@@ -28,18 +28,37 @@ ez init-shell fish | source
 
 This creates a shell wrapper that enables `cd`-on-enter when you select a session.
 
+### Shell Completions
+
+```bash
+# Zsh
+ez completions zsh > ~/.zfunc/_ez
+
+# Bash
+eval "$(ez completions bash)"
+
+# Fish
+ez completions fish > ~/.config/fish/completions/ez.fish
+```
+
 ## First Steps
 
 ### 1. Configure workspace roots
 
+Run the interactive setup:
+
 ```bash
-ez config --edit
+ez config
 ```
 
-Add your workspace directories:
+This guides you through workspace roots, shell, selector, plugins, and timeout.
 
-```toml
-workspace_roots = ["~/workspace/personal", "~/workspace/work"]
+Or configure individually:
+
+```bash
+ez config add-root ~/workspace/personal
+ez config add-root ~/workspace/work
+ez config set default_shell zsh
 ```
 
 ### 2. Register repos

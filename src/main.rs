@@ -23,6 +23,10 @@ fn main() {
         Some(Command::Plugin { command }) => plugin::dispatch(command),
         Some(Command::Config { command }) => config::dispatch(command),
         Some(Command::InitShell { shell }) => print_shell_init(&shell),
+        Some(Command::Completions { shell }) => {
+            generate_completions(shell);
+            Ok(())
+        }
         Some(Command::Preview { path }) => browser::preview(&path),
     };
 
@@ -66,4 +70,10 @@ end"#
     };
     println!("{func}");
     Ok(())
+}
+
+fn generate_completions(shell: clap_complete::Shell) {
+    use clap::CommandFactory;
+    let mut cmd = cli::Cli::command();
+    clap_complete::generate(shell, &mut cmd, "ez", &mut std::io::stdout());
 }

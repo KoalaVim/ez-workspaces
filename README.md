@@ -64,10 +64,32 @@ Sessions are tree-based — a session can have child sessions, enabling branchin
 | `ez repo remove <name>` | Unregister repo (`--purge` for cleanup) |
 | `ez plugin list` | List available plugins |
 | `ez plugin enable <name>` | Enable a plugin |
-| `ez config [--edit]` | Show/edit config |
+| `ez config` | Interactive guided setup |
+| `ez config show` | Show current config |
+| `ez config edit` | Open config in editor |
+| `ez config add-root <path>` | Add a workspace root |
+| `ez config set <key> <value>` | Set a config value |
+| `ez config get <key>` | Get a config value |
 | `ez init-shell <shell>` | Print shell wrapper function |
+| `ez completions <shell>` | Generate shell completions |
 
 ## Configuration
+
+Run the interactive setup:
+
+```bash
+ez config
+```
+
+This walks through workspace roots, shell, selector backend, plugins, and timeout.
+
+Or configure individually:
+
+```bash
+ez config add-root ~/workspace/personal
+ez config set selector.backend fzf
+ez config set default_shell zsh
+```
 
 Config file: `~/.config/ez/config.toml`
 
@@ -81,6 +103,19 @@ backend = "fzf"
 
 [plugins]
 enabled = ["git-worktree", "tmux"]
+```
+
+## Shell Completions
+
+```bash
+# Zsh
+ez completions zsh > ~/.zfunc/_ez
+
+# Bash
+eval "$(ez completions bash)"
+
+# Fish
+ez completions fish > ~/.config/fish/completions/ez.fish
 ```
 
 ## Plugins
