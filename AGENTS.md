@@ -84,3 +84,4 @@ Plugins are shell scripts or executables in `~/.config/ez/plugins/<name>/`. See 
 - Shell out to `git` (no libgit2)
 - TOML for all config/metadata files
 - When adding a new feature, always update `README.md`, `docs/user-guide.md`, and `AGENTS.md`
+- When changing architecture, modules, data flow, or adding new modules, update `docs/design.md` diagrams

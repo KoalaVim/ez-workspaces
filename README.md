@@ -135,6 +135,7 @@ See [Plugin Guide](docs/plugin-guide.md) for writing custom plugins.
 - [User Guide](docs/user-guide.md)
 - [Plugin Guide](docs/plugin-guide.md)
 - [Architecture](docs/architecture.md)
+- [Design (Mermaid diagrams)](docs/design.md)
 - [Claude Code Skills](docs/skills.md)
 
 ## Requirements
