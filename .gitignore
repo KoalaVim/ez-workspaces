@@ -2,6 +2,9 @@
 !/memory/sessions/README.md
 !bin/claude-flow
 !v3/@claude-flow/
+# Rust build output
+target/
+
 # Binaries
 # Build outputs
 

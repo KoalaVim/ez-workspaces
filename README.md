@@ -1,2 +1,106 @@
 # ez-workspaces
-Workspace Manager (TBD)
+
+A fast, plugin-extensible workspace and session manager for git repos. Browse, create, and switch between worktree-based sessions with a single command.
+
+## Quick Start
+
+```bash
+# Build
+cargo build --release
+
+# Add shell integration (add to your .zshrc/.bashrc)
+eval "$(ez init-shell zsh)"
+
+# Register a repo
+ez add ~/my-project
+
+# Create sessions
+ez session new feature-auth
+ez session new sub-task --parent feature-auth
+
+# List sessions (tree view)
+ez session list
+# feature-auth
+#   sub-task
+
+# Enter a session
+ez session enter feature-auth
+
+# Interactive browser (the killer feature)
+ez
+```
+
+## How It Works
+
+**ez** treats git worktrees as "sessions" organized in a tree hierarchy. Each session is virtual metadata — plugins give sessions physical meaning:
+
+- **git-worktree plugin**: creates/deletes worktrees on session create/delete
+- **tmux plugin**: creates/attaches tmux sessions on enter
+
+Sessions are tree-based — a session can have child sessions, enabling branching workflows.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `ez` | Interactive fzf browser |
+| `ez clone <url> [path]` | Clone + register repo |
+| `ez add [path]` | Register existing repo |
+| `ez session new [name]` | Create session (`--parent` for nesting) |
+| `ez session list` | List sessions as tree (`--flat` for flat) |
+| `ez session enter <name>` | Enter a session |
+| `ez session delete <name>` | Delete session (`--force` for cascade) |
+| `ez session rename <old> <new>` | Rename a session |
+| `ez repo list` | List registered repos |
+| `ez repo remove <name>` | Unregister repo (`--purge` for cleanup) |
+| `ez plugin list` | List available plugins |
+| `ez plugin enable <name>` | Enable a plugin |
+| `ez config [--edit]` | Show/edit config |
+| `ez init-shell <shell>` | Print shell wrapper function |
+
+## Configuration
+
+Config file: `~/.config/ez/config.toml`
+
+```toml
+workspace_roots = ["~/workspace/personal", "~/workspace/work"]
+default_shell = "zsh"
+plugin_timeout = 30
+
+[selector]
+backend = "fzf"
+
+[plugins]
+enabled = ["git-worktree", "tmux"]
+```
+
+## Plugins
+
+Plugins are external scripts in `~/.config/ez/plugins/<name>/`. Copy the bundled plugins from `plugins/` to get started:
+
+```bash
+cp -r plugins/* ~/.config/ez/plugins/
+ez plugin enable git-worktree
+ez plugin enable tmux
+```
+
+See [Plugin Guide](docs/plugin-guide.md) for writing custom plugins.
+
+## Docs
+
+- [User Guide](docs/user-guide.md)
+- [Plugin Guide](docs/plugin-guide.md)
+- [Architecture](docs/architecture.md)
+- [Claude Code Skills](docs/skills.md)
+
+## Requirements
+
+- Rust 1.70+
+- [fzf](https://github.com/junegunn/fzf) (for interactive mode)
+- git (for worktree plugin)
+- jq (for bundled plugins)
+- tmux (optional, for tmux plugin)
+
+## License
+
+AGPL-3.0

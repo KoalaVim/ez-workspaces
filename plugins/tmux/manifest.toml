@@ -1,0 +1,5 @@
+name = "tmux"
+version = "0.1.0"
+description = "Manages tmux sessions for workspaces"
+hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit"]
+executable = "tmux-plugin"

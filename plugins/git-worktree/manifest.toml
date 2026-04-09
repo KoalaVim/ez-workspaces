@@ -1,0 +1,5 @@
+name = "git-worktree"
+version = "0.1.0"
+description = "Manages git worktrees for sessions"
+hooks = ["on_session_create", "on_session_delete"]
+executable = "git-worktree-plugin"

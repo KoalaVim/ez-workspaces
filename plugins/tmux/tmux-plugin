@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# tmux plugin for ez-workspaces
+# Creates/attaches/detaches tmux sessions for workspace sessions.
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+
+set -euo pipefail
+
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_NAME=$(echo "$REQUEST" | jq -r '.repo.path' | xargs basename)
+SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
+SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // .repo.path')
+
+# Tmux session name: repo-name/session-name
+TMUX_SESSION="ez:${REPO_NAME}/${SESSION_NAME}"
+# Sanitize for tmux (no dots or colons beyond the prefix)
+TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.' '_')
+
+case "$HOOK" in
+    on_session_create)
+        # Create tmux session if tmux is running
+        if command -v tmux &>/dev/null; then
+            if ! tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
+                tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
+            fi
+        fi
+
+        jq -n \
+            --arg tmux_session "$TMUX_SESSION" \
+            '{
+                success: true,
+                session_mutations: {
+                    env: {
+                        EZ_TMUX_SESSION: $tmux_session
+                    },
+                    plugin_state: {
+                        tmux_session: $tmux_session
+                    }
+                }
+            }'
+        ;;
+
+    on_session_delete)
+        if command -v tmux &>/dev/null; then
+            tmux kill-session -t "=${TMUX_SESSION}" 2>/dev/null || true
+        fi
+        echo '{"success": true}'
+        ;;
+
+    on_session_enter)
+        COMMANDS=()
+        if command -v tmux &>/dev/null; then
+            if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
+                # Session exists, prepare attach command
+                COMMANDS+=("tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\"")
+            else
+                # Create and attach
+                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && (tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\")")
+            fi
+        fi
+
+        jq -n \
+            --argjson cmds "$(printf '%s\n' "${COMMANDS[@]}" | jq -R . | jq -s .)" \
+            '{success: true, shell_commands: $cmds}'
+        ;;
+
+    on_session_exit)
+        # Detach from tmux session if inside one
+        echo '{"success": true}'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac

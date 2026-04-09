@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# git-worktree plugin for ez-workspaces
+# Creates/removes git worktrees when sessions are created/deleted.
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+
+set -euo pipefail
+
+# Read the full JSON request from stdin
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_PATH=$(echo "$REQUEST" | jq -r '.repo.path')
+SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
+SESSION_IS_DEFAULT=$(echo "$REQUEST" | jq -r '.session.is_default // false')
+
+# Don't create worktrees for the default "main" session
+if [ "$SESSION_IS_DEFAULT" = "true" ]; then
+    echo '{"success": true}'
+    exit 0
+fi
+
+# Worktree base directory: alongside the repo (sibling directory)
+REPO_BASENAME=$(basename "$REPO_PATH")
+WORKTREE_BASE=$(dirname "$REPO_PATH")/.ez-worktrees/${REPO_BASENAME}
+WORKTREE_PATH="${WORKTREE_BASE}/${SESSION_NAME}"
+
+case "$HOOK" in
+    on_session_create)
+        mkdir -p "$WORKTREE_BASE"
+
+        # Create a new branch and worktree
+        BRANCH_NAME="ez/${SESSION_NAME}"
+
+        # Check if branch already exists
+        if git -C "$REPO_PATH" show-ref --verify --quiet "refs/heads/${BRANCH_NAME}" 2>/dev/null; then
+            # Branch exists, just add worktree
+            git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" "$BRANCH_NAME" 2>&1 >&2
+        else
+            # Create new branch + worktree from HEAD
+            git -C "$REPO_PATH" worktree add -b "$BRANCH_NAME" "$WORKTREE_PATH" 2>&1 >&2
+        fi
+
+        if [ $? -eq 0 ]; then
+            # Return mutations to set the session's path
+            jq -n \
+                --arg path "$WORKTREE_PATH" \
+                --arg branch "$BRANCH_NAME" \
+                '{
+                    success: true,
+                    session_mutations: {
+                        path: $path,
+                        plugin_state: {
+                            worktree_path: $path,
+                            branch: $branch
+                        }
+                    }
+                }'
+        else
+            jq -n --arg err "Failed to create worktree at $WORKTREE_PATH" \
+                '{success: false, error: $err}'
+        fi
+        ;;
+
+    on_session_delete)
+        if [ -d "$WORKTREE_PATH" ]; then
+            git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force 2>&1 >&2 || true
+
+            # Optionally delete the branch
+            BRANCH_NAME="ez/${SESSION_NAME}"
+            git -C "$REPO_PATH" branch -D "$BRANCH_NAME" 2>&1 >&2 || true
+        fi
+        echo '{"success": true}'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac
