@@ -2,12 +2,21 @@
 
 A fast, plugin-extensible workspace and session manager for git repos. Browse, create, and switch between worktree-based sessions with a single command.
 
+## Installation
+
+```bash
+# From git URL
+cargo install --locked --git https://github.com/user/ez-workspaces.git
+
+# From a cloned repo
+git clone https://github.com/user/ez-workspaces.git
+cd ez-workspaces
+cargo install --locked --path .
+```
+
 ## Quick Start
 
 ```bash
-# Build
-cargo build --release
-
 # Add shell integration (add to your .zshrc/.bashrc)
 eval "$(ez init-shell zsh)"
 

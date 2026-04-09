@@ -3,8 +3,13 @@
 ## Installation
 
 ```bash
-cargo build --release
-cp target/release/ez ~/.local/bin/
+# From git URL
+cargo install --locked --git https://github.com/user/ez-workspaces.git
+
+# From a cloned repo
+git clone https://github.com/user/ez-workspaces.git
+cd ez-workspaces
+cargo install --locked --path .
 ```
 
 ### Shell Integration
