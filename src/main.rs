@@ -21,7 +21,7 @@ fn main() {
         Some(Command::Session { command }) => session::dispatch(command, cli.cd_file.as_deref()),
         Some(Command::Repo { command }) => repo::dispatch(command),
         Some(Command::Plugin { command }) => plugin::dispatch(command),
-        Some(Command::Config { edit }) => config::show_or_edit(edit),
+        Some(Command::Config { command }) => config::dispatch(command),
         Some(Command::InitShell { shell }) => print_shell_init(&shell),
         Some(Command::Preview { path }) => browser::preview(&path),
     };

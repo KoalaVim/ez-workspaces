@@ -49,11 +49,10 @@ pub enum Command {
         command: PluginCommand,
     },
 
-    /// Show or edit configuration
+    /// Configuration management
     Config {
-        /// Open config in editor
-        #[arg(long)]
-        edit: bool,
+        #[command(subcommand)]
+        command: Option<ConfigCommand>,
     },
 
     /// Initialize shell integration (prints shell function to eval)
@@ -166,5 +165,43 @@ pub enum PluginCommand {
     Disable {
         /// Plugin name
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCommand {
+    /// Interactive guided setup
+    Init,
+
+    /// Show current configuration
+    Show,
+
+    /// Open config in editor
+    Edit,
+
+    /// Add a workspace root directory
+    AddRoot {
+        /// Path to add as a workspace root
+        path: String,
+    },
+
+    /// Remove a workspace root directory
+    RemoveRoot {
+        /// Path to remove
+        path: String,
+    },
+
+    /// Set a configuration value
+    Set {
+        /// Key to set (e.g. "selector.backend", "plugin_timeout")
+        key: String,
+        /// Value to set
+        value: String,
+    },
+
+    /// Get a configuration value
+    Get {
+        /// Key to get
+        key: String,
     },
 }
