@@ -1,4 +1,5 @@
 use clap::Parser;
+use colored::Colorize;
 
 mod browser;
 mod cli;
@@ -13,6 +14,10 @@ use cli::{Cli, Command};
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.no_color {
+        colored::control::set_override(false);
+    }
 
     let result = match cli.command {
         None => browser::browse(cli.cd_file.as_deref()),
@@ -31,7 +36,10 @@ fn main() {
     };
 
     if let Err(e) = result {
-        eprintln!("ez: {e}");
+        if matches!(e, error::EzError::Cancelled) {
+            std::process::exit(130);
+        }
+        eprintln!("{} {e}", "ez:".red().bold());
         std::process::exit(1);
     }
 }

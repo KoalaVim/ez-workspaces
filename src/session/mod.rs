@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use chrono::Utc;
+use colored::Colorize;
 use uuid::Uuid;
 
 use crate::cli::SessionCommand;
@@ -79,7 +80,7 @@ fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>)
     )?;
 
     store::save_sessions(&repo_entry.id, &tree)?;
-    println!("Created session: {session_name}");
+    println!("{} {}", "Created session:".green(), session_name.bold());
     Ok(())
 }
 
@@ -88,31 +89,31 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
     let tree = store::load_sessions(&repo_entry.id)?;
 
     if tree.sessions.is_empty() {
-        println!("No sessions for {}. Use `ez session new` to create one.", repo_entry.name);
+        println!("{}", format!("No sessions for {}. Use `ez session new` to create one.", repo_entry.name).yellow());
         return Ok(());
     }
 
     if flat {
         for session in &tree.sessions {
-            let default_marker = if session.is_default { " *" } else { "" };
+            let default_marker = if session.is_default { " *".yellow().to_string() } else { String::new() };
             let path_info = session
                 .path
                 .as_ref()
-                .map(|p| format!(" ({})", p.display()))
+                .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
-            println!("{}{}{}", session.name, default_marker, path_info);
+            println!("{}{}{}", session.name.bold(), default_marker, path_info);
         }
     } else {
         let rendered = tree.render_tree();
         for (depth, session) in rendered {
             let indent = "  ".repeat(depth);
-            let default_marker = if session.is_default { " *" } else { "" };
+            let default_marker = if session.is_default { " *".yellow().to_string() } else { String::new() };
             let path_info = session
                 .path
                 .as_ref()
-                .map(|p| format!(" ({})", p.display()))
+                .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
-            println!("{}{}{}{}", indent, session.name, default_marker, path_info);
+            println!("{}{}{}{}", indent, session.name.bold(), default_marker, path_info);
         }
     }
     Ok(())
@@ -174,7 +175,7 @@ fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()>
     tree.remove(&session.id)?;
 
     store::save_sessions(&repo_entry.id, &tree)?;
-    println!("Deleted session: {name}");
+    println!("{} {}", "Deleted session:".green(), name.bold());
     Ok(())
 }
 
@@ -220,7 +221,7 @@ fn enter_session(name: &str, repo_arg: Option<&str>, cd_file: Option<&Path>) -> 
 fn exit_session() -> Result<()> {
     // For now, exit is a no-op beyond plugin hooks
     // In the future, this could track which session is active
-    println!("Exited session.");
+    println!("{}", "Exited session.".green());
     Ok(())
 }
 
@@ -242,7 +243,7 @@ fn rename_session(name: &str, new_name: &str, repo_arg: Option<&str>) -> Result<
     session.name = new_name.to_string();
 
     store::save_sessions(&repo_entry.id, &tree)?;
-    println!("Renamed session: {name} -> {new_name}");
+    println!("{} {} -> {}", "Renamed session:".green(), name.bold(), new_name.bold());
     Ok(())
 }
 

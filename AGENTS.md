@@ -85,3 +85,5 @@ Plugins are shell scripts or executables in `~/.config/ez/plugins/<name>/`. See 
 - TOML for all config/metadata files
 - When adding a new feature, always update `README.md`, `docs/user-guide.md`, and `AGENTS.md`
 - When changing architecture, modules, data flow, or adding new modules, update `docs/design.md` diagrams
+- Escape/Ctrl+C in interactive menus always goes back to the previous level (e.g., parent directory, previous menu). Only cancel/abort when at the top-most level.
+- All CLI output must be colored using the `colored` crate. Use `--no-color` global flag to disable. Convention: green for success, yellow for warnings, cyan for info/labels, bold for emphasis, dimmed for secondary info.

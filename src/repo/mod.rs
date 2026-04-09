@@ -4,6 +4,7 @@ pub mod store;
 use std::path::Path;
 
 use chrono::Utc;
+use colored::Colorize;
 
 use crate::cli::RepoCommand;
 use crate::error::{EzError, Result};
@@ -24,7 +25,7 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
         std::env::current_dir()?.join(name)
     };
 
-    println!("Cloning {url} into {}...", target.display());
+    println!("{} {url} into {}...", "Cloning".cyan(), target.display());
     let status = std::process::Command::new("git")
         .args(["clone", url])
         .arg(&target)
@@ -42,7 +43,7 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
     let repo_id = paths::repo_id_from_path(&canonical);
     store::save_repo_meta(&repo_id, &meta)?;
 
-    println!("Registered: {}", canonical.display());
+    println!("{} {}", "Registered:".green(), canonical.display());
     Ok(())
 }
 
@@ -143,11 +144,11 @@ pub fn dispatch(command: RepoCommand) -> Result<()> {
 fn list_repos() -> Result<()> {
     let index = store::load_index()?;
     if index.repos.is_empty() {
-        println!("No repositories registered. Use `ez add` or `ez clone` to get started.");
+        println!("{}", "No repositories registered. Use `ez add` or `ez clone` to get started.".yellow());
         return Ok(());
     }
     for repo in &index.repos {
-        println!("{:<25} {}", repo.name, repo.path.display());
+        println!("{:<25} {}", repo.name.cyan(), repo.path.display());
     }
     Ok(())
 }
@@ -164,10 +165,10 @@ fn remove_repo(name: &str, purge: bool) -> Result<()> {
 
     if purge {
         store::delete_repo_meta(&entry.id)?;
-        println!("Purged metadata for: {}", entry.name);
+        println!("{} {}", "Purged metadata for:".yellow(), entry.name);
     }
 
-    println!("Removed: {}", entry.name);
+    println!("{} {}", "Removed:".green(), entry.name);
     Ok(())
 }
 

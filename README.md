@@ -48,6 +48,20 @@ ez
 
 Sessions are tree-based — a session can have child sessions, enabling branching workflows.
 
+### Where worktrees live
+
+The git-worktree plugin creates worktrees as siblings of the repo in a `.ez-worktrees` directory:
+
+```
+~/workspace/personal/
+  my-repo/                          # original repo
+  .ez-worktrees/my-repo/
+    feature-auth/                   # worktree for session "feature-auth"
+    bugfix-crash/                   # worktree for session "bugfix-crash"
+```
+
+Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at creation time.
+
 ## Commands
 
 | Command | Description |
@@ -72,6 +86,7 @@ Sessions are tree-based — a session can have child sessions, enabling branchin
 | `ez config get <key>` | Get a config value |
 | `ez init-shell <shell>` | Print shell wrapper function |
 | `ez completions <shell>` | Generate shell completions |
+| `ez --no-color <command>` | Disable colored output |
 
 ## Configuration
 
@@ -120,15 +135,14 @@ ez completions fish > ~/.config/fish/completions/ez.fish
 
 ## Plugins
 
-Plugins are external scripts in `~/.config/ez/plugins/<name>/`. Copy the bundled plugins from `plugins/` to get started:
+Built-in plugins (git-worktree, tmux) are bundled in the binary and auto-extracted on first use. Just enable them:
 
 ```bash
-cp -r plugins/* ~/.config/ez/plugins/
 ez plugin enable git-worktree
 ez plugin enable tmux
 ```
 
-See [Plugin Guide](docs/plugin-guide.md) for writing custom plugins.
+Custom plugins go in `~/.config/ez/plugins/<name>/`. See [Plugin Guide](docs/plugin-guide.md).
 
 ## Docs
 

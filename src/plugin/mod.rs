@@ -1,8 +1,11 @@
+pub mod bundled;
 pub mod model;
 pub mod protocol;
 pub mod runner;
 
 use std::fs;
+
+use colored::Colorize;
 
 use crate::cli::PluginCommand;
 use crate::config::model::EzConfig;
@@ -25,11 +28,7 @@ pub fn dispatch(command: PluginCommand) -> Result<()> {
 fn list_plugins() -> Result<()> {
     let config = crate::config::load()?;
     let plugins_dir = resolve_plugins_dir(&config)?;
-
-    if !plugins_dir.exists() {
-        println!("No plugins directory found at {}", plugins_dir.display());
-        return Ok(());
-    }
+    bundled::ensure_bundled_plugins(&plugins_dir)?;
 
     let entries = fs::read_dir(&plugins_dir)?;
     let mut found = false;
@@ -41,10 +40,14 @@ fn list_plugins() -> Result<()> {
                 if let Ok(contents) = fs::read_to_string(&manifest_path) {
                     if let Ok(manifest) = toml::from_str::<PluginManifest>(&contents) {
                         let enabled = config.plugins.enabled.contains(&manifest.name);
-                        let status = if enabled { "enabled" } else { "disabled" };
+                        let status = if enabled {
+                            "enabled".green().to_string()
+                        } else {
+                            "disabled".dimmed().to_string()
+                        };
                         println!(
-                            "{:<20} {:<10} {}",
-                            manifest.name, status, manifest.description
+                            "{:<20} {:<19} {}",
+                            manifest.name.cyan(), status, manifest.description
                         );
                         found = true;
                     }
@@ -54,7 +57,7 @@ fn list_plugins() -> Result<()> {
     }
 
     if !found {
-        println!("No plugins found in {}", plugins_dir.display());
+        println!("{} {}", "No plugins found in".yellow(), plugins_dir.display());
     }
     Ok(())
 }
@@ -62,12 +65,13 @@ fn list_plugins() -> Result<()> {
 fn enable_plugin(name: &str) -> Result<()> {
     let mut config = crate::config::load()?;
     if config.plugins.enabled.contains(&name.to_string()) {
-        println!("Plugin '{name}' is already enabled.");
+        println!("{}", format!("Plugin '{name}' is already enabled.").yellow());
         return Ok(());
     }
 
-    // Verify plugin exists
+    // Ensure bundled plugins are extracted
     let plugins_dir = resolve_plugins_dir(&config)?;
+    bundled::ensure_bundled_plugins(&plugins_dir)?;
     let plugin_dir = plugins_dir.join(name);
     if !plugin_dir.join("manifest.toml").exists() {
         return Err(EzError::PluginNotFound(name.into()));
@@ -75,7 +79,7 @@ fn enable_plugin(name: &str) -> Result<()> {
 
     config.plugins.enabled.push(name.to_string());
     crate::config::save(&config)?;
-    println!("Enabled plugin: {name}");
+    println!("{} {name}", "Enabled plugin:".green());
     Ok(())
 }
 
@@ -83,7 +87,7 @@ fn disable_plugin(name: &str) -> Result<()> {
     let mut config = crate::config::load()?;
     config.plugins.enabled.retain(|n| n != name);
     crate::config::save(&config)?;
-    println!("Disabled plugin: {name}");
+    println!("{} {name}", "Disabled plugin:".green());
     Ok(())
 }
 
@@ -97,9 +101,7 @@ pub fn run_hooks(
     tree: &mut SessionTree,
 ) -> Result<()> {
     let plugins_dir = resolve_plugins_dir(config)?;
-    if !plugins_dir.exists() {
-        return Ok(());
-    }
+    bundled::ensure_bundled_plugins(&plugins_dir)?;
 
     for plugin_name in &config.plugins.enabled {
         let plugin_dir = plugins_dir.join(plugin_name);

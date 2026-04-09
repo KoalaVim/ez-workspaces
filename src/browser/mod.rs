@@ -3,6 +3,8 @@ pub mod selector;
 use std::fs;
 use std::path::Path;
 
+use colored::Colorize;
+
 use crate::config;
 use crate::error::Result;
 use crate::paths;
@@ -16,8 +18,8 @@ pub fn browse(cd_file: Option<&Path>) -> Result<()> {
     let selector = FzfSelector::new(config.selector.fzf_opts.clone())?;
 
     if config.workspace_roots.is_empty() {
-        println!("No workspace roots configured.");
-        println!("Add roots to your config with: ez config --edit");
+        println!("{}", "No workspace roots configured.".yellow());
+        println!("Add roots to your config with: {}", "ez config --edit".bold());
         println!("Example: workspace_roots = [\"~/workspace\"]");
         return Ok(());
     }
@@ -113,6 +115,7 @@ fn drill_into_directory(
     selector: &dyn InteractiveSelector,
 ) -> Result<Option<std::path::PathBuf>> {
     let mut current = start.to_path_buf();
+    let mut history: Vec<std::path::PathBuf> = Vec::new();
 
     loop {
         // Check if current directory is a repo
@@ -145,7 +148,12 @@ fn drill_into_directory(
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         if entries.is_empty() {
-            println!("No subdirectories in {}", current.display());
+            println!("{} {}", "No subdirectories in".yellow(), current.display());
+            // Go back if we have history, otherwise return None
+            if let Some(prev) = history.pop() {
+                current = prev;
+                continue;
+            }
             return Ok(None);
         }
 
@@ -167,9 +175,17 @@ fn drill_into_directory(
             preview_cmd.as_deref(),
         )? {
             Some(idx) => idx,
-            None => return Ok(None),
+            None => {
+                // Escape: go back to previous directory
+                if let Some(prev) = history.pop() {
+                    current = prev;
+                    continue;
+                }
+                return Ok(None);
+            }
         };
 
+        history.push(current.clone());
         current = entries[idx].1.clone();
     }
 }

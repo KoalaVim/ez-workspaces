@@ -22,6 +22,13 @@ pub trait InteractiveSelector {
         preview_cmd: Option<&str>,
     ) -> Result<Option<usize>>;
 
+    /// Present items and allow multiple selection (Tab to toggle in fzf).
+    fn select_many(
+        &self,
+        items: &[SelectItem],
+        prompt: &str,
+    ) -> Result<Vec<usize>>;
+
     /// Prompt for free-text input with optional default.
     fn input(&self, prompt: &str, default: Option<&str>) -> Result<String>;
 
@@ -103,6 +110,64 @@ impl InteractiveSelector for FzfSelector {
         let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let index = items.iter().position(|item| item.display == selected);
         Ok(index)
+    }
+
+    fn select_many(
+        &self,
+        items: &[SelectItem],
+        prompt: &str,
+    ) -> Result<Vec<usize>> {
+        if items.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut args = vec![
+            "--prompt".to_string(),
+            format!("{prompt}> "),
+            "--multi".to_string(),
+            "--height".to_string(),
+            "~40%".to_string(),
+            "--layout".to_string(),
+            "reverse".to_string(),
+            "--ansi".to_string(),
+        ];
+
+        if let Some(opts) = &self.extra_opts {
+            args.extend(opts.split_whitespace().map(String::from));
+        }
+
+        let mut child = Command::new("fzf")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| EzError::SelectorUnavailable(e.to_string()))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            for item in items {
+                let _ = writeln!(stdin, "{}", item.display);
+            }
+        }
+
+        let output = child.wait_with_output()?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let selected_lines: Vec<String> = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+
+        let indices: Vec<usize> = selected_lines
+            .iter()
+            .filter_map(|sel| items.iter().position(|item| item.display == *sel))
+            .collect();
+
+        Ok(indices)
     }
 
     fn input(&self, prompt: &str, default: Option<&str>) -> Result<String> {

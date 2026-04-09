@@ -1,12 +1,26 @@
 pub mod model;
 
 use std::fs;
-use std::io::{self, BufRead, Write};
 
+use colored::Colorize;
+
+use crate::browser::selector::{FzfSelector, InteractiveSelector, SelectItem};
 use crate::cli::ConfigCommand;
 use crate::error::{EzError, Result};
 use crate::paths;
 use model::EzConfig;
+
+/// Helper: select_one that returns Cancelled on None (Ctrl+C / Escape).
+fn require_select(
+    selector: &dyn InteractiveSelector,
+    items: &[SelectItem],
+    prompt: &str,
+    preview_cmd: Option<&str>,
+) -> Result<usize> {
+    selector
+        .select_one(items, prompt, preview_cmd)?
+        .ok_or(EzError::Cancelled)
+}
 
 /// Load the global config, creating a default one if it doesn't exist.
 pub fn load() -> Result<EzConfig> {
@@ -69,12 +83,12 @@ fn edit() -> Result<()> {
 fn add_root(path: &str) -> Result<()> {
     let mut config = load()?;
     if config.workspace_roots.contains(&path.to_string()) {
-        println!("Root already configured: {path}");
+        println!("{} {path}", "Already configured:".yellow());
         return Ok(());
     }
     config.workspace_roots.push(path.to_string());
     save(&config)?;
-    println!("Added workspace root: {path}");
+    println!("{} {path}", "Added root:".green());
     Ok(())
 }
 
@@ -86,7 +100,7 @@ fn remove_root(path: &str) -> Result<()> {
         return Err(EzError::Config(format!("Root not found: {path}")));
     }
     save(&config)?;
-    println!("Removed workspace root: {path}");
+    println!("{} {path}", "Removed root:".green());
     Ok(())
 }
 
@@ -105,7 +119,7 @@ fn set_value(key: &str, value: &str) -> Result<()> {
         _ => return Err(EzError::Config(format!("Unknown key: {key}"))),
     }
     save(&config)?;
-    println!("Set {key} = {value}");
+    println!("{} {} = {}", "Set".green(), key.bold(), value);
     Ok(())
 }
 
@@ -125,163 +139,246 @@ fn get_value(key: &str) -> Result<()> {
     Ok(())
 }
 
-/// Interactive guided configuration.
+/// Interactive guided configuration using the InteractiveSelector.
 fn interactive_init() -> Result<()> {
     let mut config = load()?;
-    let stdin = io::stdin();
-    let mut stdout = io::stdout();
+    let selector = FzfSelector::new(config.selector.fzf_opts.clone())?;
 
-    println!("ez-workspaces configuration");
-    println!("===========================\n");
+    println!("{}\n", "ez-workspaces configuration".bold().cyan());
 
-    // Workspace roots
-    println!("Workspace roots are directories that contain your repos.");
-    println!("Examples: ~/workspace/personal, ~/workspace/work\n");
-
+    // Workspace roots — keep or clear existing
     if !config.workspace_roots.is_empty() {
-        println!("Current roots:");
-        for root in &config.workspace_roots {
-            println!("  {root}");
-        }
-        print!("\nKeep existing roots? [Y/n]: ");
-        stdout.flush()?;
-        let mut answer = String::new();
-        stdin.lock().read_line(&mut answer)?;
-        if answer.trim().eq_ignore_ascii_case("n") {
+        let keep = selector.confirm(
+            &format!("Keep existing roots? ({})", config.workspace_roots.join(", ")),
+            true,
+        )?;
+        if !keep {
             config.workspace_roots.clear();
         }
     }
 
+    // Add workspace roots by browsing directories interactively
+    let mut last_root: Option<std::path::PathBuf> = config
+        .workspace_roots
+        .last()
+        .map(|r| std::path::PathBuf::from(r));
     loop {
-        print!("Add workspace root (empty to finish): ");
-        stdout.flush()?;
-        let mut root = String::new();
-        stdin.lock().read_line(&mut root)?;
-        let root = root.trim().to_string();
-        if root.is_empty() {
-            break;
-        }
-        if !config.workspace_roots.contains(&root) {
-            config.workspace_roots.push(root.clone());
-            println!("  Added: {root}");
+        let action_items = vec![
+            SelectItem {
+                display: "Browse for a directory".into(),
+                value: "browse".into(),
+            },
+            SelectItem {
+                display: "Type a path manually".into(),
+                value: "type".into(),
+            },
+            SelectItem {
+                display: "Done adding roots".into(),
+                value: "done".into(),
+            },
+        ];
+
+        let current_roots = if config.workspace_roots.is_empty() {
+            "none".to_string()
         } else {
-            println!("  Already configured.");
+            config.workspace_roots.join(", ")
+        };
+        println!("{} {current_roots}", "Current roots:".bold());
+
+        let action_idx = match selector.select_one(&action_items, "add root", None)? {
+            Some(idx) => idx,
+            None => break, // Escape means done adding roots
+        };
+
+        match action_items[action_idx].value.as_str() {
+            "browse" => {
+                let path = browse_for_directory(&selector, last_root.as_deref())?;
+                let path_str = path.to_string_lossy().to_string();
+                if !config.workspace_roots.contains(&path_str) {
+                    config.workspace_roots.push(path_str.clone());
+                    println!("  {} {path_str}", "Added:".green());
+                } else {
+                    println!("  {}", "Already configured.".yellow());
+                }
+                last_root = Some(path);
+            }
+            "type" => {
+                let root = selector.input("Workspace root path", None)?;
+                if !root.is_empty() && !config.workspace_roots.contains(&root) {
+                    config.workspace_roots.push(root.clone());
+                    println!("  {} {root}", "Added:".green());
+                }
+            }
+            _ => break,
         }
     }
 
     // Default shell
-    let current_shell = config
-        .default_shell
-        .as_deref()
-        .unwrap_or("(auto-detect)");
-    print!("\nDefault shell [{current_shell}]: ");
-    stdout.flush()?;
-    let mut shell = String::new();
-    stdin.lock().read_line(&mut shell)?;
-    let shell = shell.trim();
-    if !shell.is_empty() {
-        config.default_shell = Some(shell.to_string());
-    }
+    let shells = &["zsh", "bash", "fish"];
+    let shell_items: Vec<SelectItem> = shells
+        .iter()
+        .map(|s| SelectItem {
+            display: s.to_string(),
+            value: s.to_string(),
+        })
+        .collect();
+    let current_shell = config.default_shell.as_deref().unwrap_or("zsh");
+    println!("\n{} {current_shell}", "Current shell:".bold());
+    let idx = require_select(&selector, &shell_items, "default shell", None)?;
+    config.default_shell = Some(shell_items[idx].value.clone());
 
     // Selector backend
-    print!("Selector backend [{}]: ", config.selector.backend);
-    stdout.flush()?;
-    let mut backend = String::new();
-    stdin.lock().read_line(&mut backend)?;
-    let backend = backend.trim();
-    if !backend.is_empty() {
-        config.selector.backend = backend.to_string();
+    let backend_items = vec![
+        SelectItem {
+            display: "fzf".into(),
+            value: "fzf".into(),
+        },
+    ];
+    println!("\n{} {}", "Current selector:".bold(), config.selector.backend);
+    let idx = require_select(&selector, &backend_items, "selector backend", None)?;
+    config.selector.backend = backend_items[idx].value.clone();
+
+    // fzf check
+    if config.selector.backend == "fzf" && which::which("fzf").is_err() {
+        println!("  {}", "Warning: fzf not found in PATH.".yellow());
     }
 
-    // Check fzf availability
-    if config.selector.backend == "fzf" {
-        if which::which("fzf").is_ok() {
-            println!("  fzf found.");
-        } else {
-            println!("  Warning: fzf not found in PATH. Interactive mode won't work.");
-            println!("  Install: https://github.com/junegunn/fzf");
-        }
-    }
-
-    // Plugins
-    println!("\nPlugins extend ez with git worktrees, tmux sessions, and more.");
-    let plugins_dir = if let Some(dir) = &config.plugins.plugin_dir {
-        dir.clone()
-    } else {
-        paths::plugins_dir()?
-    };
+    // Plugins — multi-select from available
+    let plugins_dir = config
+        .plugins
+        .plugin_dir
+        .clone()
+        .map_or_else(|| paths::plugins_dir(), Ok)?;
 
     let available = discover_plugins(&plugins_dir);
     if !available.is_empty() {
-        println!("Available plugins:");
-        for (i, (name, desc)) in available.iter().enumerate() {
-            let enabled = config.plugins.enabled.contains(name);
-            let marker = if enabled { "[x]" } else { "[ ]" };
-            println!("  {}) {} {} — {}", i + 1, marker, name, desc);
-        }
-        print!("Toggle plugins (comma-separated numbers, empty to skip): ");
-        stdout.flush()?;
-        let mut input = String::new();
-        stdin.lock().read_line(&mut input)?;
-        let input = input.trim();
-        if !input.is_empty() {
-            for part in input.split(',') {
-                if let Ok(idx) = part.trim().parse::<usize>() {
-                    if idx >= 1 && idx <= available.len() {
-                        let name = &available[idx - 1].0;
-                        if config.plugins.enabled.contains(name) {
-                            config.plugins.enabled.retain(|n| n != name);
-                            println!("  Disabled: {name}");
-                        } else {
-                            config.plugins.enabled.push(name.clone());
-                            println!("  Enabled: {name}");
-                        }
-                    }
+        let plugin_items: Vec<SelectItem> = available
+            .iter()
+            .map(|(name, desc)| {
+                let enabled = config.plugins.enabled.contains(name);
+                let marker = if enabled { "[x]" } else { "[ ]" };
+                SelectItem {
+                    display: format!("{marker} {name} — {desc}"),
+                    value: name.clone(),
                 }
-            }
-        }
+            })
+            .collect();
+
+        println!("\nSelect plugins to enable (Tab to toggle, Enter to confirm):");
+        let selected = selector.select_many(&plugin_items, "plugins")?;
+
+        // Replace enabled list with selection
+        config.plugins.enabled = selected
+            .iter()
+            .map(|&idx| plugin_items[idx].value.clone())
+            .collect();
     } else {
-        println!("No plugins found in {}", plugins_dir.display());
+        println!("\n{} {}", "No plugins found in".yellow(), plugins_dir.display());
         println!("Copy bundled plugins: cp -r plugins/* {}/", plugins_dir.display());
     }
 
     // Plugin timeout
-    print!(
-        "\nPlugin timeout in seconds [{}]: ",
-        config.plugin_timeout
-    );
-    stdout.flush()?;
-    let mut timeout = String::new();
-    stdin.lock().read_line(&mut timeout)?;
-    let timeout = timeout.trim();
-    if !timeout.is_empty() {
-        if let Ok(t) = timeout.parse() {
-            config.plugin_timeout = t;
-        } else {
-            println!("  Invalid number, keeping {}", config.plugin_timeout);
-        }
+    let timeout_str = selector.input(
+        "Plugin timeout (seconds)",
+        Some(&config.plugin_timeout.to_string()),
+    )?;
+    if let Ok(t) = timeout_str.parse::<u64>() {
+        config.plugin_timeout = t;
     }
 
     // Save
     save(&config)?;
     let path = paths::config_file()?;
-    println!("\nConfiguration saved to {}", path.display());
+    println!("\n{} {}\n", "Configuration saved to".green(), path.display());
 
-    // Summary
-    println!("\nSummary:");
-    println!("  Roots:    {:?}", config.workspace_roots);
-    println!("  Shell:    {}", config.default_shell.as_deref().unwrap_or("auto"));
-    println!("  Selector: {}", config.selector.backend);
-    println!("  Plugins:  {:?}", config.plugins.enabled);
-    println!("  Timeout:  {}s", config.plugin_timeout);
+    println!("{}", "Summary:".bold().cyan());
+    println!("  {} {:?}", "Roots:   ".bold(), config.workspace_roots);
+    println!("  {} {}", "Shell:   ".bold(), config.default_shell.as_deref().unwrap_or("auto"));
+    println!("  {} {}", "Selector:".bold(), config.selector.backend);
+    println!("  {} {:?}", "Plugins: ".bold(), config.plugins.enabled);
+    println!("  {} {}s", "Timeout: ".bold(), config.plugin_timeout);
 
-    // Shell integration hint
-    println!("\nNext steps:");
-    println!("  Add shell integration to your RC file:");
-    println!("    eval \"$(ez init-shell zsh)\"");
-    println!("  Then run `ez` to browse your workspaces.");
+    println!("\n{}", "Next steps:".bold().cyan());
+    println!("  eval \"$(ez init-shell {})\"", config.default_shell.as_deref().unwrap_or("zsh"));
+    println!("  ez");
 
     Ok(())
+}
+
+/// Browse directories interactively starting from home.
+/// Returns the selected directory path, or Cancelled on Ctrl+C.
+fn browse_for_directory(
+    selector: &dyn InteractiveSelector,
+    start_from: Option<&std::path::Path>,
+) -> Result<std::path::PathBuf> {
+    let home = dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/"));
+    let mut current = start_from.map(|p| p.to_path_buf()).unwrap_or(home);
+
+    loop {
+        let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
+
+        // Add "select this directory" option
+        entries.push((
+            format!(">>> Use this directory: {}", current.display()),
+            current.clone(),
+        ));
+
+        // Add parent directory option
+        if let Some(parent) = current.parent() {
+            entries.push(("..".to_string(), parent.to_path_buf()));
+        }
+
+        // List subdirectories
+        if let Ok(read_dir) = fs::read_dir(&current) {
+            let mut subdirs: Vec<(String, std::path::PathBuf)> = read_dir
+                .flatten()
+                .filter(|e| {
+                    e.path().is_dir()
+                        && !e
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with('.')
+                })
+                .map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    (format!("{name}/"), e.path())
+                })
+                .collect();
+            subdirs.sort_by(|a, b| a.0.cmp(&b.0));
+            entries.extend(subdirs);
+        }
+
+        let items: Vec<SelectItem> = entries
+            .iter()
+            .map(|(display, path)| SelectItem {
+                display: display.clone(),
+                value: path.to_string_lossy().to_string(),
+            })
+            .collect();
+
+        let prompt = current.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| current.to_string_lossy().to_string());
+
+        let idx = match selector.select_one(&items, &prompt, None)? {
+            Some(idx) => idx,
+            None => {
+                // Escape: go back to parent directory
+                if let Some(parent) = current.parent() {
+                    current = parent.to_path_buf();
+                    continue;
+                }
+                return Err(EzError::Cancelled);
+            }
+        };
+
+        if idx == 0 {
+            // Selected "use this directory"
+            return Ok(current);
+        }
+
+        current = entries[idx].1.clone();
+    }
 }
 
 /// Discover available plugins by scanning the plugins directory.

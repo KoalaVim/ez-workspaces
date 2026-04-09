@@ -11,6 +11,10 @@ pub struct Cli {
     /// Write the target directory to this file instead of printing it (used by shell wrapper)
     #[arg(long, hide = true, global = true)]
     pub cd_file: Option<PathBuf>,
+
+    /// Disable colored output
+    #[arg(long, global = true)]
+    pub no_color: bool,
 }
 
 #[derive(Subcommand)]

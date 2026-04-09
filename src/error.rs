@@ -35,6 +35,9 @@ pub enum EzError {
     #[error("Interactive selector not available: {0}")]
     SelectorUnavailable(String),
 
+    #[error("Aborted.")]
+    Cancelled,
+
     #[error("Git error: {0}")]
     Git(String),
 

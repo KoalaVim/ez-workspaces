@@ -74,11 +74,11 @@ ez add ~/workspace/personal/my-project
 ez clone git@github.com:user/repo.git
 ```
 
-### 3. Install plugins
+### 3. Enable plugins
+
+Built-in plugins are bundled in the binary and auto-extracted on first use:
 
 ```bash
-# Copy bundled plugins
-cp -r /path/to/ez-workspaces/plugins/* ~/.config/ez/plugins/
 ez plugin enable git-worktree
 ez plugin enable tmux
 ```
@@ -130,6 +130,20 @@ The default "main" session is auto-created when you first access a repo. It poin
 ## Non-git Sessions
 
 Sessions work without git. Without the git-worktree plugin, sessions are purely virtual — just metadata with a name, parent relationships, and environment variables. This is useful for organizing work contexts even in non-git projects.
+
+## Colored Output
+
+All output is colored by default. To disable:
+
+```bash
+ez --no-color session list
+```
+
+Or set the `NO_COLOR` environment variable (respected automatically).
+
+## Escape / Back Navigation
+
+In interactive menus (browsing directories, config wizard), pressing **Escape** goes back to the previous level instead of quitting. At the top level, Escape exits.
 
 ## Environment Variables
 
