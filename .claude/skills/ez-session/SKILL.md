@@ -65,7 +65,7 @@ Plugins can set `session.path`, `session.env`, and `session.plugin_state` via `s
 ## Testing
 
 ```bash
-cargo test session
+make test       # run all tests
 ```
 
 Unit tests cover tree operations (add, remove, roots, children, descendants, render, duplicate detection, invalid parent).

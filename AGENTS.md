@@ -63,9 +63,13 @@ docs/               Documentation
 ## Build & Test
 
 ```bash
-cargo build
-cargo test
-./target/debug/ez --help
+make build      # debug build
+make test       # run tests
+make release    # optimized build
+make install    # cargo install --locked --path .
+make lint       # clippy
+make fmt        # format code
+make check      # fmt check + clippy + tests
 ```
 
 ## Plugin Development
