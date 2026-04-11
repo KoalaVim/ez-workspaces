@@ -13,9 +13,24 @@ use crate::session;
 use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
 
 /// Main interactive browser entry point (bare `ez` command).
-pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
+pub fn browse(
+    cd_file: Option<&Path>,
+    tree_mode: bool,
+    workspace: Option<&str>,
+    repo_flag: Option<&Path>,
+) -> Result<()> {
     let config = config::load()?;
     let selector = FzfSelector::new(&config.fzf)?;
+
+    // --repo: jump straight to session picker for a specific repo
+    if let Some(repo_path) = repo_flag {
+        let repo_path = if repo_path.is_absolute() {
+            repo_path.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(repo_path)
+        };
+        return browse_repo(&repo_path, &selector, cd_file, &config.keybinds);
+    }
 
     if config.workspace_roots.is_empty() {
         println!("{}", "No workspace roots configured.".yellow());
@@ -28,25 +43,57 @@ pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
         return browse_tree(&config, &selector, cd_file);
     }
 
-    // Step 1: Select workspace root
-    let root_items: Vec<SelectItem> = config
-        .workspace_roots
-        .iter()
-        .map(|r| {
+    // --workspace: skip root selection, jump to that root
+    let root_path = if let Some(ws_raw) = workspace {
+        let ws = ws_raw.trim_end_matches('/');
+        // Match against workspace roots (by name or path)
+        let matched = config.workspace_roots.iter().find(|r| {
+            let r_trimmed = r.trim_end_matches('/');
             let expanded = paths::expand_tilde(r);
-            SelectItem {
-                display: paths::collapse_tilde(&expanded.to_string_lossy()),
-                value: expanded.to_string_lossy().to_string(),
+            let collapsed = paths::collapse_tilde(&expanded.to_string_lossy());
+            let collapsed_trimmed = collapsed.trim_end_matches('/');
+            let expanded_trimmed = expanded.to_string_lossy().trim_end_matches('/').to_string();
+            let dir_name = expanded
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            r_trimmed == ws
+                || collapsed_trimmed == ws
+                || expanded_trimmed == ws
+                || dir_name == ws
+        });
+        match matched {
+            Some(r) => paths::expand_tilde(r),
+            None => {
+                eprintln!(
+                    "{} workspace '{}' not found in config roots",
+                    "ez:".red().bold(),
+                    ws
+                );
+                return Ok(());
             }
-        })
-        .collect();
+        }
+    } else {
+        // Step 1: Select workspace root
+        let root_items: Vec<SelectItem> = config
+            .workspace_roots
+            .iter()
+            .map(|r| {
+                let expanded = paths::expand_tilde(r);
+                SelectItem {
+                    display: paths::collapse_tilde(&expanded.to_string_lossy()),
+                    value: expanded.to_string_lossy().to_string(),
+                }
+            })
+            .collect();
 
-    let root_idx = match selector.select_one(&root_items, "workspace", None)? {
-        Some(idx) => idx,
-        None => return Ok(()), // User cancelled
+        let root_idx = match selector.select_one(&root_items, "workspace", None)? {
+            Some(idx) => idx,
+            None => return Ok(()),
+        };
+
+        paths::expand_tilde(&root_items[root_idx].value)
     };
-
-    let root_path = paths::expand_tilde(&root_items[root_idx].value);
 
     // Step 2: Drill into directories until a repo is selected
     let repo_path = drill_into_directory(&root_path, &selector)?;
@@ -55,22 +102,29 @@ pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
         None => return Ok(()),
     };
 
-    // Step 3: Ensure repo is registered
+    browse_repo(&repo_path, &selector, cd_file, &config.keybinds)
+}
+
+/// Register repo if needed and enter session action loop.
+fn browse_repo(
+    repo_path: &Path,
+    selector: &dyn InteractiveSelector,
+    cd_file: Option<&Path>,
+    keybinds: &config::model::KeybindsConfig,
+) -> Result<()> {
     let index = repo::store::load_index()?;
-    let repo_entry = if let Some(entry) = index.find_by_path(&repo_path) {
+    let repo_entry = if let Some(entry) = index.find_by_path(repo_path) {
         entry.clone()
     } else {
-        // Auto-register
-        repo::add_repo(Some(&repo_path))?;
+        repo::add_repo(Some(repo_path))?;
         let index = repo::store::load_index()?;
         index
-            .find_by_path(&repo_path)
+            .find_by_path(repo_path)
             .cloned()
             .expect("just registered")
     };
 
-    // Step 4: Session selection with action keybinds
-    session_action_loop(&repo_entry, &selector, cd_file, &config.keybinds)
+    session_action_loop(&repo_entry, selector, cd_file, keybinds)
 }
 
 /// Write the target directory for the shell wrapper to cd into.

@@ -23,6 +23,14 @@ pub struct Cli {
     /// Show all repos and sessions as a tree (no drill-down)
     #[arg(long)]
     pub tree: bool,
+
+    /// Jump directly to a workspace root (skips root selection)
+    #[arg(long, short)]
+    pub workspace: Option<String>,
+
+    /// Jump directly to a repo's session picker (skips root + directory selection)
+    #[arg(long, short)]
+    pub repo: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
