@@ -20,6 +20,7 @@ impl SessionTree {
     }
 
     /// Get the full ancestry chain (bottom-up, excluding self).
+    #[allow(dead_code)]
     pub fn ancestors(&self, session_id: &SessionId) -> Vec<&Session> {
         let mut result = Vec::new();
         let mut current_id = session_id.clone();

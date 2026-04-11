@@ -38,10 +38,6 @@ pub struct RepoMeta {
 }
 
 impl RepoIndex {
-    pub fn find_by_id(&self, id: &str) -> Option<&RepoEntry> {
-        self.repos.iter().find(|r| r.id == id)
-    }
-
     pub fn find_by_path(&self, path: &std::path::Path) -> Option<&RepoEntry> {
         self.repos.iter().find(|r| r.path == path)
     }

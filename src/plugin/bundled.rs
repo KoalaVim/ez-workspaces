@@ -62,7 +62,3 @@ pub fn ensure_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// List names of all bundled plugins.
-pub fn bundled_plugin_names() -> Vec<&'static str> {
-    BUNDLED_PLUGINS.iter().map(|p| p.name).collect()
-}

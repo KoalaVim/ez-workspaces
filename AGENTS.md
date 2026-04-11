@@ -87,4 +87,5 @@ Plugins are shell scripts or executables in `~/.config/ez/plugins/<name>/`. See 
 - When changing architecture, modules, data flow, or adding new modules, update `docs/design.md` diagrams
 - Escape/Ctrl+C in interactive menus always goes back to the previous level (e.g., parent directory, previous menu). Only cancel/abort when at the top-most level.
 - All CLI output must be colored using the `colored` crate. Use `--no-color` global flag to disable. Convention: green for success, yellow for warnings, cyan for info/labels, bold for emphasis, dimmed for secondary info.
-- Use `log` crate (`log::debug!`, `log::trace!`, etc.) for debug logging. Activated via `RUST_LOG=debug ez` (env_logger). Add debug logs to any non-trivial logic (selector interactions, plugin execution, fzf I/O). Logs go to stderr so they don't interfere with fzf or cd-file output.
+- Use `log` crate (`log::debug!`, `log::trace!`, etc.) for debug logging. Activated via `ez --debug` (writes to `/tmp/ez-debug-<pid>.log`, prints path on exit) or `RUST_LOG=debug`. Add debug logs to any non-trivial logic (selector interactions, plugin execution, fzf I/O).
+- The build must produce zero warnings. Fix all warnings before finishing a task. Remove dead code, don't suppress with `#[allow]` unless the code is a public API intended for future use.
