@@ -81,6 +81,9 @@ pub enum Command {
     #[command(hide = true)]
     Preview {
         path: PathBuf,
+        /// Show session action keybinds in preview
+        #[arg(long, hide = true)]
+        session_actions: bool,
     },
 }
 

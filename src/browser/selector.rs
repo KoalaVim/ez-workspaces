@@ -11,6 +11,16 @@ pub struct SelectItem {
     pub value: String,
 }
 
+/// Result of a selection with action keybinds.
+pub enum ActionResult {
+    /// User pressed Enter — enter/select the item at index.
+    Select(usize),
+    /// User pressed a keybind — action key + selected index.
+    Action(String, usize),
+    /// User cancelled (Escape/Ctrl-C).
+    Cancel,
+}
+
 /// Trait for interactive selection UIs. Default impl uses fzf.
 /// Implementors can swap in skim, dialoguer, or a TUI framework.
 pub trait InteractiveSelector {
@@ -34,22 +44,36 @@ pub trait InteractiveSelector {
 
     /// Confirm yes/no.
     fn confirm(&self, prompt: &str, default: bool) -> Result<bool>;
+
+    /// Present items with keybind actions. Returns which key was pressed + selected index.
+    fn select_with_actions(
+        &self,
+        items: &[SelectItem],
+        prompt: &str,
+        preview_cmd: Option<&str>,
+        expect_keys: &[&str],
+        header: Option<&str>,
+    ) -> Result<ActionResult>;
 }
 
 /// fzf-based interactive selector.
 pub struct FzfSelector {
+    pub height: String,
     pub extra_opts: Option<String>,
 }
 
 impl FzfSelector {
-    pub fn new(extra_opts: Option<String>) -> Result<Self> {
+    pub fn new(fzf_config: &crate::config::model::FzfConfig) -> Result<Self> {
         // Verify fzf is available
         which::which("fzf").map_err(|_| {
             EzError::SelectorUnavailable(
                 "fzf not found in PATH. Install fzf: https://github.com/junegunn/fzf".into(),
             )
         })?;
-        Ok(Self { extra_opts })
+        Ok(Self {
+            height: fzf_config.height.clone(),
+            extra_opts: fzf_config.extra_opts.clone(),
+        })
     }
 }
 
@@ -73,7 +97,7 @@ impl InteractiveSelector for FzfSelector {
             "--prompt".to_string(),
             format!("{prompt}> "),
             "--height".to_string(),
-            "~40%".to_string(),
+            self.height.clone(),
             "--layout".to_string(),
             "reverse".to_string(),
             "--ansi".to_string(),
@@ -153,7 +177,7 @@ impl InteractiveSelector for FzfSelector {
             format!("{prompt}> "),
             "--multi".to_string(),
             "--height".to_string(),
-            "~40%".to_string(),
+            self.height.clone(),
             "--layout".to_string(),
             "reverse".to_string(),
             "--ansi".to_string(),
@@ -251,5 +275,113 @@ impl InteractiveSelector for FzfSelector {
             return Ok(default);
         }
         Ok(input == "y" || input == "yes")
+    }
+
+    fn select_with_actions(
+        &self,
+        items: &[SelectItem],
+        prompt: &str,
+        preview_cmd: Option<&str>,
+        expect_keys: &[&str],
+        header: Option<&str>,
+    ) -> Result<ActionResult> {
+        if items.is_empty() {
+            return Ok(ActionResult::Cancel);
+        }
+
+        let use_value_prefix = preview_cmd.is_some();
+
+        let mut args = vec![
+            "--prompt".to_string(),
+            format!("{prompt}> "),
+            "--height".to_string(),
+            self.height.clone(),
+            "--layout".to_string(),
+            "reverse".to_string(),
+            "--ansi".to_string(),
+        ];
+
+        // --expect captures keybinds; fzf outputs the pressed key on line 1
+        if !expect_keys.is_empty() {
+            args.push("--expect".to_string());
+            args.push(expect_keys.join(","));
+        }
+
+        if let Some(hdr) = header {
+            args.push("--header".to_string());
+            args.push(hdr.to_string());
+            args.push("--header-first".to_string());
+        }
+
+        if use_value_prefix {
+            args.push("--delimiter".to_string());
+            args.push("\t".to_string());
+            args.push("--with-nth".to_string());
+            args.push("2..".to_string());
+        }
+
+        if let Some(preview) = preview_cmd {
+            let cmd = preview.replace("{}", "{1}");
+            args.push("--preview".to_string());
+            args.push(cmd);
+            args.push("--preview-window".to_string());
+            args.push("right:50%".to_string());
+        }
+
+        if let Some(opts) = &self.extra_opts {
+            args.extend(opts.split_whitespace().map(String::from));
+        }
+
+        let mut child = Command::new("fzf")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| EzError::SelectorUnavailable(e.to_string()))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            for item in items {
+                if use_value_prefix {
+                    let _ = writeln!(stdin, "{}\t{}", item.value, item.display);
+                } else {
+                    let _ = writeln!(stdin, "{}", item.display);
+                }
+            }
+        }
+
+        let output = child.wait_with_output()?;
+
+        if !output.status.success() {
+            return Ok(ActionResult::Cancel);
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let mut lines = raw.lines();
+
+        // With --expect, first line is the key pressed (empty string = Enter)
+        let key_line = lines.next().unwrap_or("").trim().to_string();
+        let selection_line = lines.next().unwrap_or("").trim().to_string();
+
+        let selected_display = if use_value_prefix {
+            selection_line
+                .splitn(2, '\t')
+                .nth(1)
+                .unwrap_or(&selection_line)
+                .to_string()
+        } else {
+            selection_line
+        };
+
+        let index = match items.iter().position(|item| item.display == selected_display) {
+            Some(idx) => idx,
+            None => return Ok(ActionResult::Cancel),
+        };
+
+        if key_line.is_empty() {
+            Ok(ActionResult::Select(index))
+        } else {
+            Ok(ActionResult::Action(key_line, index))
+        }
     }
 }

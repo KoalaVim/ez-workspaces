@@ -20,6 +20,10 @@ pub struct EzConfig {
     #[serde(default)]
     pub selector: SelectorConfig,
 
+    /// fzf-specific configuration
+    #[serde(default)]
+    pub fzf: FzfConfig,
+
     /// Plugin configuration
     #[serde(default)]
     pub plugins: PluginsConfig,
@@ -35,9 +39,20 @@ pub struct SelectorConfig {
     #[serde(default = "default_selector_backend")]
     pub backend: String,
 
-    /// Extra fzf flags
+    /// Extra fzf flags (deprecated, use [fzf] section)
     #[serde(default)]
     pub fzf_opts: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct FzfConfig {
+    /// fzf height (e.g. "90%", "100%", "20")
+    #[serde(default = "default_fzf_height")]
+    pub height: String,
+
+    /// Extra fzf flags
+    #[serde(default)]
+    pub extra_opts: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -58,6 +73,7 @@ impl Default for EzConfig {
             default_shell: None,
             editor: None,
             selector: SelectorConfig::default(),
+            fzf: FzfConfig::default(),
             plugins: PluginsConfig::default(),
             plugin_timeout: default_plugin_timeout(),
         }
@@ -73,6 +89,15 @@ impl Default for SelectorConfig {
     }
 }
 
+impl Default for FzfConfig {
+    fn default() -> Self {
+        Self {
+            height: default_fzf_height(),
+            extra_opts: None,
+        }
+    }
+}
+
 impl Default for PluginsConfig {
     fn default() -> Self {
         Self {
@@ -84,6 +109,10 @@ impl Default for PluginsConfig {
 
 fn default_selector_backend() -> String {
     "fzf".into()
+}
+
+fn default_fzf_height() -> String {
+    "90%".into()
 }
 
 fn default_plugin_timeout() -> u64 {

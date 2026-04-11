@@ -55,6 +55,17 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Collapse the home directory prefix back to ~/
+pub fn collapse_tilde(path: &str) -> String {
+    if let Some(home) = dirs::home_dir() {
+        let home_str = home.to_string_lossy();
+        if let Some(rest) = path.strip_prefix(home_str.as_ref()) {
+            return format!("~{rest}");
+        }
+    }
+    path.to_string()
+}
+
 /// Generate a repo ID slug from a path.
 /// e.g. /home/user/workspace/personal/my-repo -> personal-my-repo
 pub fn repo_id_from_path(path: &std::path::Path) -> String {

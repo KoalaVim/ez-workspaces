@@ -142,7 +142,7 @@ fn get_value(key: &str) -> Result<()> {
 /// Interactive guided configuration using the InteractiveSelector.
 fn interactive_init() -> Result<()> {
     let mut config = load()?;
-    let selector = FzfSelector::new(config.selector.fzf_opts.clone())?;
+    let selector = FzfSelector::new(&config.fzf)?;
 
     println!("{}\n", "ez-workspaces configuration".bold().cyan());
 

@@ -32,7 +32,10 @@ fn main() {
             generate_completions(shell);
             Ok(())
         }
-        Some(Command::Preview { path }) => browser::preview(&path),
+        Some(Command::Preview {
+            path,
+            session_actions,
+        }) => browser::preview(&path, session_actions),
     };
 
     if let Err(e) = result {

@@ -10,12 +10,12 @@ use crate::error::Result;
 use crate::paths;
 use crate::repo;
 use crate::session;
-use selector::{FzfSelector, InteractiveSelector, SelectItem};
+use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
 
 /// Main interactive browser entry point (bare `ez` command).
 pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
     let config = config::load()?;
-    let selector = FzfSelector::new(config.selector.fzf_opts.clone())?;
+    let selector = FzfSelector::new(&config.fzf)?;
 
     if config.workspace_roots.is_empty() {
         println!("{}", "No workspace roots configured.".yellow());
@@ -35,7 +35,7 @@ pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
         .map(|r| {
             let expanded = paths::expand_tilde(r);
             SelectItem {
-                display: r.clone(),
+                display: paths::collapse_tilde(&expanded.to_string_lossy()),
                 value: expanded.to_string_lossy().to_string(),
             }
         })
@@ -69,42 +69,8 @@ pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
             .expect("just registered")
     };
 
-    // Step 4: Ensure default session exists, show session tree
-    let tree = session::ensure_default_session(&repo_entry.id, &repo_entry.path)?;
-
-    let rendered = tree.render_tree();
-    let session_items: Vec<SelectItem> = rendered
-        .iter()
-        .map(|(depth, s)| {
-            let indent = "  ".repeat(*depth);
-            let marker = if s.is_default { " *" } else { "" };
-            let path_info = s
-                .path
-                .as_ref()
-                .map(|p| format!(" ({})", p.display()))
-                .unwrap_or_default();
-            SelectItem {
-                display: format!("{}{}{}{}", indent, s.name, marker, path_info),
-                value: s.id.clone(),
-            }
-        })
-        .collect();
-
-    let session_idx = match selector.select_one(&session_items, "session", None)? {
-        Some(idx) => idx,
-        None => return Ok(()),
-    };
-
-    let selected_session = rendered[session_idx].1;
-
-    // Step 5: Enter the session
-    let target_dir = selected_session
-        .path
-        .as_ref()
-        .cloned()
-        .unwrap_or_else(|| repo_entry.path.clone());
-
-    write_cd_target(cd_file, &target_dir)
+    // Step 4: Session selection with action keybinds
+    session_action_loop(&repo_entry, &selector, cd_file)
 }
 
 /// Write the target directory for the shell wrapper to cd into.
@@ -115,6 +81,129 @@ fn write_cd_target(cd_file: Option<&Path>, target_dir: &Path) -> Result<()> {
         println!("{}", target_dir.display());
     }
     Ok(())
+}
+
+/// Session selection loop with action keybinds.
+fn session_action_loop(
+    repo_entry: &repo::model::RepoEntry,
+    selector: &dyn InteractiveSelector,
+    cd_file: Option<&Path>,
+) -> Result<()> {
+    loop {
+        let tree = session::ensure_default_session(&repo_entry.id, &repo_entry.path)?;
+        let rendered = tree.render_tree();
+
+        let session_items: Vec<SelectItem> = rendered
+            .iter()
+            .map(|(depth, s)| {
+                let indent = "  ".repeat(*depth);
+                let marker = if s.is_default {
+                    " ★".yellow().to_string()
+                } else {
+                    String::new()
+                };
+                let path_info = s
+                    .path
+                    .as_ref()
+                    .map(|p| format!(" → {}", p.display()).dimmed().to_string())
+                    .unwrap_or_default();
+                SelectItem {
+                    display: format!("{}{}{}{}", indent, s.name.bold(), marker, path_info),
+                    value: s.id.clone(),
+                }
+            })
+            .collect();
+
+        let ez_bin = std::env::current_exe().ok();
+        let repo_path_str = repo_entry.path.to_string_lossy();
+        let preview_cmd = ez_bin.map(|bin| {
+            format!(
+                "{} preview --session-actions {}",
+                bin.display(),
+                repo_path_str
+            )
+        });
+
+        let action = selector.select_with_actions(
+            &session_items,
+            &repo_entry.name,
+            preview_cmd.as_deref(),
+            &["ctrl-n", "ctrl-d", "ctrl-r"],
+            None,
+        )?;
+
+        match action {
+            ActionResult::Select(idx) => {
+                // Enter the session
+                let selected = rendered[idx].1;
+                let target_dir = selected
+                    .path
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_else(|| repo_entry.path.clone());
+                return write_cd_target(cd_file, &target_dir);
+            }
+            ActionResult::Action(key, idx) => {
+                let selected = rendered[idx].1;
+                match key.as_str() {
+                    "ctrl-n" => {
+                        // New child session under the selected one
+                        let name = selector.input("Session name", None)?;
+                        if !name.is_empty() {
+                            session::create_child_session(
+                                &repo_entry.id,
+                                &selected.id,
+                                &name,
+                            )?;
+                            eprintln!(
+                                "{} {} → {}",
+                                "Created:".green(),
+                                name.bold(),
+                                selected.name.dimmed()
+                            );
+                        }
+                    }
+                    "ctrl-d" => {
+                        let msg = format!("Delete session '{}'?", selected.name);
+                        if selector.confirm(&msg, false)? {
+                            session::delete_session_by_id(
+                                &repo_entry.id,
+                                &selected.id,
+                                true,
+                            )?;
+                            eprintln!(
+                                "{} {}",
+                                "Deleted:".green(),
+                                selected.name.bold()
+                            );
+                        }
+                    }
+                    "ctrl-r" => {
+                        let new_name = selector.input(
+                            "New name",
+                            Some(&selected.name),
+                        )?;
+                        if !new_name.is_empty() && new_name != selected.name {
+                            session::rename_session_by_id(
+                                &repo_entry.id,
+                                &selected.id,
+                                &new_name,
+                            )?;
+                            eprintln!(
+                                "{} {} → {}",
+                                "Renamed:".green(),
+                                selected.name.bold(),
+                                new_name.bold()
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+                // Loop back to show updated session list
+            }
+            ActionResult::Cancel => return Ok(()),
+        }
+    }
 }
 
 /// Tree browser: show all roots → repos → sessions in one unicode tree.
@@ -133,7 +222,6 @@ fn browse_tree(
         let root_connector = if is_last_root { "└── " } else { "├── " };
         let root_cont = if is_last_root { "    " } else { "│   " };
 
-        // Root header (non-selectable)
         nodes.push((
             format!("{}{}", root_connector.dimmed(), root.bold().blue()),
             None,
@@ -144,7 +232,6 @@ fn browse_tree(
             continue;
         }
 
-        // Collect repos in this root
         let mut repos: Vec<(String, std::path::PathBuf)> = Vec::new();
         if let Ok(read_dir) = fs::read_dir(&root_path) {
             for entry in read_dir.flatten() {
@@ -174,7 +261,6 @@ fn browse_tree(
 
             let branch = get_branch(repo_path).unwrap_or_else(|| "?".into());
 
-            // Repo node (selectable)
             nodes.push((
                 format!(
                     "{}{}{} {}",
@@ -187,7 +273,6 @@ fn browse_tree(
                 repo_path.clone(),
             ));
 
-            // Sessions for this repo
             if let Some(repo_entry) = index.find_by_path(repo_path) {
                 if let Ok(tree) = session::store::load_sessions(&repo_entry.id) {
                     if !tree.sessions.is_empty() {
@@ -195,11 +280,8 @@ fn browse_tree(
                         let num_sessions = rendered.len();
                         for (sess_i, (depth, s)) in rendered.iter().enumerate() {
                             let is_last_session = sess_i == num_sessions - 1;
-                            let sess_connector = if is_last_session {
-                                "└── "
-                            } else {
-                                "├── "
-                            };
+                            let sess_connector =
+                                if is_last_session { "└── " } else { "├── " };
                             let session_indent = "    ".repeat(*depth);
                             let marker = if s.is_default {
                                 " ★".yellow().to_string()
@@ -256,7 +338,7 @@ fn browse_tree(
 
     match &nodes[idx].1 {
         Some(target) => write_cd_target(cd_file, target),
-        None => Ok(()), // Non-selectable root header
+        None => Ok(()),
     }
 }
 
@@ -269,21 +351,22 @@ fn drill_into_directory(
     let mut history: Vec<std::path::PathBuf> = Vec::new();
 
     loop {
-        // Check if current directory is a repo
         if current.join(".git").exists() {
             return Ok(Some(current));
         }
 
-        // List subdirectories
         let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
 
         if let Ok(read_dir) = fs::read_dir(&current) {
             for entry in read_dir.flatten() {
                 let path = entry.path();
-                if path.is_dir() && !path.file_name().map_or(true, |n| n.to_string_lossy().starts_with('.')) {
+                if path.is_dir()
+                    && !path
+                        .file_name()
+                        .map_or(true, |n| n.to_string_lossy().starts_with('.'))
+                {
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
 
-                    // Annotate repos with branch info
                     let display = if path.join(".git").exists() {
                         let branch = get_branch(&path).unwrap_or_else(|| "?".into());
                         format!("{name} [{branch}]")
@@ -300,7 +383,6 @@ fn drill_into_directory(
 
         if entries.is_empty() {
             println!("{} {}", "No subdirectories in".yellow(), current.display());
-            // Go back if we have history, otherwise return None
             if let Some(prev) = history.pop() {
                 current = prev;
                 continue;
@@ -316,7 +398,6 @@ fn drill_into_directory(
             })
             .collect();
 
-        // Use ez preview for fzf preview
         let ez_bin = std::env::current_exe().ok();
         let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
 
@@ -327,7 +408,6 @@ fn drill_into_directory(
         )? {
             Some(idx) => idx,
             None => {
-                // Escape: go back to previous directory
                 if let Some(prev) = history.pop() {
                     current = prev;
                     continue;
@@ -341,75 +421,261 @@ fn drill_into_directory(
     }
 }
 
-/// Get the current branch of a git repo.
-fn get_branch(path: &Path) -> Option<String> {
+/// Run a git command and capture stdout.
+fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
     std::process::Command::new("git")
-        .args(["symbolic-ref", "--short", "HEAD"])
+        .args(args)
         .current_dir(path)
         .output()
         .ok()
         .and_then(|o| {
             if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+                let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if s.is_empty() { None } else { Some(s) }
             } else {
                 None
             }
         })
 }
 
+/// Get the current branch of a git repo.
+fn get_branch(path: &Path) -> Option<String> {
+    git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
+}
+
+fn preview_section(title: &str) {
+    let bar = "─".repeat(40);
+    println!("{}", format!("┌{bar}").dimmed());
+    println!("{} {}", "│".dimmed(), title.bold().cyan());
+    println!("{}", format!("└{bar}").dimmed());
+}
+
 /// Preview handler for fzf (hidden `ez preview <path>` command).
-pub fn preview(path: &Path) -> Result<()> {
+pub fn preview(path: &Path, show_session_actions: bool) -> Result<()> {
     if !path.exists() {
-        println!("Path does not exist: {}", path.display());
+        println!("{}", "Path does not exist".red().bold());
+        println!("{}", path.display());
         return Ok(());
     }
 
     if path.join(".git").exists() {
-        // It's a repo — show sessions
-        let index = repo::store::load_index()?;
-        if let Some(entry) = index.find_by_path(path) {
-            let tree = session::store::load_sessions(&entry.id)?;
-            if tree.sessions.is_empty() {
-                println!("Repository: {}", entry.name);
-                println!("No sessions (will auto-create 'main')");
-            } else {
-                println!("Repository: {}", entry.name);
-                println!("Sessions:");
-                let rendered = tree.render_tree();
-                for (depth, session) in rendered {
-                    let indent = "  ".repeat(depth);
-                    let marker = if session.is_default { " *" } else { "" };
-                    println!("  {}{}{}", indent, session.name, marker);
-                }
-            }
-        } else {
-            println!("Repository (unregistered): {}", path.display());
-            let branch = get_branch(path).unwrap_or_else(|| "?".into());
-            println!("Branch: {branch}");
-        }
+        preview_repo(path, show_session_actions)?;
     } else {
-        // It's a directory — show contents
-        println!("Directory: {}", path.display());
-        if let Ok(entries) = fs::read_dir(path) {
-            let mut dirs: Vec<String> = Vec::new();
-            for entry in entries.flatten() {
-                let p = entry.path();
-                if p.is_dir() && !p.file_name().map_or(true, |n| n.to_string_lossy().starts_with('.')) {
-                    let name = p.file_name().unwrap().to_string_lossy().to_string();
-                    if p.join(".git").exists() {
-                        let branch = get_branch(&p).unwrap_or_else(|| "?".into());
-                        dirs.push(format!("  {name} [{branch}]"));
-                    } else {
-                        dirs.push(format!("  {name}/"));
-                    }
-                }
-            }
-            dirs.sort();
-            for d in dirs {
-                println!("{d}");
-            }
-        }
+        preview_directory(path);
     }
 
     Ok(())
+}
+
+fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    println!("{} {}", "■".green(), name.bold().green());
+    println!("{}", path.display().to_string().dimmed());
+    println!();
+
+    // ── Sessions (first) ──
+    preview_section("Sessions");
+    let index = repo::store::load_index()?;
+    if let Some(entry) = index.find_by_path(path) {
+        let tree = session::store::load_sessions(&entry.id)?;
+        if tree.sessions.is_empty() {
+            println!(
+                "  {} {}",
+                "none".dimmed(),
+                "(will auto-create 'main')".dimmed()
+            );
+        } else {
+            let rendered = tree.render_tree();
+            for (depth, s) in rendered {
+                let indent = "  ".repeat(depth + 1);
+                let marker = if s.is_default {
+                    " ★".yellow().to_string()
+                } else {
+                    String::new()
+                };
+                let path_info = s
+                    .path
+                    .as_ref()
+                    .map(|p| format!(" → {}", p.display()).dimmed().to_string())
+                    .unwrap_or_default();
+                println!("{}{}{}{}", indent, s.name.bold(), marker, path_info);
+            }
+        }
+    } else {
+        println!("  {}", "(unregistered — select to register)".dimmed());
+    }
+
+    if show_actions {
+        println!();
+        preview_keybind_help();
+    }
+
+    println!();
+
+    // ── Git Info ──
+    preview_section("Git Info");
+    let branch = get_branch(path).unwrap_or_else(|| "detached".into());
+    println!("  {} {}", "branch:".bold(), branch.cyan());
+
+    if let Some(remote) = git_cmd(path, &["remote", "get-url", "origin"]) {
+        println!("  {} {}", "remote:".bold(), remote.dimmed());
+    }
+
+    let dirty = git_cmd(path, &["status", "--porcelain"])
+        .map(|s| s.lines().count())
+        .unwrap_or(0);
+    if dirty > 0 {
+        println!(
+            "  {} {}",
+            "status:".bold(),
+            format!("{dirty} modified file(s)").yellow()
+        );
+    } else {
+        println!("  {} {}", "status:".bold(), "clean".green());
+    }
+
+    if let Some(tags) = git_cmd(path, &["tag", "--sort=-creatordate"]) {
+        let tag_list: Vec<&str> = tags.lines().take(3).collect();
+        if !tag_list.is_empty() {
+            println!("  {}  {}", "tags:".bold(), tag_list.join(", ").magenta());
+        }
+    }
+
+    if let Some(branches) = git_cmd(path, &["branch", "--list"]) {
+        let count = branches.lines().count();
+        println!("  {} {count}", "branches:".bold());
+    }
+
+    println!();
+
+    // ── Recent Commits ──
+    preview_section("Recent Commits");
+    if let Some(log) = git_cmd(path, &["log", "--oneline", "--decorate", "--no-color", "-8"]) {
+        for line in log.lines() {
+            if let Some((hash, msg)) = line.split_once(' ') {
+                println!("  {} {}", hash.yellow(), msg);
+            } else {
+                println!("  {line}");
+            }
+        }
+    } else {
+        println!("  {}", "no commits".dimmed());
+    }
+
+    Ok(())
+}
+
+fn preview_directory(path: &Path) {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    println!("{} {}", "■".blue(), name.bold().blue());
+    println!("{}", path.display().to_string().dimmed());
+    println!();
+
+    preview_section("Contents");
+
+    if let Ok(entries) = fs::read_dir(path) {
+        let mut repos: Vec<String> = Vec::new();
+        let mut dirs: Vec<String> = Vec::new();
+        let mut file_count: usize = 0;
+
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let entry_name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if entry_name.starts_with('.') {
+                continue;
+            }
+
+            if p.is_dir() {
+                if p.join(".git").exists() {
+                    let branch = get_branch(&p).unwrap_or_else(|| "?".into());
+                    repos.push(format!(
+                        "  {} {} {}",
+                        "●".green(),
+                        entry_name.bold(),
+                        format!("[{branch}]").cyan()
+                    ));
+                } else {
+                    dirs.push(format!("  {} {}/", "▸".blue(), entry_name));
+                }
+            } else {
+                file_count += 1;
+            }
+        }
+
+        repos.sort();
+        dirs.sort();
+
+        if !repos.is_empty() {
+            println!(
+                "  {}",
+                format!("Repositories ({})", repos.len()).bold().green()
+            );
+            for r in &repos {
+                println!("{r}");
+            }
+        }
+
+        if !dirs.is_empty() {
+            if !repos.is_empty() {
+                println!();
+            }
+            println!(
+                "  {}",
+                format!("Directories ({})", dirs.len()).bold().blue()
+            );
+            for d in &dirs {
+                println!("{d}");
+            }
+        }
+
+        if file_count > 0 {
+            println!();
+            println!("  {} {file_count} file(s)", "…".dimmed());
+        }
+
+        if repos.is_empty() && dirs.is_empty() && file_count == 0 {
+            println!("  {}", "(empty)".dimmed());
+        }
+    }
+}
+
+fn preview_keybind_help() {
+    preview_section("Keybinds");
+    println!(
+        "  {}  {}",
+        "Enter".bold().green(),
+        "Enter session"
+    );
+    println!(
+        "  {}  {}",
+        "Ctrl-N".bold().yellow(),
+        "New child session"
+    );
+    println!(
+        "  {}  {}",
+        "Ctrl-R".bold().yellow(),
+        "Rename session"
+    );
+    println!(
+        "  {}  {}",
+        "Ctrl-D".bold().red(),
+        "Delete session"
+    );
+    println!(
+        "  {}  {}",
+        "Esc".bold().dimmed(),
+        "Go back"
+    );
 }
