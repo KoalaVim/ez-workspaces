@@ -64,6 +64,11 @@ impl InteractiveSelector for FzfSelector {
             return Ok(None);
         }
 
+        // When preview is used, send "value\tdisplay" so fzf's {} gives
+        // the value (path) to the preview command, while --with-nth shows
+        // only the display portion to the user.
+        let use_value_prefix = preview_cmd.is_some();
+
         let mut args = vec![
             "--prompt".to_string(),
             format!("{prompt}> "),
@@ -74,9 +79,18 @@ impl InteractiveSelector for FzfSelector {
             "--ansi".to_string(),
         ];
 
+        if use_value_prefix {
+            args.push("--delimiter".to_string());
+            args.push("\t".to_string());
+            args.push("--with-nth".to_string());
+            args.push("2..".to_string());
+        }
+
         if let Some(preview) = preview_cmd {
+            // {1} extracts the first tab-delimited field (the value/path)
+            let cmd = preview.replace("{}", "{1}");
             args.push("--preview".to_string());
-            args.push(preview.to_string());
+            args.push(cmd);
             args.push("--preview-window".to_string());
             args.push("right:50%".to_string());
         }
@@ -96,7 +110,11 @@ impl InteractiveSelector for FzfSelector {
         // Write items to fzf's stdin
         if let Some(mut stdin) = child.stdin.take() {
             for item in items {
-                let _ = writeln!(stdin, "{}", item.display);
+                if use_value_prefix {
+                    let _ = writeln!(stdin, "{}\t{}", item.value, item.display);
+                } else {
+                    let _ = writeln!(stdin, "{}", item.display);
+                }
             }
         }
 
@@ -107,7 +125,16 @@ impl InteractiveSelector for FzfSelector {
             return Ok(None);
         }
 
-        let selected = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let selected = if use_value_prefix {
+            // Output is "value\tdisplay" — match on display part
+            raw.splitn(2, '\t')
+                .nth(1)
+                .unwrap_or(&raw)
+                .to_string()
+        } else {
+            raw
+        };
         let index = items.iter().position(|item| item.display == selected);
         Ok(index)
     }

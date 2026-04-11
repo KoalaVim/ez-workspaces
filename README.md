@@ -66,7 +66,8 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 
 | Command | Description |
 |---------|-------------|
-| `ez` | Interactive fzf browser |
+| `ez` | Interactive fzf browser (drill-down) |
+| `ez --tree` | Tree view of all repos and sessions |
 | `ez clone <url> [path]` | Clone + register repo |
 | `ez add [path]` | Register existing repo |
 | `ez session new [name]` | Create session (`--parent` for nesting) |

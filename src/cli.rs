@@ -15,6 +15,10 @@ pub struct Cli {
     /// Disable colored output
     #[arg(long, global = true)]
     pub no_color: bool,
+
+    /// Show all repos and sessions as a tree (no drill-down)
+    #[arg(long)]
+    pub tree: bool,
 }
 
 #[derive(Subcommand)]

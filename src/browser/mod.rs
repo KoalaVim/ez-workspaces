@@ -13,7 +13,7 @@ use crate::session;
 use selector::{FzfSelector, InteractiveSelector, SelectItem};
 
 /// Main interactive browser entry point (bare `ez` command).
-pub fn browse(cd_file: Option<&Path>) -> Result<()> {
+pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
     let config = config::load()?;
     let selector = FzfSelector::new(config.selector.fzf_opts.clone())?;
 
@@ -22,6 +22,10 @@ pub fn browse(cd_file: Option<&Path>) -> Result<()> {
         println!("Add roots to your config with: {}", "ez config --edit".bold());
         println!("Example: workspace_roots = [\"~/workspace\"]");
         return Ok(());
+    }
+
+    if tree_mode {
+        return browse_tree(&config, &selector, cd_file);
     }
 
     // Step 1: Select workspace root
@@ -100,13 +104,160 @@ pub fn browse(cd_file: Option<&Path>) -> Result<()> {
         .cloned()
         .unwrap_or_else(|| repo_entry.path.clone());
 
+    write_cd_target(cd_file, &target_dir)
+}
+
+/// Write the target directory for the shell wrapper to cd into.
+fn write_cd_target(cd_file: Option<&Path>, target_dir: &Path) -> Result<()> {
     if let Some(cd_path) = cd_file {
         fs::write(cd_path, target_dir.to_string_lossy().as_bytes())?;
     } else {
         println!("{}", target_dir.display());
     }
-
     Ok(())
+}
+
+/// Tree browser: show all roots → repos → sessions in one unicode tree.
+fn browse_tree(
+    config: &config::model::EzConfig,
+    selector: &dyn InteractiveSelector,
+    cd_file: Option<&Path>,
+) -> Result<()> {
+    let index = repo::store::load_index()?;
+    let mut nodes: Vec<(String, Option<std::path::PathBuf>, std::path::PathBuf)> = Vec::new();
+    let num_roots = config.workspace_roots.len();
+
+    for (root_i, root) in config.workspace_roots.iter().enumerate() {
+        let root_path = paths::expand_tilde(root);
+        let is_last_root = root_i == num_roots - 1;
+        let root_connector = if is_last_root { "└── " } else { "├── " };
+        let root_cont = if is_last_root { "    " } else { "│   " };
+
+        // Root header (non-selectable)
+        nodes.push((
+            format!("{}{}", root_connector.dimmed(), root.bold().blue()),
+            None,
+            root_path.clone(),
+        ));
+
+        if !root_path.is_dir() {
+            continue;
+        }
+
+        // Collect repos in this root
+        let mut repos: Vec<(String, std::path::PathBuf)> = Vec::new();
+        if let Ok(read_dir) = fs::read_dir(&root_path) {
+            for entry in read_dir.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if name.starts_with('.') {
+                    continue;
+                }
+                if path.join(".git").exists() {
+                    repos.push((name, path));
+                }
+            }
+        }
+        repos.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let num_repos = repos.len();
+        for (repo_i, (repo_name, repo_path)) in repos.iter().enumerate() {
+            let is_last_repo = repo_i == num_repos - 1;
+            let repo_connector = if is_last_repo { "└── " } else { "├── " };
+            let repo_cont = if is_last_repo { "    " } else { "│   " };
+
+            let branch = get_branch(repo_path).unwrap_or_else(|| "?".into());
+
+            // Repo node (selectable)
+            nodes.push((
+                format!(
+                    "{}{}{} {}",
+                    root_cont.dimmed(),
+                    repo_connector.dimmed(),
+                    repo_name.bold().green(),
+                    format!("[{branch}]").cyan(),
+                ),
+                Some(repo_path.clone()),
+                repo_path.clone(),
+            ));
+
+            // Sessions for this repo
+            if let Some(repo_entry) = index.find_by_path(repo_path) {
+                if let Ok(tree) = session::store::load_sessions(&repo_entry.id) {
+                    if !tree.sessions.is_empty() {
+                        let rendered = tree.render_tree();
+                        let num_sessions = rendered.len();
+                        for (sess_i, (depth, s)) in rendered.iter().enumerate() {
+                            let is_last_session = sess_i == num_sessions - 1;
+                            let sess_connector = if is_last_session {
+                                "└── "
+                            } else {
+                                "├── "
+                            };
+                            let session_indent = "    ".repeat(*depth);
+                            let marker = if s.is_default {
+                                " ★".yellow().to_string()
+                            } else {
+                                String::new()
+                            };
+
+                            let target = s
+                                .path
+                                .as_ref()
+                                .cloned()
+                                .unwrap_or_else(|| repo_path.clone());
+
+                            nodes.push((
+                                format!(
+                                    "{}{}{}{}{}{}",
+                                    root_cont.dimmed(),
+                                    repo_cont.dimmed(),
+                                    sess_connector.dimmed(),
+                                    session_indent,
+                                    s.name.bold().cyan(),
+                                    marker,
+                                ),
+                                Some(target),
+                                repo_path.clone(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if nodes.is_empty() {
+        println!("{}", "No repositories found in workspace roots.".yellow());
+        return Ok(());
+    }
+
+    let items: Vec<SelectItem> = nodes
+        .iter()
+        .map(|(display, _target, preview_path)| SelectItem {
+            display: display.clone(),
+            value: preview_path.to_string_lossy().to_string(),
+        })
+        .collect();
+
+    let ez_bin = std::env::current_exe().ok();
+    let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
+
+    let idx = match selector.select_one(&items, "ez tree", preview_cmd.as_deref())? {
+        Some(idx) => idx,
+        None => return Ok(()),
+    };
+
+    match &nodes[idx].1 {
+        Some(target) => write_cd_target(cd_file, target),
+        None => Ok(()), // Non-selectable root header
+    }
 }
 
 /// Drill into directories until a git repo is found or user selects one.
@@ -165,9 +316,9 @@ fn drill_into_directory(
             })
             .collect();
 
-        // Use ez _preview for fzf preview
+        // Use ez preview for fzf preview
         let ez_bin = std::env::current_exe().ok();
-        let preview_cmd = ez_bin.map(|bin| format!("{} _preview {{}}", bin.display()));
+        let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
 
         let idx = match selector.select_one(
             &items,
@@ -206,7 +357,7 @@ fn get_branch(path: &Path) -> Option<String> {
         })
 }
 
-/// Preview handler for fzf (hidden `ez _preview <path>` command).
+/// Preview handler for fzf (hidden `ez preview <path>` command).
 pub fn preview(path: &Path) -> Result<()> {
     if !path.exists() {
         println!("Path does not exist: {}", path.display());
