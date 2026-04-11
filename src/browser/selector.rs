@@ -151,16 +151,23 @@ impl InteractiveSelector for FzfSelector {
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let selected = if use_value_prefix {
-            raw.splitn(2, '\t')
-                .nth(1)
+        // When using value prefix, match on value (first field) since fzf
+        // strips ANSI codes from the display portion in its output.
+        let (match_field, match_on_value) = if use_value_prefix {
+            let value = raw.splitn(2, '\t')
+                .next()
                 .unwrap_or(&raw)
-                .to_string()
+                .to_string();
+            (value, true)
         } else {
-            raw
+            (raw, false)
         };
-        log::debug!("select_one: selected={:?}", selected);
-        let index = items.iter().position(|item| item.display == selected);
+        log::debug!("select_one: match_field={:?} on_value={}", match_field, match_on_value);
+        let index = if match_on_value {
+            items.iter().position(|item| item.value == match_field)
+        } else {
+            items.iter().position(|item| item.display == match_field)
+        };
         log::debug!("select_one: matched index={:?}", index);
         Ok(index)
     }
@@ -372,22 +379,29 @@ impl InteractiveSelector for FzfSelector {
         log::debug!("fzf key_line: {:?}", key_line);
         log::debug!("fzf selection_line: {:?}", selection_line);
 
-        let selected_display = if use_value_prefix {
-            selection_line
+        // When using value prefix (tab-delimited), match on value (first field)
+        // because fzf strips ANSI codes from the display portion in its output.
+        let (match_field, match_on_value) = if use_value_prefix {
+            let value = selection_line
                 .splitn(2, '\t')
-                .nth(1)
+                .next()
                 .unwrap_or(&selection_line)
-                .to_string()
+                .to_string();
+            (value, true)
         } else {
-            selection_line
+            (selection_line, false)
         };
 
-        log::debug!("fzf selected_display: {:?}", selected_display);
+        log::debug!("fzf match_field: {:?} (on_value={})", match_field, match_on_value);
 
-        let index = match items.iter().position(|item| item.display == selected_display) {
+        let index = match if match_on_value {
+            items.iter().position(|item| item.value == match_field)
+        } else {
+            items.iter().position(|item| item.display == match_field)
+        } {
             Some(idx) => idx,
             None => {
-                log::debug!("fzf display match failed, items:");
+                log::debug!("fzf match failed, items:");
                 for (i, item) in items.iter().enumerate() {
                     log::debug!("  [{}] display={:?} value={:?}", i, item.display, item.value);
                 }
