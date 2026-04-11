@@ -35,7 +35,13 @@ fn main() {
         Some(Command::Preview {
             path,
             session_actions,
-        }) => browser::preview(&path, session_actions),
+        }) => {
+            // fzf pipes preview output — force colors on (unless --no-color)
+            if !cli.no_color {
+                colored::control::set_override(true);
+            }
+            browser::preview(&path, session_actions)
+        }
     };
 
     if let Err(e) = result {
