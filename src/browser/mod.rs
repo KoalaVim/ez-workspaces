@@ -70,7 +70,7 @@ pub fn browse(cd_file: Option<&Path>, tree_mode: bool) -> Result<()> {
     };
 
     // Step 4: Session selection with action keybinds
-    session_action_loop(&repo_entry, &selector, cd_file)
+    session_action_loop(&repo_entry, &selector, cd_file, &config.keybinds)
 }
 
 /// Write the target directory for the shell wrapper to cd into.
@@ -88,6 +88,7 @@ fn session_action_loop(
     repo_entry: &repo::model::RepoEntry,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
+    keybinds: &config::model::KeybindsConfig,
 ) -> Result<()> {
     loop {
         let tree = session::ensure_default_session(&repo_entry.id, &repo_entry.path)?;
@@ -128,7 +129,11 @@ fn session_action_loop(
             &session_items,
             &repo_entry.name,
             preview_cmd.as_deref(),
-            &["alt-n", "alt-d", "alt-r"],
+            &[
+                keybinds.new_session.as_str(),
+                keybinds.delete_session.as_str(),
+                keybinds.rename_session.as_str(),
+            ],
             None,
         )?;
 
@@ -151,7 +156,7 @@ fn session_action_loop(
             ActionResult::Action(key, idx) => {
                 let selected = rendered[idx].1;
                 match key.as_str() {
-                    "alt-n" => {
+                    key if key == keybinds.new_session => {
                         // New child session under the selected one
                         let name = selector.input("Session name", None)?;
                         if !name.is_empty() {
@@ -168,7 +173,7 @@ fn session_action_loop(
                             );
                         }
                     }
-                    "alt-d" => {
+                    key if key == keybinds.delete_session => {
                         let msg = format!("Delete session '{}'?", selected.name);
                         if selector.confirm(&msg, false)? {
                             session::delete_session_by_id(
@@ -183,7 +188,7 @@ fn session_action_loop(
                             );
                         }
                     }
-                    "alt-r" => {
+                    key if key == keybinds.rename_session => {
                         let new_name = selector.input(
                             "New name",
                             Some(&selected.name),
@@ -657,6 +662,12 @@ fn preview_directory(path: &Path) {
 }
 
 fn preview_keybind_help() {
+    let keybinds = config::load()
+        .map(|c| c.keybinds)
+        .unwrap_or_default();
+
+    let fmt_key = |k: &str| k.replace("alt-", "Alt-").replace("ctrl-", "Ctrl-");
+
     preview_section("Keybinds");
     println!(
         "  {}  {}",
@@ -665,17 +676,17 @@ fn preview_keybind_help() {
     );
     println!(
         "  {}  {}",
-        "Alt-N".bold().yellow(),
+        fmt_key(&keybinds.new_session).bold().yellow(),
         "New child session"
     );
     println!(
         "  {}  {}",
-        "Alt-R".bold().yellow(),
+        fmt_key(&keybinds.rename_session).bold().yellow(),
         "Rename session"
     );
     println!(
         "  {}  {}",
-        "Alt-D".bold().red(),
+        fmt_key(&keybinds.delete_session).bold().red(),
         "Delete session"
     );
     println!(

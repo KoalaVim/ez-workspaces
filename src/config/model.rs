@@ -24,6 +24,10 @@ pub struct EzConfig {
     #[serde(default)]
     pub fzf: FzfConfig,
 
+    /// Keybindings for session actions
+    #[serde(default)]
+    pub keybinds: KeybindsConfig,
+
     /// Plugin configuration
     #[serde(default)]
     pub plugins: PluginsConfig,
@@ -56,6 +60,21 @@ pub struct FzfConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct KeybindsConfig {
+    /// Create new child session (default: "alt-n")
+    #[serde(default = "default_bind_new")]
+    pub new_session: String,
+
+    /// Delete session (default: "alt-d")
+    #[serde(default = "default_bind_delete")]
+    pub delete_session: String,
+
+    /// Rename session (default: "alt-r")
+    #[serde(default = "default_bind_rename")]
+    pub rename_session: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct PluginsConfig {
     /// List of enabled plugin names
     #[serde(default)]
@@ -74,6 +93,7 @@ impl Default for EzConfig {
             editor: None,
             selector: SelectorConfig::default(),
             fzf: FzfConfig::default(),
+            keybinds: KeybindsConfig::default(),
             plugins: PluginsConfig::default(),
             plugin_timeout: default_plugin_timeout(),
         }
@@ -98,6 +118,16 @@ impl Default for FzfConfig {
     }
 }
 
+impl Default for KeybindsConfig {
+    fn default() -> Self {
+        Self {
+            new_session: default_bind_new(),
+            delete_session: default_bind_delete(),
+            rename_session: default_bind_rename(),
+        }
+    }
+}
+
 impl Default for PluginsConfig {
     fn default() -> Self {
         Self {
@@ -113,6 +143,18 @@ fn default_selector_backend() -> String {
 
 fn default_fzf_height() -> String {
     "90%".into()
+}
+
+fn default_bind_new() -> String {
+    "alt-n".into()
+}
+
+fn default_bind_delete() -> String {
+    "alt-d".into()
+}
+
+fn default_bind_rename() -> String {
+    "alt-r".into()
 }
 
 fn default_plugin_timeout() -> u64 {
