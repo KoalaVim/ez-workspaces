@@ -15,6 +15,20 @@ use cli::{Cli, Command};
 fn main() {
     let cli = Cli::parse();
 
+    let debug_log_path = if cli.debug {
+        let path = std::env::temp_dir().join(format!("ez-debug-{}.log", std::process::id()));
+        let file = std::fs::File::create(&path).expect("failed to create debug log file");
+        env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Debug)
+            .target(env_logger::Target::Pipe(Box::new(file)))
+            .init();
+        log::debug!("ez debug session started: {:?}", std::env::args().collect::<Vec<_>>());
+        Some(path)
+    } else {
+        env_logger::init();
+        None
+    };
+
     if cli.no_color {
         colored::control::set_override(false);
     }
@@ -43,6 +57,10 @@ fn main() {
             browser::preview(&path, session_actions)
         }
     };
+
+    if let Some(ref log_path) = debug_log_path {
+        eprintln!("{} {}", "debug log:".dimmed(), log_path.display());
+    }
 
     if let Err(e) = result {
         if matches!(e, error::EzError::Cancelled) {

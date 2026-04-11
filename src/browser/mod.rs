@@ -128,13 +128,18 @@ fn session_action_loop(
             &session_items,
             &repo_entry.name,
             preview_cmd.as_deref(),
-            &["ctrl-n", "ctrl-d", "ctrl-r"],
+            &["alt-n", "alt-d", "alt-r"],
             None,
         )?;
 
+        log::debug!("session_action_loop: action={:?}", match &action {
+            ActionResult::Select(i) => format!("Select({})", i),
+            ActionResult::Action(k, i) => format!("Action({}, {})", k, i),
+            ActionResult::Cancel => "Cancel".to_string(),
+        });
+
         match action {
             ActionResult::Select(idx) => {
-                // Enter the session
                 let selected = rendered[idx].1;
                 let target_dir = selected
                     .path
@@ -146,7 +151,7 @@ fn session_action_loop(
             ActionResult::Action(key, idx) => {
                 let selected = rendered[idx].1;
                 match key.as_str() {
-                    "ctrl-n" => {
+                    "alt-n" => {
                         // New child session under the selected one
                         let name = selector.input("Session name", None)?;
                         if !name.is_empty() {
@@ -163,7 +168,7 @@ fn session_action_loop(
                             );
                         }
                     }
-                    "ctrl-d" => {
+                    "alt-d" => {
                         let msg = format!("Delete session '{}'?", selected.name);
                         if selector.confirm(&msg, false)? {
                             session::delete_session_by_id(
@@ -178,7 +183,7 @@ fn session_action_loop(
                             );
                         }
                     }
-                    "ctrl-r" => {
+                    "alt-r" => {
                         let new_name = selector.input(
                             "New name",
                             Some(&selected.name),
@@ -660,17 +665,17 @@ fn preview_keybind_help() {
     );
     println!(
         "  {}  {}",
-        "Ctrl-N".bold().yellow(),
+        "Alt-N".bold().yellow(),
         "New child session"
     );
     println!(
         "  {}  {}",
-        "Ctrl-R".bold().yellow(),
+        "Alt-R".bold().yellow(),
         "Rename session"
     );
     println!(
         "  {}  {}",
-        "Ctrl-D".bold().red(),
+        "Alt-D".bold().red(),
         "Delete session"
     );
     println!(

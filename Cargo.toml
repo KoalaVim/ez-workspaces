@@ -21,6 +21,8 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 which = "7"
 colored = "3"
+log = "0.4"
+env_logger = "0.11"
 
 [dev-dependencies]
 assert_cmd = "2"

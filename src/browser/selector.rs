@@ -144,14 +144,14 @@ impl InteractiveSelector for FzfSelector {
 
         let output = child.wait_with_output()?;
 
+        log::debug!("select_one: fzf exit={}, stdout={:?}", output.status, String::from_utf8_lossy(&output.stdout));
+
         if !output.status.success() {
-            // User pressed Escape or Ctrl-C
             return Ok(None);
         }
 
         let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let selected = if use_value_prefix {
-            // Output is "value\tdisplay" — match on display part
             raw.splitn(2, '\t')
                 .nth(1)
                 .unwrap_or(&raw)
@@ -159,7 +159,9 @@ impl InteractiveSelector for FzfSelector {
         } else {
             raw
         };
+        log::debug!("select_one: selected={:?}", selected);
         let index = items.iter().position(|item| item.display == selected);
+        log::debug!("select_one: matched index={:?}", index);
         Ok(index)
     }
 
@@ -352,7 +354,11 @@ impl InteractiveSelector for FzfSelector {
 
         let output = child.wait_with_output()?;
 
+        log::debug!("fzf exit status: {}", output.status);
+        log::debug!("fzf stdout raw: {:?}", String::from_utf8_lossy(&output.stdout));
+
         if !output.status.success() {
+            log::debug!("fzf exited with non-zero status, returning Cancel");
             return Ok(ActionResult::Cancel);
         }
 
@@ -362,6 +368,9 @@ impl InteractiveSelector for FzfSelector {
         // With --expect, first line is the key pressed (empty string = Enter)
         let key_line = lines.next().unwrap_or("").trim().to_string();
         let selection_line = lines.next().unwrap_or("").trim().to_string();
+
+        log::debug!("fzf key_line: {:?}", key_line);
+        log::debug!("fzf selection_line: {:?}", selection_line);
 
         let selected_display = if use_value_prefix {
             selection_line
@@ -373,10 +382,20 @@ impl InteractiveSelector for FzfSelector {
             selection_line
         };
 
+        log::debug!("fzf selected_display: {:?}", selected_display);
+
         let index = match items.iter().position(|item| item.display == selected_display) {
             Some(idx) => idx,
-            None => return Ok(ActionResult::Cancel),
+            None => {
+                log::debug!("fzf display match failed, items:");
+                for (i, item) in items.iter().enumerate() {
+                    log::debug!("  [{}] display={:?} value={:?}", i, item.display, item.value);
+                }
+                return Ok(ActionResult::Cancel);
+            }
         };
+
+        log::debug!("fzf matched index: {}, key: {:?}", index, key_line);
 
         if key_line.is_empty() {
             Ok(ActionResult::Select(index))

@@ -16,6 +16,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub no_color: bool,
 
+    /// Enable debug logging (writes to a temp file, prints path on exit)
+    #[arg(long, global = true)]
+    pub debug: bool,
+
     /// Show all repos and sessions as a tree (no drill-down)
     #[arg(long)]
     pub tree: bool,
