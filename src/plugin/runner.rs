@@ -25,6 +25,14 @@ pub fn execute(
 
     let request_json = serde_json::to_string(request)?;
 
+    log::debug!(
+        "plugin [{}]: executing {} hook={}",
+        manifest.name,
+        executable.display(),
+        request.hook
+    );
+    log::debug!("plugin [{}]: request={}", manifest.name, request_json);
+
     let mut child = Command::new(&executable)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -43,25 +51,49 @@ pub fn execute(
     let output = wait_with_timeout(&mut child, Duration::from_secs(timeout_secs))
         .map_err(|_| EzError::PluginTimeout(manifest.name.clone(), timeout_secs))?;
 
-    // Log stderr at debug level
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.is_empty() {
-        eprintln!("[plugin:{}] {}", manifest.name, stderr.trim());
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    let stderr_str = String::from_utf8_lossy(&output.stderr);
+
+    log::debug!(
+        "plugin [{}]: exit={} stdout={:?} stderr={:?}",
+        manifest.name,
+        output.status,
+        stdout_str,
+        stderr_str
+    );
+
+    if !stderr_str.is_empty() {
+        eprintln!("[plugin:{}] {}", manifest.name, stderr_str.trim());
     }
 
     if !output.status.success() {
-        return Err(EzError::PluginFailed(
-            manifest.name.clone(),
-            format!("exited with status {}", output.status),
-        ));
+        let mut detail = format!("exited with status {}", output.status);
+        if !stdout_str.is_empty() {
+            detail.push_str(&format!("\n  stdout: {}", stdout_str.trim()));
+        }
+        if !stderr_str.is_empty() {
+            detail.push_str(&format!("\n  stderr: {}", stderr_str.trim()));
+        }
+        return Err(EzError::PluginFailed(manifest.name.clone(), detail));
     }
 
-    let response: HookResponse = serde_json::from_slice(&output.stdout).map_err(|e| {
+    // Plugins may print non-JSON output (e.g. git progress) before the JSON response.
+    // Extract the first valid JSON object from stdout.
+    let json_str = extract_json(&stdout_str).ok_or_else(|| {
         EzError::PluginFailed(
             manifest.name.clone(),
-            format!("invalid JSON response: {e}"),
+            format!("no JSON found in stdout:\n  {}", stdout_str.trim()),
         )
     })?;
+
+    let response: HookResponse = serde_json::from_str(json_str).map_err(|e| {
+        EzError::PluginFailed(
+            manifest.name.clone(),
+            format!("invalid JSON response: {e}\n  raw: {json_str}"),
+        )
+    })?;
+
+    log::debug!("plugin [{}]: response success={} error={:?}", manifest.name, response.success, response.error);
 
     if !response.success {
         if let Some(err) = &response.error {
@@ -70,6 +102,26 @@ pub fn execute(
     }
 
     Ok(response)
+}
+
+/// Extract the first JSON object from a string that may contain non-JSON preamble.
+fn extract_json(s: &str) -> Option<&str> {
+    let start = s.find('{')?;
+    let bytes = s[start..].as_bytes();
+    let mut depth = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(&s[start..start + i + 1]);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn wait_with_timeout(

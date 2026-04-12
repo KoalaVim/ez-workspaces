@@ -103,11 +103,14 @@ pub fn run_hooks(
     let plugins_dir = resolve_plugins_dir(config)?;
     bundled::ensure_bundled_plugins(&plugins_dir)?;
 
+    log::debug!("run_hooks: hook={:?} repo={} enabled_plugins={:?}", hook, repo_entry.name, config.plugins.enabled);
+
     for plugin_name in &config.plugins.enabled {
         let plugin_dir = plugins_dir.join(plugin_name);
         let manifest_path = plugin_dir.join("manifest.toml");
 
         if !manifest_path.exists() {
+            log::debug!("plugin [{}]: manifest not found at {}", plugin_name, manifest_path.display());
             continue;
         }
 
@@ -116,8 +119,11 @@ pub fn run_hooks(
 
         // Skip if this plugin doesn't handle this hook
         if !manifest.hooks.contains(&hook) {
+            log::debug!("plugin [{}]: skipping, does not handle {:?}", plugin_name, hook);
             continue;
         }
+
+        log::debug!("plugin [{}]: running {:?} hook", plugin_name, hook);
 
         let request = build_request(&hook, repo_entry, repo_meta, session, plugin_name);
 
