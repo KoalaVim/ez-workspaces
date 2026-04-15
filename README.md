@@ -66,8 +66,11 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 
 | Command | Description |
 |---------|-------------|
-| `ez` | Interactive fzf browser (drill-down) |
+| `ez` | Interactive fzf browser (workspace view by default) |
 | `ez --tree` | Tree view of all repos and sessions |
+| `ez --view <mode>` | Start in a specific view: `tree`, `workspace`, `repo`, `owner`, `label` |
+| `ez --workspace <name>` | Jump directly to a workspace root |
+| `ez --repo <path>` | Jump straight to a repo's session picker |
 | `ez clone <url> [path]` | Clone + register repo |
 | `ez add [path]` | Register existing repo |
 | `ez session new [name]` | Create session (`--parent` for nesting) |
@@ -75,8 +78,14 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez session enter <name>` | Enter a session |
 | `ez session delete <name>` | Delete session (`--force` for cascade) |
 | `ez session rename <old> <new>` | Rename a session |
-| `ez repo list` | List registered repos |
+| `ez session label add <name> <label>...` | Add labels to a session |
+| `ez session label remove <name> <label>...` | Remove labels from a session |
+| `ez session label list [<name>]` | List labels (or group sessions by label) |
+| `ez repo list [--label <label>]` | List registered repos (optionally filter by label) |
 | `ez repo remove <name>` | Unregister repo (`--purge` for cleanup) |
+| `ez repo label add <name> <label>...` | Add labels to a repo |
+| `ez repo label remove <name> <label>...` | Remove labels from a repo |
+| `ez repo label list [<name>]` | List labels (or group repos by label) |
 | `ez plugin list` | List available plugins |
 | `ez plugin enable <name>` | Enable a plugin |
 | `ez config` | Interactive guided setup |
@@ -88,6 +97,58 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez init-shell <shell>` | Print shell wrapper function |
 | `ez completions <shell>` | Generate shell completions |
 | `ez --no-color <command>` | Disable colored output |
+
+## Browser Views & Keybinds
+
+Inside the interactive browser (`ez`), press a keybind at the top-level selector to switch views:
+
+| Keybind (default) | View | What it shows |
+|---|---|---|
+| `Ctrl-t` | Tree | All workspaces → repos → sessions in one tree |
+| `Ctrl-w` | Workspace | Workspace root → drill into directories → session picker (default view) |
+| `Ctrl-e` | Repo | Flat list of every registered repo |
+| `Ctrl-o` | Owner | Repos grouped by GitHub-style owner (parsed from remote URL) |
+| `Ctrl-g` | Label | Items grouped by user-defined labels |
+
+Inside the session picker (and the flat Repo view):
+
+| Keybind (default) | Action |
+|---|---|
+| `Alt-n` | New child session |
+| `Alt-r` | Rename session |
+| `Alt-d` | Delete session |
+| `Alt-l` | Edit labels on the selected item (comma-separated, prefix `-` to remove) |
+
+All keybinds are configurable under `[keybinds]` in `~/.config/ez/config.toml`:
+
+```toml
+[keybinds]
+new_session = "alt-n"
+delete_session = "alt-d"
+rename_session = "alt-r"
+view_tree = "ctrl-t"
+view_workspace = "ctrl-w"
+view_repo = "ctrl-e"
+view_owner = "ctrl-o"
+view_label = "ctrl-g"
+edit_labels = "alt-l"
+```
+
+## Labels
+
+Repos and sessions can be tagged with arbitrary string labels. Labels aggregate across all registered repos in the Label view and let you filter repo listings.
+
+```bash
+# Tag a repo and a session
+ez repo label add my-repo backend core
+ez session label add feature-x --repo my-repo wip
+
+# Filter the list
+ez repo list --label backend
+
+# Browse by label (or press Ctrl-g inside `ez`)
+ez --view label
+```
 
 ## Configuration
 

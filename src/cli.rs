@@ -31,6 +31,10 @@ pub struct Cli {
     /// Jump directly to a repo's session picker (skips root + directory selection)
     #[arg(long, short)]
     pub repo: Option<PathBuf>,
+
+    /// Start the browser in a specific view: tree, workspace, repo, owner, label
+    #[arg(long)]
+    pub view: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -160,13 +164,23 @@ pub enum SessionCommand {
         #[arg(long, short)]
         repo: Option<String>,
     },
+
+    /// Manage labels on a session
+    Label {
+        #[command(subcommand)]
+        command: SessionLabelCommand,
+    },
 }
 
 #[derive(Subcommand)]
 pub enum RepoCommand {
     /// List registered repositories
     #[command(alias = "ls")]
-    List,
+    List {
+        /// Only show repos carrying this label
+        #[arg(long)]
+        label: Option<String>,
+    },
 
     /// Unregister a repository
     #[command(alias = "rm")]
@@ -176,6 +190,79 @@ pub enum RepoCommand {
         /// Also delete all session metadata and plugin state
         #[arg(long)]
         purge: bool,
+    },
+
+    /// Manage labels on a repository
+    Label {
+        #[command(subcommand)]
+        command: LabelCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum LabelCommand {
+    /// Add one or more labels
+    Add {
+        /// Repo name or path
+        target: String,
+        /// Labels to add (space-separated)
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+
+    /// Remove one or more labels
+    #[command(alias = "rm")]
+    Remove {
+        /// Repo name or path
+        target: String,
+        /// Labels to remove (space-separated)
+        #[arg(required = true)]
+        labels: Vec<String>,
+    },
+
+    /// List labels on a target, or group entries by label when no target is given
+    #[command(alias = "ls")]
+    List {
+        /// Optional repo name or path — omit to list all labels across repos
+        target: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SessionLabelCommand {
+    /// Add one or more labels to a session
+    Add {
+        /// Session name
+        name: String,
+        /// Labels to add (space-separated)
+        #[arg(required = true)]
+        labels: Vec<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+    },
+
+    /// Remove one or more labels from a session
+    #[command(alias = "rm")]
+    Remove {
+        /// Session name
+        name: String,
+        /// Labels to remove (space-separated)
+        #[arg(required = true)]
+        labels: Vec<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+    },
+
+    /// List labels for a session, or group sessions by label when no name is given
+    #[command(alias = "ls")]
+    List {
+        /// Optional session name — omit to list all session labels in the repo
+        name: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
     },
 }
 

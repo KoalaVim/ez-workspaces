@@ -9,7 +9,7 @@ use chrono::Utc;
 use colored::Colorize;
 use uuid::Uuid;
 
-use crate::cli::SessionCommand;
+use crate::cli::{SessionCommand, SessionLabelCommand};
 use crate::error::{EzError, Result};
 use crate::plugin;
 use crate::repo;
@@ -34,6 +34,122 @@ pub fn dispatch(command: SessionCommand, cd_file: Option<&Path>) -> Result<()> {
             new_name,
             repo,
         } => rename_session(&name, &new_name, repo.as_deref()),
+        SessionCommand::Label { command } => dispatch_label(command),
+    }
+}
+
+fn dispatch_label(cmd: SessionLabelCommand) -> Result<()> {
+    match cmd {
+        SessionLabelCommand::Add { name, labels, repo } => {
+            let repo_entry = repo::resolve_repo(repo.as_deref())?;
+            let session_id = find_session_id(&repo_entry.id, &name)?;
+            let changed = set_session_labels(&repo_entry.id, &session_id, &labels, &[])?;
+            println!(
+                "{} {} {}",
+                "Labels on session".green(),
+                name.bold(),
+                format_label_change(&changed)
+            );
+            Ok(())
+        }
+        SessionLabelCommand::Remove { name, labels, repo } => {
+            let repo_entry = repo::resolve_repo(repo.as_deref())?;
+            let session_id = find_session_id(&repo_entry.id, &name)?;
+            let changed = set_session_labels(&repo_entry.id, &session_id, &[], &labels)?;
+            println!(
+                "{} {} {}",
+                "Labels on session".green(),
+                name.bold(),
+                format_label_change(&changed)
+            );
+            Ok(())
+        }
+        SessionLabelCommand::List { name, repo } => {
+            let repo_entry = repo::resolve_repo(repo.as_deref())?;
+            let tree = store::load_sessions(&repo_entry.id)?;
+            match name {
+                Some(n) => {
+                    let session = tree
+                        .find_by_name(&n)
+                        .ok_or_else(|| EzError::SessionNotFound(n.clone()))?;
+                    if session.labels.is_empty() {
+                        println!("{}", "(no labels)".dimmed());
+                    } else {
+                        for label in &session.labels {
+                            println!("{}", label.magenta());
+                        }
+                    }
+                }
+                None => {
+                    use std::collections::BTreeMap;
+                    let mut by_label: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                    for session in &tree.sessions {
+                        for label in &session.labels {
+                            by_label
+                                .entry(label.clone())
+                                .or_default()
+                                .push(session.name.clone());
+                        }
+                    }
+                    if by_label.is_empty() {
+                        println!("{}", "No session labels set.".dimmed());
+                        return Ok(());
+                    }
+                    for (label, sessions) in by_label {
+                        println!("{}", label.bold().magenta());
+                        for s in sessions {
+                            println!("  {}", s.cyan());
+                        }
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn find_session_id(repo_id: &str, name: &str) -> Result<String> {
+    let tree = store::load_sessions(repo_id)?;
+    tree.find_by_name(name)
+        .map(|s| s.id.clone())
+        .ok_or_else(|| EzError::SessionNotFound(name.into()))
+}
+
+/// Apply add/remove label mutations to a session. Returns the resulting label set.
+pub fn set_session_labels(
+    repo_id: &str,
+    session_id: &str,
+    add: &[String],
+    remove: &[String],
+) -> Result<Vec<String>> {
+    let mut tree = store::load_sessions(repo_id)?;
+    let session = tree
+        .sessions
+        .iter_mut()
+        .find(|s| s.id == session_id)
+        .ok_or_else(|| EzError::SessionNotFound(session_id.into()))?;
+
+    let mut labels: std::collections::BTreeSet<String> =
+        std::mem::take(&mut session.labels).into_iter().collect();
+    for l in remove {
+        labels.remove(l.as_str());
+    }
+    for l in add {
+        if !l.trim().is_empty() {
+            labels.insert(l.trim().to_string());
+        }
+    }
+    let sorted: Vec<String> = labels.into_iter().collect();
+    session.labels = sorted.clone();
+    store::save_sessions(repo_id, &tree)?;
+    Ok(sorted)
+}
+
+fn format_label_change(labels: &[String]) -> String {
+    if labels.is_empty() {
+        "→ (none)".dimmed().to_string()
+    } else {
+        format!("→ {}", labels.join(", ").magenta())
     }
 }
 
@@ -61,6 +177,7 @@ fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>)
         path: None,
         env: HashMap::new(),
         plugin_state: HashMap::new(),
+        labels: Vec::new(),
         created_at: Utc::now(),
         is_default: false,
     };
@@ -269,6 +386,7 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
         path: None,
         env: HashMap::new(),
         plugin_state: HashMap::new(),
+        labels: Vec::new(),
         created_at: Utc::now(),
         is_default: false,
     };
@@ -385,6 +503,7 @@ pub fn ensure_default_session(repo_id: &str, repo_path: &Path) -> Result<Session
             path: Some(repo_path.to_path_buf()),
             env: HashMap::new(),
             plugin_state: HashMap::new(),
+            labels: Vec::new(),
             created_at: Utc::now(),
             is_default: true,
         };

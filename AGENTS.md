@@ -53,7 +53,9 @@ docs/               Documentation
 
 ### browser/ - Interactive Browser
 - `selector.rs`: `InteractiveSelector` trait + `FzfSelector` impl
-- `mod.rs`: drill-down browse flow, preview handler
+- `mod.rs`: drill-down browse flow, session action loop, label input parser, shared git helpers
+- `preview.rs`: fzf preview pane renderer (repo, directory, keybind help)
+- `views.rs`: top-level view dispatcher (`ViewMode`: Tree/Workspace/Repo/Owner/Label) with view-switch keybind handling
 
 ## Key Traits
 

@@ -63,6 +63,10 @@ Plugins are external executables using JSON-over-stdio:
 
 The `InteractiveSelector` trait abstracts the UI backend. The default `FzfSelector` shells out to fzf. This can be replaced with skim, dialoguer, or a TUI framework without changing browser logic.
 
+### Browser View Dispatcher
+
+The browser has a `ViewMode` enum (`Tree`, `Workspace`, `Repo`, `Owner`, `Label`) implemented in `src/browser/views.rs`. `browse()` enters a dispatch loop that renders the current view and listens for view-switch keybinds (`ctrl-t/w/e/o/g` by default). Each view uses `select_with_actions` with the view-switch keys registered in `--expect`; pressing one exits the current fzf instance and the loop continues in the next mode. Nested selectors (drill-down, session picker) keep the smaller keybind surface (`alt-n/d/r/l`) and do not participate in view switching.
+
 ### Shell Integration
 
 The `cd`-on-enter pattern uses a temp file (same approach as zoxide, nnn). The `ez init-shell` command generates a shell wrapper function.

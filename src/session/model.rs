@@ -24,6 +24,9 @@ pub struct Session {
     /// Per-plugin state for this session
     #[serde(default)]
     pub plugin_state: HashMap<String, toml::Value>,
+    /// User-defined labels for grouping/filtering
+    #[serde(default)]
+    pub labels: Vec<String>,
     /// When the session was created
     pub created_at: DateTime<Utc>,
     /// Whether this is the auto-created default session

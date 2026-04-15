@@ -39,6 +39,7 @@ fn main() {
             cli.tree,
             cli.workspace.as_deref(),
             cli.repo.as_deref(),
+            cli.view.as_deref(),
         ),
         Some(Command::Clone { url, path }) => repo::clone_repo(&url, path.as_deref()),
         Some(Command::Add { path }) => repo::add_repo(path.as_deref()),

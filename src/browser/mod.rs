@@ -1,4 +1,6 @@
+pub mod preview;
 pub mod selector;
+pub mod views;
 
 use std::fs;
 use std::path::Path;
@@ -7,10 +9,11 @@ use colored::Colorize;
 
 use crate::config;
 use crate::error::Result;
-use crate::paths;
 use crate::repo;
 use crate::session;
 use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
+
+pub use preview::preview;
 
 /// Main interactive browser entry point (bare `ez` command).
 pub fn browse(
@@ -18,6 +21,7 @@ pub fn browse(
     tree_mode: bool,
     workspace: Option<&str>,
     repo_flag: Option<&Path>,
+    view: Option<&str>,
 ) -> Result<()> {
     let config = config::load()?;
     let selector = FzfSelector::new(&config.fzf)?;
@@ -32,81 +36,20 @@ pub fn browse(
         return browse_repo(&repo_path, &selector, cd_file, &config.keybinds);
     }
 
-    if config.workspace_roots.is_empty() {
-        println!("{}", "No workspace roots configured.".yellow());
-        println!("Add roots to your config with: {}", "ez config --edit".bold());
-        println!("Example: workspace_roots = [\"~/workspace\"]");
-        return Ok(());
-    }
-
+    // Decide starting view.
+    let mut mode = views::ViewMode::Workspace;
     if tree_mode {
-        return browse_tree(&config, &selector, cd_file);
+        mode = views::ViewMode::Tree;
+    }
+    if let Some(v) = view {
+        mode = views::ViewMode::from_flag(v)?;
     }
 
-    // --workspace: skip root selection, jump to that root
-    let root_path = if let Some(ws_raw) = workspace {
-        let ws = ws_raw.trim_end_matches('/');
-        // Match against workspace roots (by name or path)
-        let matched = config.workspace_roots.iter().find(|r| {
-            let r_trimmed = r.trim_end_matches('/');
-            let expanded = paths::expand_tilde(r);
-            let collapsed = paths::collapse_tilde(&expanded.to_string_lossy());
-            let collapsed_trimmed = collapsed.trim_end_matches('/');
-            let expanded_trimmed = expanded.to_string_lossy().trim_end_matches('/').to_string();
-            let dir_name = expanded
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            r_trimmed == ws
-                || collapsed_trimmed == ws
-                || expanded_trimmed == ws
-                || dir_name == ws
-        });
-        match matched {
-            Some(r) => paths::expand_tilde(r),
-            None => {
-                eprintln!(
-                    "{} workspace '{}' not found in config roots",
-                    "ez:".red().bold(),
-                    ws
-                );
-                return Ok(());
-            }
-        }
-    } else {
-        // Step 1: Select workspace root
-        let root_items: Vec<SelectItem> = config
-            .workspace_roots
-            .iter()
-            .map(|r| {
-                let expanded = paths::expand_tilde(r);
-                SelectItem {
-                    display: paths::collapse_tilde(&expanded.to_string_lossy()),
-                    value: expanded.to_string_lossy().to_string(),
-                }
-            })
-            .collect();
-
-        let root_idx = match selector.select_one(&root_items, "workspace", None)? {
-            Some(idx) => idx,
-            None => return Ok(()),
-        };
-
-        paths::expand_tilde(&root_items[root_idx].value)
-    };
-
-    // Step 2: Drill into directories until a repo is selected
-    let repo_path = drill_into_directory(&root_path, &selector)?;
-    let repo_path = match repo_path {
-        Some(p) => p,
-        None => return Ok(()),
-    };
-
-    browse_repo(&repo_path, &selector, cd_file, &config.keybinds)
+    views::run(mode, &selector, &config, workspace, cd_file)
 }
 
 /// Register repo if needed and enter session action loop.
-fn browse_repo(
+pub(crate) fn browse_repo(
     repo_path: &Path,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
@@ -128,7 +71,7 @@ fn browse_repo(
 }
 
 /// Write the target directory for the shell wrapper to cd into.
-fn write_cd_target(cd_file: Option<&Path>, target_dir: &Path) -> Result<()> {
+pub(crate) fn write_cd_target(cd_file: Option<&Path>, target_dir: &Path) -> Result<()> {
     if let Some(cd_path) = cd_file {
         fs::write(cd_path, target_dir.to_string_lossy().as_bytes())?;
     } else {
@@ -138,7 +81,7 @@ fn write_cd_target(cd_file: Option<&Path>, target_dir: &Path) -> Result<()> {
 }
 
 /// Session selection loop with action keybinds.
-fn session_action_loop(
+pub(crate) fn session_action_loop(
     repo_entry: &repo::model::RepoEntry,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
@@ -162,8 +105,13 @@ fn session_action_loop(
                     .as_ref()
                     .map(|p| format!(" → {}", p.display()).dimmed().to_string())
                     .unwrap_or_default();
+                let labels = if s.labels.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", s.labels.join(",")).magenta().to_string()
+                };
                 SelectItem {
-                    display: format!("{}{}{}{}", indent, s.name.bold(), marker, path_info),
+                    display: format!("{}{}{}{}{}", indent, s.name.bold(), marker, labels, path_info),
                     value: s.id.clone(),
                 }
             })
@@ -179,6 +127,14 @@ fn session_action_loop(
             )
         });
 
+        let header = format!(
+            "{}: new  {}: rename  {}: delete  {}: labels",
+            keybinds.new_session,
+            keybinds.rename_session,
+            keybinds.delete_session,
+            keybinds.edit_labels,
+        );
+
         let action = selector.select_with_actions(
             &session_items,
             &repo_entry.name,
@@ -187,15 +143,19 @@ fn session_action_loop(
                 keybinds.new_session.as_str(),
                 keybinds.delete_session.as_str(),
                 keybinds.rename_session.as_str(),
+                keybinds.edit_labels.as_str(),
             ],
-            None,
+            Some(&header),
         )?;
 
-        log::debug!("session_action_loop: action={:?}", match &action {
-            ActionResult::Select(i) => format!("Select({})", i),
-            ActionResult::Action(k, i) => format!("Action({}, {})", k, i),
-            ActionResult::Cancel => "Cancel".to_string(),
-        });
+        log::debug!(
+            "session_action_loop: action={:?}",
+            match &action {
+                ActionResult::Select(i) => format!("Select({})", i),
+                ActionResult::Action(k, i) => format!("Action({}, {})", k, i),
+                ActionResult::Cancel => "Cancel".to_string(),
+            }
+        );
 
         match action {
             ActionResult::Select(idx) => {
@@ -211,7 +171,6 @@ fn session_action_loop(
                 let selected = rendered[idx].1;
                 match key.as_str() {
                     key if key == keybinds.new_session => {
-                        // New child session under the selected one
                         let name = selector.input("Session name", None)?;
                         if !name.is_empty() {
                             session::create_child_session(
@@ -261,6 +220,28 @@ fn session_action_loop(
                             );
                         }
                     }
+                    key if key == keybinds.edit_labels => {
+                        let current = selected.labels.join(",");
+                        let input = selector.input(
+                            "Labels (comma-sep; prefix - to remove)",
+                            Some(&current),
+                        )?;
+                        let (add, remove) = parse_label_input(&input);
+                        let session_id = selected.id.clone();
+                        let session_name = selected.name.clone();
+                        let result =
+                            session::set_session_labels(&repo_entry.id, &session_id, &add, &remove)?;
+                        eprintln!(
+                            "{} {} → {}",
+                            "Labels on".green(),
+                            session_name.bold(),
+                            if result.is_empty() {
+                                "(none)".dimmed().to_string()
+                            } else {
+                                result.join(", ").magenta().to_string()
+                            }
+                        );
+                    }
                     _ => {}
                 }
                 // Loop back to show updated session list
@@ -270,144 +251,8 @@ fn session_action_loop(
     }
 }
 
-/// Tree browser: show all roots → repos → sessions in one unicode tree.
-fn browse_tree(
-    config: &config::model::EzConfig,
-    selector: &dyn InteractiveSelector,
-    cd_file: Option<&Path>,
-) -> Result<()> {
-    let index = repo::store::load_index()?;
-    let mut nodes: Vec<(String, Option<std::path::PathBuf>, std::path::PathBuf)> = Vec::new();
-    let num_roots = config.workspace_roots.len();
-
-    for (root_i, root) in config.workspace_roots.iter().enumerate() {
-        let root_path = paths::expand_tilde(root);
-        let is_last_root = root_i == num_roots - 1;
-        let root_connector = if is_last_root { "└── " } else { "├── " };
-        let root_cont = if is_last_root { "    " } else { "│   " };
-
-        nodes.push((
-            format!("{}{}", root_connector.dimmed(), root.bold().blue()),
-            None,
-            root_path.clone(),
-        ));
-
-        if !root_path.is_dir() {
-            continue;
-        }
-
-        let mut repos: Vec<(String, std::path::PathBuf)> = Vec::new();
-        if let Ok(read_dir) = fs::read_dir(&root_path) {
-            for entry in read_dir.flatten() {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                if name.starts_with('.') {
-                    continue;
-                }
-                if path.join(".git").exists() {
-                    repos.push((name, path));
-                }
-            }
-        }
-        repos.sort_by(|a, b| a.0.cmp(&b.0));
-
-        let num_repos = repos.len();
-        for (repo_i, (repo_name, repo_path)) in repos.iter().enumerate() {
-            let is_last_repo = repo_i == num_repos - 1;
-            let repo_connector = if is_last_repo { "└── " } else { "├── " };
-            let repo_cont = if is_last_repo { "    " } else { "│   " };
-
-            let branch = get_branch(repo_path).unwrap_or_else(|| "?".into());
-
-            nodes.push((
-                format!(
-                    "{}{}{} {}",
-                    root_cont.dimmed(),
-                    repo_connector.dimmed(),
-                    repo_name.bold().green(),
-                    format!("[{branch}]").cyan(),
-                ),
-                Some(repo_path.clone()),
-                repo_path.clone(),
-            ));
-
-            if let Some(repo_entry) = index.find_by_path(repo_path) {
-                if let Ok(tree) = session::store::load_sessions(&repo_entry.id) {
-                    if !tree.sessions.is_empty() {
-                        let rendered = tree.render_tree();
-                        let num_sessions = rendered.len();
-                        for (sess_i, (depth, s)) in rendered.iter().enumerate() {
-                            let is_last_session = sess_i == num_sessions - 1;
-                            let sess_connector =
-                                if is_last_session { "└── " } else { "├── " };
-                            let session_indent = "    ".repeat(*depth);
-                            let marker = if s.is_default {
-                                " ★".yellow().to_string()
-                            } else {
-                                String::new()
-                            };
-
-                            let target = s
-                                .path
-                                .as_ref()
-                                .cloned()
-                                .unwrap_or_else(|| repo_path.clone());
-
-                            nodes.push((
-                                format!(
-                                    "{}{}{}{}{}{}",
-                                    root_cont.dimmed(),
-                                    repo_cont.dimmed(),
-                                    sess_connector.dimmed(),
-                                    session_indent,
-                                    s.name.bold().cyan(),
-                                    marker,
-                                ),
-                                Some(target),
-                                repo_path.clone(),
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if nodes.is_empty() {
-        println!("{}", "No repositories found in workspace roots.".yellow());
-        return Ok(());
-    }
-
-    let items: Vec<SelectItem> = nodes
-        .iter()
-        .map(|(display, _target, preview_path)| SelectItem {
-            display: display.clone(),
-            value: preview_path.to_string_lossy().to_string(),
-        })
-        .collect();
-
-    let ez_bin = std::env::current_exe().ok();
-    let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
-
-    let idx = match selector.select_one(&items, "ez tree", preview_cmd.as_deref())? {
-        Some(idx) => idx,
-        None => return Ok(()),
-    };
-
-    match &nodes[idx].1 {
-        Some(target) => write_cd_target(cd_file, target),
-        None => Ok(()),
-    }
-}
-
 /// Drill into directories until a git repo is found or user selects one.
-fn drill_into_directory(
+pub(crate) fn drill_into_directory(
     start: &Path,
     selector: &dyn InteractiveSelector,
 ) -> Result<Option<std::path::PathBuf>> {
@@ -486,7 +331,7 @@ fn drill_into_directory(
 }
 
 /// Run a git command and capture stdout.
-fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
+pub(crate) fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
     std::process::Command::new("git")
         .args(args)
         .current_dir(path)
@@ -503,249 +348,58 @@ fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
 }
 
 /// Get the current branch of a git repo.
-fn get_branch(path: &Path) -> Option<String> {
+pub(crate) fn get_branch(path: &Path) -> Option<String> {
     git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
 }
 
-fn preview_section(title: &str) {
-    let bar = "─".repeat(40);
-    println!("{}", format!("┌{bar}").dimmed());
-    println!("{} {}", "│".dimmed(), title.bold().cyan());
-    println!("{}", format!("└{bar}").dimmed());
-}
-
-/// Preview handler for fzf (hidden `ez preview <path>` command).
-pub fn preview(path: &Path, show_session_actions: bool) -> Result<()> {
-    if !path.exists() {
-        println!("{}", "Path does not exist".red().bold());
-        println!("{}", path.display());
-        return Ok(());
-    }
-
-    if path.join(".git").exists() {
-        preview_repo(path, show_session_actions)?;
-    } else {
-        preview_directory(path);
-    }
-
-    Ok(())
-}
-
-fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.display().to_string());
-
-    println!("{} {}", "■".green(), name.bold().green());
-    println!("{}", path.display().to_string().dimmed());
-    println!();
-
-    // ── Sessions (first) ──
-    preview_section("Sessions");
-    let index = repo::store::load_index()?;
-    if let Some(entry) = index.find_by_path(path) {
-        let tree = session::store::load_sessions(&entry.id)?;
-        if tree.sessions.is_empty() {
-            println!(
-                "  {} {}",
-                "none".dimmed(),
-                "(will auto-create 'main')".dimmed()
-            );
+/// Parse a comma-separated label edit string.
+///
+/// - `foo, bar` → add `foo`, `bar`
+/// - `-foo` → remove `foo`
+///
+/// Returns `(to_add, to_remove)`.
+pub(crate) fn parse_label_input(input: &str) -> (Vec<String>, Vec<String>) {
+    let mut add = Vec::new();
+    let mut remove = Vec::new();
+    for raw in input.split(',') {
+        let token = raw.trim();
+        if token.is_empty() {
+            continue;
+        }
+        if let Some(r) = token.strip_prefix('-') {
+            let r = r.trim();
+            if !r.is_empty() {
+                remove.push(r.to_string());
+            }
         } else {
-            let rendered = tree.render_tree();
-            for (depth, s) in rendered {
-                let indent = "  ".repeat(depth + 1);
-                let marker = if s.is_default {
-                    " ★".yellow().to_string()
-                } else {
-                    String::new()
-                };
-                let path_info = s
-                    .path
-                    .as_ref()
-                    .map(|p| format!(" → {}", p.display()).dimmed().to_string())
-                    .unwrap_or_default();
-                println!("{}{}{}{}", indent, s.name.bold(), marker, path_info);
-            }
-        }
-    } else {
-        println!("  {}", "(unregistered — select to register)".dimmed());
-    }
-
-    if show_actions {
-        println!();
-        preview_keybind_help();
-    }
-
-    println!();
-
-    // ── Git Info ──
-    preview_section("Git Info");
-    let branch = get_branch(path).unwrap_or_else(|| "detached".into());
-    println!("  {} {}", "branch:".bold(), branch.cyan());
-
-    if let Some(remote) = git_cmd(path, &["remote", "get-url", "origin"]) {
-        println!("  {} {}", "remote:".bold(), remote.dimmed());
-    }
-
-    let dirty = git_cmd(path, &["status", "--porcelain"])
-        .map(|s| s.lines().count())
-        .unwrap_or(0);
-    if dirty > 0 {
-        println!(
-            "  {} {}",
-            "status:".bold(),
-            format!("{dirty} modified file(s)").yellow()
-        );
-    } else {
-        println!("  {} {}", "status:".bold(), "clean".green());
-    }
-
-    if let Some(tags) = git_cmd(path, &["tag", "--sort=-creatordate"]) {
-        let tag_list: Vec<&str> = tags.lines().take(3).collect();
-        if !tag_list.is_empty() {
-            println!("  {}  {}", "tags:".bold(), tag_list.join(", ").magenta());
+            add.push(token.to_string());
         }
     }
-
-    if let Some(branches) = git_cmd(path, &["branch", "--list"]) {
-        let count = branches.lines().count();
-        println!("  {} {count}", "branches:".bold());
-    }
-
-    println!();
-
-    // ── Recent Commits ──
-    preview_section("Recent Commits");
-    if let Some(log) = git_cmd(path, &["log", "--oneline", "--decorate", "--no-color", "-8"]) {
-        for line in log.lines() {
-            if let Some((hash, msg)) = line.split_once(' ') {
-                println!("  {} {}", hash.yellow(), msg);
-            } else {
-                println!("  {line}");
-            }
-        }
-    } else {
-        println!("  {}", "no commits".dimmed());
-    }
-
-    Ok(())
+    (add, remove)
 }
 
-fn preview_directory(path: &Path) {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.display().to_string());
+#[cfg(test)]
+mod tests {
+    use super::parse_label_input;
 
-    println!("{} {}", "■".blue(), name.bold().blue());
-    println!("{}", path.display().to_string().dimmed());
-    println!();
-
-    preview_section("Contents");
-
-    if let Ok(entries) = fs::read_dir(path) {
-        let mut repos: Vec<String> = Vec::new();
-        let mut dirs: Vec<String> = Vec::new();
-        let mut file_count: usize = 0;
-
-        for entry in entries.flatten() {
-            let p = entry.path();
-            let entry_name = p
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            if entry_name.starts_with('.') {
-                continue;
-            }
-
-            if p.is_dir() {
-                if p.join(".git").exists() {
-                    let branch = get_branch(&p).unwrap_or_else(|| "?".into());
-                    repos.push(format!(
-                        "  {} {} {}",
-                        "●".green(),
-                        entry_name.bold(),
-                        format!("[{branch}]").cyan()
-                    ));
-                } else {
-                    dirs.push(format!("  {} {}/", "▸".blue(), entry_name));
-                }
-            } else {
-                file_count += 1;
-            }
-        }
-
-        repos.sort();
-        dirs.sort();
-
-        if !repos.is_empty() {
-            println!(
-                "  {}",
-                format!("Repositories ({})", repos.len()).bold().green()
-            );
-            for r in &repos {
-                println!("{r}");
-            }
-        }
-
-        if !dirs.is_empty() {
-            if !repos.is_empty() {
-                println!();
-            }
-            println!(
-                "  {}",
-                format!("Directories ({})", dirs.len()).bold().blue()
-            );
-            for d in &dirs {
-                println!("{d}");
-            }
-        }
-
-        if file_count > 0 {
-            println!();
-            println!("  {} {file_count} file(s)", "…".dimmed());
-        }
-
-        if repos.is_empty() && dirs.is_empty() && file_count == 0 {
-            println!("  {}", "(empty)".dimmed());
-        }
+    #[test]
+    fn parses_add_and_remove() {
+        let (a, r) = parse_label_input("foo, bar, -baz");
+        assert_eq!(a, vec!["foo", "bar"]);
+        assert_eq!(r, vec!["baz"]);
     }
-}
 
-fn preview_keybind_help() {
-    let keybinds = config::load()
-        .map(|c| c.keybinds)
-        .unwrap_or_default();
+    #[test]
+    fn empty_input() {
+        let (a, r) = parse_label_input("");
+        assert!(a.is_empty());
+        assert!(r.is_empty());
+    }
 
-    let fmt_key = |k: &str| k.replace("alt-", "Alt-").replace("ctrl-", "Ctrl-");
-
-    preview_section("Keybinds");
-    println!(
-        "  {}  {}",
-        "Enter".bold().green(),
-        "Enter session"
-    );
-    println!(
-        "  {}  {}",
-        fmt_key(&keybinds.new_session).bold().yellow(),
-        "New child session"
-    );
-    println!(
-        "  {}  {}",
-        fmt_key(&keybinds.rename_session).bold().yellow(),
-        "Rename session"
-    );
-    println!(
-        "  {}  {}",
-        fmt_key(&keybinds.delete_session).bold().red(),
-        "Delete session"
-    );
-    println!(
-        "  {}  {}",
-        "Esc".bold().dimmed(),
-        "Go back"
-    );
+    #[test]
+    fn ignores_bare_dash() {
+        let (a, r) = parse_label_input("-");
+        assert!(a.is_empty());
+        assert!(r.is_empty());
+    }
 }

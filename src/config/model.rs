@@ -72,6 +72,30 @@ pub struct KeybindsConfig {
     /// Rename session (default: "alt-r")
     #[serde(default = "default_bind_rename")]
     pub rename_session: String,
+
+    /// Switch to tree view (default: "ctrl-t")
+    #[serde(default = "default_bind_view_tree")]
+    pub view_tree: String,
+
+    /// Switch to workspace view (default: "ctrl-w")
+    #[serde(default = "default_bind_view_workspace")]
+    pub view_workspace: String,
+
+    /// Switch to repo view (default: "ctrl-e"; ctrl-r reserved by fzf history)
+    #[serde(default = "default_bind_view_repo")]
+    pub view_repo: String,
+
+    /// Switch to owner view (default: "ctrl-o")
+    #[serde(default = "default_bind_view_owner")]
+    pub view_owner: String,
+
+    /// Switch to label view (default: "ctrl-g"; ctrl-l reserved by terminal clear)
+    #[serde(default = "default_bind_view_label")]
+    pub view_label: String,
+
+    /// Edit labels on the selected item (default: "alt-l")
+    #[serde(default = "default_bind_edit_labels")]
+    pub edit_labels: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -124,6 +148,12 @@ impl Default for KeybindsConfig {
             new_session: default_bind_new(),
             delete_session: default_bind_delete(),
             rename_session: default_bind_rename(),
+            view_tree: default_bind_view_tree(),
+            view_workspace: default_bind_view_workspace(),
+            view_repo: default_bind_view_repo(),
+            view_owner: default_bind_view_owner(),
+            view_label: default_bind_view_label(),
+            edit_labels: default_bind_edit_labels(),
         }
     }
 }
@@ -155,6 +185,30 @@ fn default_bind_delete() -> String {
 
 fn default_bind_rename() -> String {
     "alt-r".into()
+}
+
+fn default_bind_view_tree() -> String {
+    "ctrl-t".into()
+}
+
+fn default_bind_view_workspace() -> String {
+    "ctrl-w".into()
+}
+
+fn default_bind_view_repo() -> String {
+    "ctrl-e".into()
+}
+
+fn default_bind_view_owner() -> String {
+    "ctrl-o".into()
+}
+
+fn default_bind_view_label() -> String {
+    "ctrl-g".into()
+}
+
+fn default_bind_edit_labels() -> String {
+    "alt-l".into()
 }
 
 fn default_plugin_timeout() -> u64 {

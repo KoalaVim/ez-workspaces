@@ -113,6 +113,46 @@ Run bare `ez` to get an fzf-powered browser:
 3. Select a repo to see its sessions
 4. Select a session to enter it
 
+At any top-level selector, press a keybind to switch views:
+
+- **Ctrl-t** — Tree view: all workspaces → repos → sessions in one tree
+- **Ctrl-w** — Workspace view (default): root → drill → session picker
+- **Ctrl-e** — Repo view: flat list of every registered repo
+- **Ctrl-o** — Owner view: repos grouped by GitHub-style owner (parsed from remote URL)
+- **Ctrl-g** — Label view: items grouped by user-defined labels
+
+Inside the session picker:
+
+- **Alt-n** — New child session
+- **Alt-r** — Rename session
+- **Alt-d** — Delete session
+- **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
+
+You can also launch a specific view directly: `ez --view repo`, `ez --view label`, etc.
+
+## Labels
+
+Tag any repo or session to group and filter them.
+
+```bash
+# Add labels
+ez repo label add my-repo backend core
+ez session label add feature-x --repo my-repo wip
+
+# Remove labels
+ez repo label remove my-repo core
+
+# List
+ez repo label list              # all labels grouped
+ez repo label list my-repo      # labels on one repo
+ez repo list --label backend    # filter repo list
+
+# Browse by label
+ez --view label
+```
+
+Labels on the currently selected item can also be edited interactively in the browser by pressing **Alt-l**. Labels are stored in the repo's metadata (`~/.config/ez/repos/<id>/repo.toml`) and in per-session metadata (`sessions.toml`).
+
 ## Session Hierarchy
 
 Sessions form a tree. Use `--parent` to nest sessions:

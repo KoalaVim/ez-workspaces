@@ -132,6 +132,7 @@ mod tests {
             path: None,
             env: HashMap::new(),
             plugin_state: HashMap::new(),
+            labels: Vec::new(),
             created_at: Utc::now(),
             is_default: false,
         }
