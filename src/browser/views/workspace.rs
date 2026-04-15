@@ -58,8 +58,9 @@ pub(super) fn run(
             .iter()
             .map(|r| {
                 let expanded = paths::expand_tilde(r);
+                let display = paths::collapse_tilde(&expanded.to_string_lossy());
                 SelectItem {
-                    display: paths::collapse_tilde(&expanded.to_string_lossy()),
+                    display: display.bold().blue().to_string(),
                     value: expanded.to_string_lossy().to_string(),
                 }
             })

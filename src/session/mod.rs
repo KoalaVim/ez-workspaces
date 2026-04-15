@@ -98,7 +98,7 @@ fn dispatch_label(cmd: SessionLabelCommand) -> Result<()> {
                     for (label, sessions) in by_label {
                         println!("{}", label.bold().magenta());
                         for s in sessions {
-                            println!("  {}", s.cyan());
+                            println!("  {}", s.yellow());
                         }
                     }
                 }
@@ -218,7 +218,7 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
-            println!("{}{}{}", session.name.bold(), default_marker, path_info);
+            println!("{}{}{}", session.name.bold().yellow(), default_marker, path_info);
         }
     } else {
         let rendered = tree.render_tree();
@@ -230,7 +230,7 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
-            println!("{}{}{}{}", indent, session.name.bold(), default_marker, path_info);
+            println!("{}{}{}{}", indent, session.name.bold().yellow(), default_marker, path_info);
         }
     }
     Ok(())

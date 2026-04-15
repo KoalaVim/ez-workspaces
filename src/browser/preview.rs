@@ -67,7 +67,14 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
                 } else {
                     format!(" [{}]", s.labels.join(",")).magenta().to_string()
                 };
-                println!("{}{}{}{}{}", indent, s.name.bold(), marker, labels, path_info);
+                println!(
+                    "{}{}{}{}{}",
+                    indent,
+                    s.name.bold().yellow(),
+                    marker,
+                    labels,
+                    path_info
+                );
             }
         }
 
@@ -180,7 +187,7 @@ fn preview_directory(path: &Path) {
                         format!("[{branch}]").cyan()
                     ));
                 } else {
-                    dirs.push(format!("  {} {}/", "▸".blue(), entry_name));
+                    dirs.push(format!("  {} {}/", "▸".blue(), entry_name.bold().blue()));
                 }
             } else {
                 file_count += 1;

@@ -117,8 +117,8 @@ pub(super) fn run(
                 ),
                 LabeledItem::Session(b) => format!(
                     "{} {} {}{}",
-                    "◆".cyan(),
-                    b.session.name.bold().cyan(),
+                    "◆".yellow(),
+                    b.session.name.bold().yellow(),
                     format!("({})", b.repo.name).dimmed(),
                     b.session
                         .path

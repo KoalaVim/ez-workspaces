@@ -107,7 +107,14 @@ pub(crate) fn session_action_loop(
                     format!(" [{}]", s.labels.join(",")).magenta().to_string()
                 };
                 SelectItem {
-                    display: format!("{}{}{}{}{}", indent, s.name.bold(), marker, labels, path_info),
+                    display: format!(
+                        "{}{}{}{}{}",
+                        indent,
+                        s.name.bold().yellow(),
+                        marker,
+                        labels,
+                        path_info
+                    ),
                     value: s.id.clone(),
                 }
             })
@@ -260,6 +267,9 @@ pub(crate) fn drill_into_directory(
             return Ok(Some(current));
         }
 
+        // Load once per level so registered-repo labels render consistently
+        // with the Repo/Owner views.
+        let index = repo::store::load_index().unwrap_or_default();
         let mut entries: Vec<(String, std::path::PathBuf)> = Vec::new();
 
         if let Ok(read_dir) = fs::read_dir(&current) {
@@ -274,9 +284,14 @@ pub(crate) fn drill_into_directory(
 
                     let display = if path.join(".git").exists() {
                         let branch = get_branch(&path).unwrap_or_else(|| "?".into());
-                        format!("{name} [{branch}]")
+                        let labels = index
+                            .find_by_path(&path)
+                            .and_then(|e| repo::store::load_repo_meta(&e.id).ok())
+                            .map(|m| m.labels)
+                            .unwrap_or_default();
+                        format_repo_display(&name, None, Some(&branch), &labels)
                     } else {
-                        name
+                        name.bold().blue().to_string()
                     };
 
                     entries.push((display, path));
@@ -346,6 +361,28 @@ pub(crate) fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
 /// Get the current branch of a git repo.
 pub(crate) fn get_branch(path: &Path) -> Option<String> {
     git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
+}
+
+/// Shared display style for a repository row in any picker (drill-down,
+/// repo view, owner view, etc.). `path` is the (collapse-tilded) path —
+/// pass `None` when the surrounding context already shows it.
+pub(crate) fn format_repo_display(
+    name: &str,
+    path: Option<&str>,
+    branch: Option<&str>,
+    labels: &[String],
+) -> String {
+    let mut parts = vec![name.bold().green().to_string()];
+    if let Some(p) = path {
+        parts.push(p.dimmed().to_string());
+    }
+    if let Some(b) = branch {
+        parts.push(format!("[{b}]").cyan().to_string());
+    }
+    if !labels.is_empty() {
+        parts.push(format!("[{}]", labels.join(",")).magenta().to_string());
+    }
+    parts.join(" ")
 }
 
 /// Parse a comma-separated label edit string.

@@ -109,7 +109,7 @@ pub(super) fn run(
                                     repo_cont.dimmed(),
                                     sess_connector.dimmed(),
                                     session_indent,
-                                    s.name.bold().cyan(),
+                                    s.name.bold().yellow(),
                                     marker,
                                 ),
                                 Some(target),

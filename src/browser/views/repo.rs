@@ -8,7 +8,7 @@ use crate::paths;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, get_branch, parse_label_input};
+use super::super::{browse_repo, format_repo_display, get_branch, parse_label_input};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome};
 
 pub(super) fn run(
@@ -28,18 +28,13 @@ pub(super) fn run(
         .map(|r| {
             let branch = get_branch(&r.path).unwrap_or_else(|| "?".into());
             let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
-            let labels = if meta.labels.is_empty() {
-                String::new()
-            } else {
-                format!(" [{}]", meta.labels.join(",")).magenta().to_string()
-            };
+            let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
             SelectItem {
-                display: format!(
-                    "{} {} {}{}",
-                    r.name.bold().green(),
-                    paths::collapse_tilde(&r.path.to_string_lossy()).dimmed(),
-                    format!("[{branch}]").cyan(),
-                    labels,
+                display: format_repo_display(
+                    &r.name,
+                    Some(&path_str),
+                    Some(&branch),
+                    &meta.labels,
                 ),
                 value: r.path.to_string_lossy().to_string(),
             }
