@@ -1,4 +1,4 @@
-.PHONY: build release test install clean lint fmt check
+.PHONY: build release test run install clean lint fmt check
 
 build:
 	cargo build
@@ -8,6 +8,9 @@ release:
 
 test:
 	cargo test
+
+run:
+	cargo run --release -- $(ARGS)
 
 install:
 	cargo install --locked --path .

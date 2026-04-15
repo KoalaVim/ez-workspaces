@@ -298,7 +298,10 @@ impl InteractiveSelector for FzfSelector {
             return Ok(ActionResult::Cancel);
         }
 
-        let use_value_prefix = preview_cmd.is_some();
+        // Always tab-prefix items with their value so matching works whether or
+        // not fzf strips ANSI codes from stdout. The visible portion is set via
+        // --with-nth 2.. below.
+        let use_value_prefix = true;
 
         let mut args = vec![
             "--prompt".to_string(),
