@@ -20,10 +20,6 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub debug: bool,
 
-    /// Show all repos and sessions as a tree (no drill-down)
-    #[arg(long)]
-    pub tree: bool,
-
     /// Jump directly to a workspace root (skips root selection)
     #[arg(long, short)]
     pub workspace: Option<String>,
@@ -32,9 +28,9 @@ pub struct Cli {
     #[arg(long, short)]
     pub repo: Option<PathBuf>,
 
-    /// Start the browser in a specific view: tree, workspace, repo, owner, label
-    #[arg(long)]
-    pub view: Option<String>,
+    /// Start the browser by a specific selection type (overrides `default_select_by` in config)
+    #[arg(long, value_name = "MODE", value_parser = ["tree", "workspace", "repo", "owner", "label"])]
+    pub select_by: Option<String>,
 }
 
 #[derive(Subcommand)]

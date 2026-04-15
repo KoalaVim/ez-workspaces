@@ -36,10 +36,9 @@ fn main() {
     let result = match cli.command {
         None => browser::browse(
             cli.cd_file.as_deref(),
-            cli.tree,
             cli.workspace.as_deref(),
             cli.repo.as_deref(),
-            cli.view.as_deref(),
+            cli.select_by.as_deref(),
         ),
         Some(Command::Clone { url, path }) => repo::clone_repo(&url, path.as_deref()),
         Some(Command::Add { path }) => repo::add_repo(path.as_deref()),

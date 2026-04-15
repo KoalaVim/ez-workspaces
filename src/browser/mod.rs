@@ -18,10 +18,9 @@ pub use preview::preview;
 /// Main interactive browser entry point (bare `ez` command).
 pub fn browse(
     cd_file: Option<&Path>,
-    tree_mode: bool,
     workspace: Option<&str>,
     repo_flag: Option<&Path>,
-    view: Option<&str>,
+    select_by: Option<&str>,
 ) -> Result<()> {
     let config = config::load()?;
     let selector = FzfSelector::new(&config.fzf)?;
@@ -36,14 +35,11 @@ pub fn browse(
         return browse_repo(&repo_path, &selector, cd_file, &config.keybinds);
     }
 
-    // Decide starting view.
-    let mut mode = views::ViewMode::Workspace;
-    if tree_mode {
-        mode = views::ViewMode::Tree;
-    }
-    if let Some(v) = view {
-        mode = views::ViewMode::from_flag(v)?;
-    }
+    // Decide starting view: CLI flag > config default > Workspace.
+    let mode = match select_by {
+        Some(v) => views::ViewMode::from_flag(v)?,
+        None => views::ViewMode::from_flag(&config.default_select_by)?,
+    };
 
     views::run(mode, &selector, &config, workspace, cd_file)
 }

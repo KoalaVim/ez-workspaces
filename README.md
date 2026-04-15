@@ -66,9 +66,8 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 
 | Command | Description |
 |---------|-------------|
-| `ez` | Interactive fzf browser (workspace view by default) |
-| `ez --tree` | Tree view of all repos and sessions |
-| `ez --view <mode>` | Start in a specific view: `tree`, `workspace`, `repo`, `owner`, `label` |
+| `ez` | Interactive fzf browser (default view is `default_select_by` in config, else `workspace`) |
+| `ez --select-by <mode>` | Start the browser by `tree`, `workspace`, `repo`, `owner`, or `label` |
 | `ez --workspace <name>` | Jump directly to a workspace root |
 | `ez --repo <path>` | Jump straight to a repo's session picker |
 | `ez clone <url> [path]` | Clone + register repo |
@@ -147,7 +146,7 @@ ez session label add feature-x --repo my-repo wip
 ez repo list --label backend
 
 # Browse by label (or press Ctrl-g inside `ez`)
-ez --view label
+ez --select-by label
 ```
 
 ## Configuration
@@ -174,6 +173,7 @@ Config file: `~/.config/ez/config.toml`
 workspace_roots = ["~/workspace/personal", "~/workspace/work"]
 default_shell = "zsh"
 plugin_timeout = 30
+default_select_by = "workspace"  # tree | workspace | repo | owner | label
 
 [selector]
 backend = "fzf"

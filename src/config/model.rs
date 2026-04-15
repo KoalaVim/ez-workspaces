@@ -35,6 +35,11 @@ pub struct EzConfig {
     /// Plugin execution timeout in seconds
     #[serde(default = "default_plugin_timeout")]
     pub plugin_timeout: u64,
+
+    /// Default selection type for the interactive browser (`tree`, `workspace`,
+    /// `repo`, `owner`, `label`). Overridden by `--select-by` on the CLI.
+    #[serde(default = "default_select_by")]
+    pub default_select_by: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -120,6 +125,7 @@ impl Default for EzConfig {
             keybinds: KeybindsConfig::default(),
             plugins: PluginsConfig::default(),
             plugin_timeout: default_plugin_timeout(),
+            default_select_by: default_select_by(),
         }
     }
 }
@@ -213,4 +219,8 @@ fn default_bind_edit_labels() -> String {
 
 fn default_plugin_timeout() -> u64 {
     30
+}
+
+fn default_select_by() -> String {
+    "workspace".into()
 }

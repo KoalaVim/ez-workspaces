@@ -128,7 +128,7 @@ Inside the session picker:
 - **Alt-d** — Delete session
 - **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
 
-You can also launch a specific view directly: `ez --view repo`, `ez --view label`, etc.
+You can also launch a specific view directly: `ez --select-by repo`, `ez --select-by label`, etc. To change the default view, set `default_select_by = "repo"` in your config (or run `ez config set default_select_by repo`).
 
 ## Labels
 
@@ -148,7 +148,7 @@ ez repo label list my-repo      # labels on one repo
 ez repo list --label backend    # filter repo list
 
 # Browse by label
-ez --view label
+ez --select-by label
 ```
 
 Labels on the currently selected item can also be edited interactively in the browser by pressing **Alt-l**. Labels are stored in the repo's metadata (`~/.config/ez/repos/<id>/repo.toml`) and in per-session metadata (`sessions.toml`).

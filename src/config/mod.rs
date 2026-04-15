@@ -114,6 +114,11 @@ fn set_value(key: &str, value: &str) -> Result<()> {
                 EzError::Config(format!("Invalid number: {value}"))
             })?;
         }
+        "default_select_by" => {
+            // Validate early so we never persist an unusable value.
+            crate::browser::views::ViewMode::from_flag(value)?;
+            config.default_select_by = value.to_string();
+        }
         "selector.backend" => config.selector.backend = value.to_string(),
         "selector.fzf_opts" => config.selector.fzf_opts = Some(value.to_string()),
         _ => return Err(EzError::Config(format!("Unknown key: {key}"))),
@@ -130,6 +135,7 @@ fn get_value(key: &str) -> Result<()> {
         "default_shell" => config.default_shell.unwrap_or_default(),
         "editor" => config.editor.unwrap_or_default(),
         "plugin_timeout" => config.plugin_timeout.to_string(),
+        "default_select_by" => config.default_select_by,
         "selector.backend" => config.selector.backend,
         "selector.fzf_opts" => config.selector.fzf_opts.unwrap_or_default(),
         "plugins.enabled" => format!("{:?}", config.plugins.enabled),
