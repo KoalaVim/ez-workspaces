@@ -11,16 +11,28 @@ REQUEST=$(cat)
 
 HOOK=$(echo "$REQUEST" | jq -r '.hook')
 REPO_NAME=$(echo "$REQUEST" | jq -r '.repo.path' | xargs basename 2>/dev/null || echo "")
+REPO_ID=$(echo "$REQUEST" | jq -r '.repo.id // empty')
+SESSION_ID=$(echo "$REQUEST" | jq -r '.session.id // empty')
 SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
 SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // .repo.path')
 AUTO_ATTACH=$(echo "$REQUEST" | jq -r '.config.user_config.auto_attach // "false"')
 
-# Tmux session name: ez_<repo>/<session>.
-# tmux uses ":" as a target separator (session:window), so we must avoid it
-# in session names — use "_" instead. Dots in names also confuse tmux/grep, so
-# we replace them with "_" as well.
-TMUX_SESSION="ez_${REPO_NAME}/${SESSION_NAME}"
+# Tmux session name: <repo>/<session>. Identification of ez-managed tmux
+# sessions happens via tmux user options (@ez_managed=1) — see on_session_create.
+# tmux uses ":" as a target separator and dots confuse some tooling, so
+# replace both with "_".
+TMUX_SESSION="${REPO_NAME}/${SESSION_NAME}"
 TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.:' '__')
+
+# Mark a tmux session as ez-managed by setting user options.
+# Args: $1 = tmux session name
+mark_ez_managed() {
+    local sess="$1"
+    tmux set-option -t "=${sess}" -q @ez_managed "1" 2>/dev/null || true
+    tmux set-option -t "=${sess}" -q @ez_repo_id "${REPO_ID}" 2>/dev/null || true
+    tmux set-option -t "=${sess}" -q @ez_session_id "${SESSION_ID}" 2>/dev/null || true
+    tmux set-option -t "=${sess}" -q @ez_session_name "${SESSION_NAME}" 2>/dev/null || true
+}
 
 case "$HOOK" in
     on_session_create)
@@ -29,6 +41,7 @@ case "$HOOK" in
             if ! tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
                 tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
             fi
+            mark_ez_managed "$TMUX_SESSION"
         fi
 
         jq -n \
@@ -87,6 +100,7 @@ case "$HOOK" in
         if ! tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
             tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
         fi
+        mark_ez_managed "$TMUX_SESSION"
 
         CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_SESSION}\"; else tmux attach-session -t \"=${TMUX_SESSION}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
@@ -106,8 +120,10 @@ case "$HOOK" in
         REPOS_DIR="${EZ_CONFIG_DIR}/repos"
         INDEX_FILE="${REPOS_DIR}/index.toml"
 
-        # Build set of running ez_* tmux session names (one per line)
-        RUNNING=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | { grep '^ez_' || true; } || true)
+        # Build set of running ez-managed tmux session names (one per line),
+        # identified by the @ez_managed user option set in on_session_create.
+        RUNNING=$(tmux list-sessions -F '#{session_name}|#{@ez_managed}' 2>/dev/null \
+            | { awk -F'|' '$2 == "1" { print $1 }' || true; } || true)
 
         # Collect all sessions from all registered repos by parsing index.toml
         # for (id, path) pairs, then reading each repo's sessions.toml.
@@ -143,7 +159,7 @@ case "$HOOK" in
                     }
                     /^$/ && in_session && name != "" {
                         if (path == "") path = repo_path
-                        tmux_name = "ez_" repo_basename "/" name
+                        tmux_name = repo_basename "/" name
                         gsub(/[.:]/, "_", tmux_name)
                         print tmux_name "|" repo_basename "|" name "|" path
                         in_session=0; name=""; path=""
@@ -151,8 +167,8 @@ case "$HOOK" in
                     END {
                         if (in_session && name != "") {
                             if (path == "") path = repo_path
-                            tmux_name = "ez:" repo_basename "/" name
-                            gsub(/\./, "_", tmux_name)
+                            tmux_name = repo_basename "/" name
+                            gsub(/[.:]/, "_", tmux_name)
                             print tmux_name "|" repo_basename "|" name "|" path
                         }
                     }
