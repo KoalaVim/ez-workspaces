@@ -90,33 +90,92 @@ case "$HOOK" in
         ;;
 
     on_view)
-        # List all ez-managed tmux sessions (those starting with "ez:")
+        # List all ez sessions across all repos. The tmux session for each is
+        # ez:<repo-basename>/<session-name>. Mark sessions whose tmux session
+        # is currently running. on_view_select will create-then-attach for any
+        # session whose tmux counterpart is missing.
         if ! command -v tmux &>/dev/null; then
             echo '{"success": true, "view_items": [], "view_prompt": "tmux (not installed)"}'
             exit 0
         fi
 
-        if ! tmux list-sessions &>/dev/null; then
-            echo '{"success": true, "view_items": [], "view_prompt": "tmux (no server)"}'
-            exit 0
-        fi
+        EZ_CONFIG_DIR="${EZ_CONFIG_DIR:-$HOME/.config/ez}"
+        REPOS_DIR="${EZ_CONFIG_DIR}/repos"
+        INDEX_FILE="${REPOS_DIR}/index.toml"
 
-        # Get ez: sessions with window count and activity
-        ITEMS=$(tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}' 2>/dev/null \
-            | { grep '^ez:' || true; } \
-            | while IFS='|' read -r name windows attached; do
-                # Format display: "  ez:repo/session  [2 windows] (attached)"
-                attach_marker=""
-                if [ "$attached" != "0" ]; then
-                    attach_marker=" (attached)"
+        # Build set of running ez:* tmux session names (one per line)
+        RUNNING=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | { grep '^ez:' || true; } || true)
+
+        # Collect all sessions from all registered repos by parsing index.toml
+        # for (id, path) pairs, then reading each repo's sessions.toml.
+        ALL_SESSIONS_FILE=$(mktemp)
+        trap 'rm -f "$ALL_SESSIONS_FILE"' EXIT
+
+        if [ -f "$INDEX_FILE" ]; then
+            # Parse [[repos]] entries: each block has id and path fields.
+            awk '
+                /^\[\[repos\]\]/ { id=""; path=""; next }
+                /^id = / { gsub(/^id = "|"$/, "", $0); id=$0 }
+                /^path = / { gsub(/^path = "|"$/, "", $0); path=$0 }
+                /^$/ && id != "" && path != "" {
+                    print id "|" path; id=""; path=""
+                }
+                END {
+                    if (id != "" && path != "") print id "|" path
+                }
+            ' "$INDEX_FILE" | while IFS='|' read -r repo_id repo_path; do
+                [ -z "$repo_id" ] && continue
+                sessions_file="${REPOS_DIR}/${repo_id}/sessions.toml"
+                [ -f "$sessions_file" ] || continue
+                repo_basename=$(basename "$repo_path")
+
+                awk -v repo_basename="$repo_basename" -v repo_path="$repo_path" '
+                    /^\[\[sessions\]\]/ { in_session=1; name=""; path=""; next }
+                    /^\[\[/ { in_session=0 }
+                    in_session && /^name = / {
+                        gsub(/^name = "|"$/, "", $0); name=$0
+                    }
+                    in_session && /^path = / {
+                        gsub(/^path = "|"$/, "", $0); path=$0
+                    }
+                    /^$/ && in_session && name != "" {
+                        if (path == "") path = repo_path
+                        tmux_name = "ez:" repo_basename "/" name
+                        gsub(/\./, "_", tmux_name)
+                        print tmux_name "|" repo_basename "|" name "|" path
+                        in_session=0; name=""; path=""
+                    }
+                    END {
+                        if (in_session && name != "") {
+                            if (path == "") path = repo_path
+                            tmux_name = "ez:" repo_basename "/" name
+                            gsub(/\./, "_", tmux_name)
+                            print tmux_name "|" repo_basename "|" name "|" path
+                        }
+                    }
+                ' "$sessions_file" >> "$ALL_SESSIONS_FILE"
+            done
+        fi
+        ALL_SESSIONS=$(cat "$ALL_SESSIONS_FILE")
+
+        # Build JSON items array
+        ITEMS=$(printf '%s\n' "$ALL_SESSIONS" \
+            | grep -v '^$' \
+            | while IFS='|' read -r tmux_name repo_name session_name session_path; do
+                [ -z "$tmux_name" ] && continue
+                running="○"
+                if echo "$RUNNING" | grep -Fxq "$tmux_name"; then
+                    running="●"
                 fi
-                display="  ${name}  [${windows} window(s)]${attach_marker}"
-                jq -n --arg d "$display" --arg v "$name" '{display: $d, value: $v}'
+                display="  ${running} ${repo_name}/${session_name}"
+                # Stash session_path in value as "name|path" so on_view_select
+                # can create the tmux session in the right directory.
+                value="${tmux_name}|${session_path}"
+                jq -n --arg d "$display" --arg v "$value" '{display: $d, value: $v}'
             done \
             | jq -s '.')
 
-        # If no ez sessions found
-        if [ -z "$ITEMS" ] || [ "$ITEMS" = "[]" ] || [ "$ITEMS" = "null" ]; then
+        if [ -z "$ITEMS" ] || [ "$ITEMS" = "null" ]; then
             ITEMS="[]"
         fi
 
@@ -125,7 +184,7 @@ case "$HOOK" in
             '{
                 success: true,
                 view_items: $items,
-                view_prompt: "tmux sessions"
+                view_prompt: "tmux"
             }'
         ;;
 
@@ -137,9 +196,19 @@ case "$HOOK" in
             exit 0
         fi
 
-        # Build the switch/attach command
-        CMD="tmux switch-client -t \"=${SELECTED}\" 2>/dev/null || tmux attach-session -t \"=${SELECTED}\""
+        # Value format: "<tmux-session>|<session-path>" (from on_view)
+        TMUX_NAME="${SELECTED%%|*}"
+        SESS_PATH="${SELECTED#*|}"
+        if [ "$SESS_PATH" = "$SELECTED" ]; then
+            SESS_PATH="$HOME"
+        fi
 
+        # Create the tmux session if it doesn't exist
+        if ! tmux has-session -t "=${TMUX_NAME}" 2>/dev/null; then
+            tmux new-session -d -s "$TMUX_NAME" -c "$SESS_PATH" 2>&1 >&2 || true
+        fi
+
+        CMD="tmux switch-client -t \"=${TMUX_NAME}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_NAME}\""
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 

@@ -33,10 +33,17 @@ pub fn execute(
     );
     log::debug!("plugin [{}]: request={}", manifest.name, request_json);
 
-    let mut child = Command::new(&executable)
-        .stdin(Stdio::piped())
+    let mut cmd = Command::new(&executable);
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Expose ez paths so plugins can read repo/session metadata
+    if let Ok(config_dir) = crate::paths::config_dir() {
+        cmd.env("EZ_CONFIG_DIR", config_dir);
+    }
+
+    let mut child = cmd
         .spawn()
         .map_err(|e| EzError::PluginFailed(manifest.name.clone(), e.to_string()))?;
 
