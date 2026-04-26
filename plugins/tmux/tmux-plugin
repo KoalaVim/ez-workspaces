@@ -15,10 +15,12 @@ SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
 SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // .repo.path')
 AUTO_ATTACH=$(echo "$REQUEST" | jq -r '.config.user_config.auto_attach // "false"')
 
-# Tmux session name: repo-name/session-name
-TMUX_SESSION="ez:${REPO_NAME}/${SESSION_NAME}"
-# Sanitize for tmux (no dots or colons beyond the prefix)
-TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.' '_')
+# Tmux session name: ez_<repo>/<session>.
+# tmux uses ":" as a target separator (session:window), so we must avoid it
+# in session names — use "_" instead. Dots in names also confuse tmux/grep, so
+# we replace them with "_" as well.
+TMUX_SESSION="ez_${REPO_NAME}/${SESSION_NAME}"
+TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.:' '__')
 
 case "$HOOK" in
     on_session_create)
@@ -54,10 +56,11 @@ case "$HOOK" in
     on_session_enter)
         COMMANDS=()
         if command -v tmux &>/dev/null && [ "$AUTO_ATTACH" = "true" ]; then
+            ATTACH="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_SESSION}\"; else tmux attach-session -t \"=${TMUX_SESSION}\"; fi"
             if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
-                COMMANDS+=("tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\"")
+                COMMANDS+=("$ATTACH")
             else
-                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && (tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\")")
+                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && ${ATTACH}")
             fi
         fi
 
@@ -85,7 +88,7 @@ case "$HOOK" in
             tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
         fi
 
-        CMD="tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\""
+        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_SESSION}\"; else tmux attach-session -t \"=${TMUX_SESSION}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
@@ -103,8 +106,8 @@ case "$HOOK" in
         REPOS_DIR="${EZ_CONFIG_DIR}/repos"
         INDEX_FILE="${REPOS_DIR}/index.toml"
 
-        # Build set of running ez:* tmux session names (one per line)
-        RUNNING=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | { grep '^ez:' || true; } || true)
+        # Build set of running ez_* tmux session names (one per line)
+        RUNNING=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | { grep '^ez_' || true; } || true)
 
         # Collect all sessions from all registered repos by parsing index.toml
         # for (id, path) pairs, then reading each repo's sessions.toml.
@@ -140,8 +143,8 @@ case "$HOOK" in
                     }
                     /^$/ && in_session && name != "" {
                         if (path == "") path = repo_path
-                        tmux_name = "ez:" repo_basename "/" name
-                        gsub(/\./, "_", tmux_name)
+                        tmux_name = "ez_" repo_basename "/" name
+                        gsub(/[.:]/, "_", tmux_name)
                         print tmux_name "|" repo_basename "|" name "|" path
                         in_session=0; name=""; path=""
                     }
@@ -208,7 +211,11 @@ case "$HOOK" in
             tmux new-session -d -s "$TMUX_NAME" -c "$SESS_PATH" 2>&1 >&2 || true
         fi
 
-        CMD="tmux switch-client -t \"=${TMUX_NAME}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_NAME}\""
+        # If the user's shell is inside tmux ($TMUX set), switch the current
+        # client. Otherwise, attach in the current terminal — never call
+        # switch-client without $TMUX, since tmux will switch some random
+        # other client in another terminal.
+        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_NAME}\"; else tmux attach-session -t \"=${TMUX_NAME}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 

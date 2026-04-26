@@ -298,10 +298,17 @@ pub(crate) fn session_action_loop(
                                     write_cd_target(cd_file, cd)?;
                                 }
                                 if !response.post_shell_commands.is_empty() {
-                                    write_post_commands(
-                                        post_cmd_file,
-                                        &response.post_shell_commands,
-                                    )?;
+                                    if post_cmd_file.is_some() {
+                                        write_post_commands(
+                                            post_cmd_file,
+                                            &response.post_shell_commands,
+                                        )?;
+                                    } else {
+                                        eprintln!("warning: shell wrapper is outdated. Re-run: eval \"$(ez init-shell zsh)\"");
+                                        plugin::runner::run_shell_commands(
+                                            &response.post_shell_commands,
+                                        )?;
+                                    }
                                 }
                                 if !response.shell_commands.is_empty() {
                                     plugin::runner::run_shell_commands(

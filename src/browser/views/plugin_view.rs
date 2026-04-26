@@ -79,9 +79,19 @@ pub(super) fn run(
                 write_cd_target(cd_file, cd)?;
             }
 
-            // Write post-exit shell commands for the shell wrapper
+            // Write post-exit shell commands for the shell wrapper.
+            // If the shell wrapper isn't passing --post-cmd-file (old wrapper),
+            // fall back to running them inline so the feature still works.
             if !select_response.post_shell_commands.is_empty() {
-                write_post_commands(post_cmd_file, &select_response.post_shell_commands)?;
+                if post_cmd_file.is_some() {
+                    write_post_commands(post_cmd_file, &select_response.post_shell_commands)?;
+                } else {
+                    eprintln!(
+                        "{}",
+                        "warning: shell wrapper is outdated. Re-run: eval \"$(ez init-shell zsh)\"".to_string()
+                    );
+                    plugin::runner::run_shell_commands(&select_response.post_shell_commands)?;
+                }
             }
 
             // Execute any immediate shell commands
