@@ -36,6 +36,7 @@ fn main() {
     let result = match cli.command {
         None => browser::browse(
             cli.cd_file.as_deref(),
+            cli.post_cmd_file.as_deref(),
             cli.workspace.as_deref(),
             cli.repo.as_deref(),
             cli.select_by.as_deref(),
@@ -81,24 +82,32 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
         "bash" | "zsh" => {
             r#"ez() {
     local tmp=$(mktemp)
-    command ez "$@" --cd-file="$tmp"
+    local post_cmd=$(mktemp)
+    command ez "$@" --cd-file="$tmp" --post-cmd-file="$post_cmd"
     local ret=$?
     if [ -s "$tmp" ]; then
         cd "$(cat "$tmp")"
     fi
-    rm -f "$tmp"
+    if [ -s "$post_cmd" ]; then
+        source "$post_cmd"
+    fi
+    rm -f "$tmp" "$post_cmd"
     return $ret
 }"#
         }
         "fish" => {
             r#"function ez
     set tmp (mktemp)
-    command ez $argv --cd-file="$tmp"
+    set post_cmd (mktemp)
+    command ez $argv --cd-file="$tmp" --post-cmd-file="$post_cmd"
     set ret $status
     if test -s "$tmp"
         cd (cat "$tmp")
     end
-    rm -f "$tmp"
+    if test -s "$post_cmd"
+        source "$post_cmd"
+    end
+    rm -f "$tmp" "$post_cmd"
     return $ret
 end"#
         }

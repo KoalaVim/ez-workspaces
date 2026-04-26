@@ -6,6 +6,7 @@ use colored::Colorize;
 use crate::config;
 use crate::error::Result;
 use crate::paths;
+use crate::plugin;
 use crate::repo;
 use crate::session;
 
@@ -17,6 +18,7 @@ pub(super) fn run(
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
+    _post_cmd_file: Option<&Path>,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     // nodes: (display, Option<target-dir>, preview-path)
@@ -127,6 +129,8 @@ pub(super) fn run(
         return Ok(Outcome::Done);
     }
 
+    let plugin_views = plugin::collect_plugin_views("tree", config).unwrap_or_default();
+
     let items: Vec<SelectItem> = nodes
         .iter()
         .map(|(display, _target, preview_path)| SelectItem {
@@ -137,19 +141,19 @@ pub(super) fn run(
 
     let ez_bin = std::env::current_exe().ok();
     let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
-    let header = view_header("tree", &config.keybinds);
+    let header = view_header("tree", &config.keybinds, &plugin_views);
 
     let action = selector.select_with_actions(
         &items,
         "ez tree",
         preview_cmd.as_deref(),
-        &view_switch_keys(&config.keybinds),
+        &view_switch_keys(&config.keybinds, &plugin_views),
         Some(&header),
     )?;
 
     match action {
         ActionResult::Cancel => Ok(Outcome::Done),
-        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &key) {
+        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &plugin_views, &key) {
             Some(next) => Ok(Outcome::Switch(next)),
             None => Ok(Outcome::Done),
         },

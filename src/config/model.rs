@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,13 @@ pub struct EzConfig {
     /// `repo`, `owner`, `label`). Overridden by `--select-by` on the CLI.
     #[serde(default = "default_select_by")]
     pub default_select_by: String,
+
+    /// Per-plugin user-facing settings. Keyed by plugin name.
+    /// Example in config.toml:
+    ///   [plugin_settings.tmux]
+    ///   auto_attach = true
+    #[serde(default)]
+    pub plugin_settings: HashMap<String, HashMap<String, toml::Value>>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -126,6 +134,7 @@ impl Default for EzConfig {
             plugins: PluginsConfig::default(),
             plugin_timeout: default_plugin_timeout(),
             default_select_by: default_select_by(),
+            plugin_settings: HashMap::new(),
         }
     }
 }

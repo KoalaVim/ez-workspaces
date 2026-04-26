@@ -29,25 +29,30 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
 ];
 
 /// Ensure all bundled plugins are extracted to the plugins directory.
-/// Only writes files that don't already exist (won't overwrite user edits).
+/// Updates files when the bundled version has changed.
 pub fn ensure_bundled_plugins(plugins_dir: &Path) -> Result<()> {
     for plugin in BUNDLED_PLUGINS {
         let plugin_dir = plugins_dir.join(plugin.name);
         let manifest_path = plugin_dir.join("manifest.toml");
         let exec_path = plugin_dir.join(plugin.executable_name);
 
-        // Skip if already exists
-        if manifest_path.exists() && exec_path.exists() {
-            continue;
-        }
-
         fs::create_dir_all(&plugin_dir)?;
 
-        if !manifest_path.exists() {
+        // Write manifest if missing or if bundled version differs
+        let needs_manifest = !manifest_path.exists()
+            || fs::read_to_string(&manifest_path)
+                .map(|c| c != plugin.manifest)
+                .unwrap_or(true);
+        if needs_manifest {
             fs::write(&manifest_path, plugin.manifest)?;
         }
 
-        if !exec_path.exists() {
+        // Write executable if missing or if bundled version differs
+        let needs_exec = !exec_path.exists()
+            || fs::read_to_string(&exec_path)
+                .map(|c| c != plugin.executable)
+                .unwrap_or(true);
+        if needs_exec {
             fs::write(&exec_path, plugin.executable)?;
             #[cfg(unix)]
             {

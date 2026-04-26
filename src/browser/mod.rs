@@ -9,6 +9,7 @@ use colored::Colorize;
 
 use crate::config;
 use crate::error::Result;
+use crate::plugin;
 use crate::repo;
 use crate::session;
 use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
@@ -18,6 +19,7 @@ pub use preview::preview;
 /// Main interactive browser entry point (bare `ez` command).
 pub fn browse(
     cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
     workspace: Option<&str>,
     repo_flag: Option<&Path>,
     select_by: Option<&str>,
@@ -32,16 +34,16 @@ pub fn browse(
         } else {
             std::env::current_dir()?.join(repo_path)
         };
-        return browse_repo(&repo_path, &selector, cd_file, &config.keybinds);
+        return browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config);
     }
 
     // Decide starting view: CLI flag > config default > Workspace.
     let mode = match select_by {
-        Some(v) => views::ViewMode::from_flag(v)?,
-        None => views::ViewMode::from_flag(&config.default_select_by)?,
+        Some(v) => views::ViewMode::from_flag(v, &config)?,
+        None => views::ViewMode::from_flag(&config.default_select_by, &config)?,
     };
 
-    views::run(mode, &selector, &config, workspace, cd_file)
+    views::run(mode, &selector, &config, workspace, cd_file, post_cmd_file)
 }
 
 /// Register repo if needed and enter session action loop.
@@ -49,7 +51,8 @@ pub(crate) fn browse_repo(
     repo_path: &Path,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
-    keybinds: &config::model::KeybindsConfig,
+    post_cmd_file: Option<&Path>,
+    config: &config::model::EzConfig,
 ) -> Result<()> {
     let index = repo::store::load_index()?;
     let repo_entry = if let Some(entry) = index.find_by_path(repo_path) {
@@ -63,7 +66,7 @@ pub(crate) fn browse_repo(
             .expect("just registered")
     };
 
-    session_action_loop(&repo_entry, selector, cd_file, keybinds)
+    session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config)
 }
 
 /// Write the target directory for the shell wrapper to cd into.
@@ -76,13 +79,29 @@ pub(crate) fn write_cd_target(cd_file: Option<&Path>, target_dir: &Path) -> Resu
     Ok(())
 }
 
+/// Write post-exit shell commands for the shell wrapper to source after ez exits.
+pub(crate) fn write_post_commands(post_cmd_file: Option<&Path>, commands: &[String]) -> Result<()> {
+    if commands.is_empty() {
+        return Ok(());
+    }
+    if let Some(path) = post_cmd_file {
+        fs::write(path, commands.join("\n"))?;
+    }
+    Ok(())
+}
+
 /// Session selection loop with action keybinds.
 pub(crate) fn session_action_loop(
     repo_entry: &repo::model::RepoEntry,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
-    keybinds: &config::model::KeybindsConfig,
+    post_cmd_file: Option<&Path>,
+    config: &config::model::EzConfig,
 ) -> Result<()> {
+    let keybinds = &config.keybinds;
+    let plugin_views = plugin::collect_plugin_views("session", config).unwrap_or_default();
+    let plugin_binds = plugin::collect_plugin_binds("session", config).unwrap_or_default();
+
     loop {
         let tree = session::ensure_default_session(&repo_entry.id, &repo_entry.path)?;
         let rendered = tree.render_tree();
@@ -130,24 +149,38 @@ pub(crate) fn session_action_loop(
             )
         });
 
-        let header = format!(
+        let mut header = format!(
             "{}: new  {}: rename  {}: delete  {}: labels",
             keybinds.new_session,
             keybinds.rename_session,
             keybinds.delete_session,
             keybinds.edit_labels,
         );
+        for pv in &plugin_views {
+            header.push_str(&format!("  {}:{}", pv.key, pv.label));
+        }
+        for pb in &plugin_binds {
+            header.push_str(&format!("  {}:{}", pb.key, pb.label));
+        }
+
+        let mut expect_keys: Vec<&str> = vec![
+            keybinds.new_session.as_str(),
+            keybinds.delete_session.as_str(),
+            keybinds.rename_session.as_str(),
+            keybinds.edit_labels.as_str(),
+        ];
+        for pv in &plugin_views {
+            expect_keys.push(pv.key.as_str());
+        }
+        for pb in &plugin_binds {
+            expect_keys.push(pb.key.as_str());
+        }
 
         let action = selector.select_with_actions(
             &session_items,
             &repo_entry.name,
             preview_cmd.as_deref(),
-            &[
-                keybinds.new_session.as_str(),
-                keybinds.delete_session.as_str(),
-                keybinds.rename_session.as_str(),
-                keybinds.edit_labels.as_str(),
-            ],
+            &expect_keys,
             Some(&header),
         )?;
 
@@ -245,7 +278,66 @@ pub(crate) fn session_action_loop(
                             }
                         );
                     }
-                    _ => {}
+                    _ => {
+                        // Check plugin binds first (actions on selected session)
+                        let mut handled = false;
+                        for pb in &plugin_binds {
+                            if key == pb.key {
+                                let response = plugin::run_bind_hook(
+                                    &pb.plugin_name,
+                                    &pb.bind_name,
+                                    &pb.key,
+                                    "session",
+                                    &selected.id,
+                                    &selected.name,
+                                    repo_entry,
+                                    Some(selected),
+                                    config,
+                                )?;
+                                if let Some(ref cd) = response.cd_target {
+                                    write_cd_target(cd_file, cd)?;
+                                }
+                                if !response.post_shell_commands.is_empty() {
+                                    write_post_commands(
+                                        post_cmd_file,
+                                        &response.post_shell_commands,
+                                    )?;
+                                }
+                                if !response.shell_commands.is_empty() {
+                                    plugin::runner::run_shell_commands(
+                                        &response.shell_commands,
+                                    )?;
+                                }
+                                if !response.post_shell_commands.is_empty()
+                                    || response.cd_target.is_some()
+                                {
+                                    return Ok(());
+                                }
+                                handled = true;
+                                break;
+                            }
+                        }
+                        if handled {
+                            continue;
+                        }
+                        // Check if it's a plugin view key
+                        for pv in &plugin_views {
+                            if key == pv.key {
+                                views::run(
+                                    views::ViewMode::Plugin {
+                                        view_name: pv.view_name.clone(),
+                                        plugin_name: pv.plugin_name.clone(),
+                                    },
+                                    selector,
+                                    config,
+                                    None,
+                                    cd_file,
+                                    post_cmd_file,
+                                )?;
+                                return Ok(());
+                            }
+                        }
+                    }
                 }
                 // Loop back to show updated session list
             }

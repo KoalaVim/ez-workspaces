@@ -6,6 +6,7 @@ use colored::Colorize;
 use crate::config;
 use crate::error::Result;
 use crate::paths;
+use crate::plugin;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
@@ -16,12 +17,15 @@ pub(super) fn run(
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     if index.repos.is_empty() {
         println!("{}", "No registered repos. Use `ez add` or `ez clone`.".yellow());
         return Ok(Outcome::Done);
     }
+
+    let plugin_views = plugin::collect_plugin_views("owner", config).unwrap_or_default();
 
     let mut by_owner: BTreeMap<String, Vec<repo::model::RepoEntry>> = BTreeMap::new();
     for entry in &index.repos {
@@ -47,20 +51,20 @@ pub(super) fn run(
         })
         .collect();
 
-    let header = view_header("owner", &config.keybinds);
+    let header = view_header("owner", &config.keybinds, &plugin_views);
 
     let action = selector.select_with_actions(
         &items,
         "owner",
         None,
-        &view_switch_keys(&config.keybinds),
+        &view_switch_keys(&config.keybinds, &plugin_views),
         Some(&header),
     )?;
 
     let owner_idx = match action {
         ActionResult::Cancel => return Ok(Outcome::Done),
         ActionResult::Action(key, _) => {
-            return match match_view_switch(&config.keybinds, &key) {
+            return match match_view_switch(&config.keybinds, &plugin_views, &key) {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }
@@ -94,19 +98,19 @@ pub(super) fn run(
         &sub_items,
         "repo",
         preview_cmd.as_deref(),
-        &view_switch_keys(&config.keybinds),
+        &view_switch_keys(&config.keybinds, &plugin_views),
         Some(&header),
     )?;
 
     match sub_action {
         ActionResult::Cancel => Ok(Outcome::Switch(ViewMode::Owner)),
-        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &key) {
+        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &plugin_views, &key) {
             Some(next) => Ok(Outcome::Switch(next)),
             None => Ok(Outcome::Done),
         },
         ActionResult::Select(idx) => {
             let entry = &entries[idx];
-            browse_repo(&entry.path, selector, cd_file, &config.keybinds)?;
+            browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)?;
             Ok(Outcome::Done)
         }
     }

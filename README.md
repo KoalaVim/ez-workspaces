@@ -44,7 +44,7 @@ ez
 **ez** treats git worktrees as "sessions" organized in a tree hierarchy. Each session is virtual metadata — plugins give sessions physical meaning:
 
 - **git-worktree plugin**: creates/deletes worktrees on session create/delete
-- **tmux plugin**: creates/attaches tmux sessions on enter
+- **tmux plugin**: creates tmux sessions, attach via `Ctrl-a` view or auto-attach on enter
 
 Sessions are tree-based — a session can have child sessions, enabling branching workflows.
 
@@ -108,6 +108,9 @@ Inside the interactive browser (`ez`), press a keybind at the top-level selector
 | `Ctrl-e` | Repo | Flat list of every registered repo |
 | `Ctrl-o` | Owner | Repos grouped by GitHub-style owner (parsed from remote URL) |
 | `Ctrl-g` | Label | Items grouped by user-defined labels |
+| `Ctrl-a` | Tmux (plugin) | Ez-managed tmux sessions (requires tmux plugin) |
+
+Plugin views appear automatically when a plugin is enabled. The tmux plugin registers `Ctrl-a` by default.
 
 Inside the session picker (and the flat Repo view):
 
@@ -180,6 +183,9 @@ backend = "fzf"
 
 [plugins]
 enabled = ["git-worktree", "tmux"]
+
+[plugin_settings.tmux]
+auto_attach = true  # auto-attach to tmux session on session enter
 ```
 
 ## Shell Completions
@@ -204,7 +210,7 @@ ez plugin enable git-worktree
 ez plugin enable tmux
 ```
 
-Custom plugins go in `~/.config/ez/plugins/<name>/`. See [Plugin Guide](docs/plugin-guide.md).
+Plugins can register custom views (shown as extra keybinds in the browser), declare configuration options, and run commands in the user's shell after ez exits. See [Plugin Guide](docs/plugin-guide.md).
 
 ## Docs
 

@@ -53,11 +53,12 @@ Sessions use a flat list with `parent_id` pointers (adjacency list). This is sim
 ### Plugin Protocol
 
 Plugins are external executables using JSON-over-stdio:
-- Request on stdin (single JSON line)
-- Response on stdout (single JSON line)
+- Request on stdin (single JSON line) — includes `bind_context` / `view_context` for interactive hooks
+- Response on stdout (single JSON line) — can return `view_items` for plugin views, `post_shell_commands` for post-exit execution
 - stderr for diagnostics
 - Patch semantics for mutations
 - 30s timeout (configurable)
+- User-facing config via `[plugin_settings.<name>]` in config.toml, delivered in `config.user_config`
 
 ### Interactive Selector Trait
 
@@ -65,11 +66,15 @@ The `InteractiveSelector` trait abstracts the UI backend. The default `FzfSelect
 
 ### Browser View Dispatcher
 
-The browser has a `ViewMode` enum (`Tree`, `Workspace`, `Repo`, `Owner`, `Label`) implemented in `src/browser/views.rs`. `browse()` enters a dispatch loop that renders the current view and listens for view-switch keybinds (`ctrl-t/w/e/o/g` by default). Each view uses `select_with_actions` with the view-switch keys registered in `--expect`; pressing one exits the current fzf instance and the loop continues in the next mode. Nested selectors (drill-down, session picker) keep the smaller keybind surface (`alt-n/d/r/l`) and do not participate in view switching.
+The browser has a `ViewMode` enum (`Tree`, `Workspace`, `Repo`, `Owner`, `Label`, `Plugin`) implemented in `src/browser/views/mod.rs`. `browse()` enters a dispatch loop that renders the current view and listens for view-switch keybinds (`ctrl-t/w/e/o/g` by default, plus plugin view keys like `ctrl-a`). Each view uses `select_with_actions` with the view-switch keys registered in `--expect`; pressing one exits the current fzf instance and the loop continues in the next mode. Plugin views are rendered by `plugin_view.rs` which calls the plugin's `OnView` hook to get items, then `OnViewSelect` on selection. Plugin view keys are collected from enabled plugin manifests and merged into the expect list alongside core keys. Nested selectors (drill-down, session picker) also include plugin view keys.
+
+### Post-Exit Shell Commands
+
+The shell wrapper (`ez init-shell`) sources a post-cmd-file after `cd`. This allows plugins to run commands in the user's shell after ez exits — critical for `tmux switch-client` which needs the user's terminal. Plugins return `post_shell_commands` in their response.
 
 ### Shell Integration
 
-The `cd`-on-enter pattern uses a temp file (same approach as zoxide, nnn). The `ez init-shell` command generates a shell wrapper function.
+The `cd`-on-enter pattern uses a temp file (same approach as zoxide, nnn). The `ez init-shell` command generates a shell wrapper function that also sources a post-cmd-file for plugin post-exit commands.
 
 ## Data Flow
 

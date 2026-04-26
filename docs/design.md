@@ -118,6 +118,29 @@ sequenceDiagram
     Note over EZ: Apply session_mutations
     Note over EZ: Apply repo_mutations
     Note over EZ: Execute shell_commands
+    Note over EZ: Write post_shell_commands to file
+    Note over EZ: Write cd_target to cd-file
+```
+
+## Plugin View Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant B as Browser
+    participant P as Plugin Process
+
+    U->>B: Press Ctrl-a (plugin view key)
+    B->>P: on_view hook
+    P-->>B: view_items + view_prompt
+    B->>U: fzf with plugin items
+    U->>B: Select an item
+    B->>P: on_view_select hook (selected_value)
+    P-->>B: post_shell_commands
+    B->>B: Write post-cmd-file
+    B-->>U: ez exits
+    Note over U: Shell wrapper sources post-cmd-file
+    Note over U: e.g., tmux switch-client
 ```
 
 ## Module Dependencies

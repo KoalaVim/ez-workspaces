@@ -116,7 +116,7 @@ fn set_value(key: &str, value: &str) -> Result<()> {
         }
         "default_select_by" => {
             // Validate early so we never persist an unusable value.
-            crate::browser::views::ViewMode::from_flag(value)?;
+            crate::browser::views::ViewMode::from_flag(value, &config)?;
             config.default_select_by = value.to_string();
         }
         "selector.backend" => config.selector.backend = value.to_string(),

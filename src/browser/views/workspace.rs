@@ -5,6 +5,7 @@ use colored::Colorize;
 use crate::config;
 use crate::error::Result;
 use crate::paths;
+use crate::plugin;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
 use super::super::{browse_repo, drill_into_directory};
@@ -14,6 +15,7 @@ pub(super) fn run(
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
     jump: Option<&str>,
 ) -> Result<Outcome> {
     if config.workspace_roots.is_empty() {
@@ -22,6 +24,8 @@ pub(super) fn run(
         println!("Example: workspace_roots = [\"~/workspace\"]");
         return Ok(Outcome::Done);
     }
+
+    let plugin_views = plugin::collect_plugin_views("workspace", config).unwrap_or_default();
 
     let root_path = if let Some(ws_raw) = jump {
         let ws = ws_raw.trim_end_matches('/');
@@ -66,19 +70,19 @@ pub(super) fn run(
             })
             .collect();
 
-        let header = view_header("workspace", &config.keybinds);
+        let header = view_header("workspace", &config.keybinds, &plugin_views);
         let action = selector.select_with_actions(
             &root_items,
             "workspace",
             None,
-            &view_switch_keys(&config.keybinds),
+            &view_switch_keys(&config.keybinds, &plugin_views),
             Some(&header),
         )?;
 
         match action {
             ActionResult::Cancel => return Ok(Outcome::Done),
             ActionResult::Action(key, _) => {
-                return match match_view_switch(&config.keybinds, &key) {
+                return match match_view_switch(&config.keybinds, &plugin_views, &key) {
                     Some(next) => Ok(Outcome::Switch(next)),
                     None => Ok(Outcome::Done),
                 }
@@ -94,6 +98,6 @@ pub(super) fn run(
         None => return Ok(Outcome::Switch(ViewMode::Workspace)),
     };
 
-    browse_repo(&repo_path, selector, cd_file, &config.keybinds)?;
+    browse_repo(&repo_path, selector, cd_file, post_cmd_file, config)?;
     Ok(Outcome::Done)
 }

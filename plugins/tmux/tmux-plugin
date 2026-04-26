@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tmux plugin for ez-workspaces
 # Creates/attaches/detaches tmux sessions for workspace sessions.
+# Provides a "tmux" view listing ez-managed tmux sessions.
 #
 # Protocol: reads JSON request from stdin, writes JSON response to stdout.
 
@@ -9,9 +10,10 @@ set -euo pipefail
 REQUEST=$(cat)
 
 HOOK=$(echo "$REQUEST" | jq -r '.hook')
-REPO_NAME=$(echo "$REQUEST" | jq -r '.repo.path' | xargs basename)
+REPO_NAME=$(echo "$REQUEST" | jq -r '.repo.path' | xargs basename 2>/dev/null || echo "")
 SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
 SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // .repo.path')
+AUTO_ATTACH=$(echo "$REQUEST" | jq -r '.config.user_config.auto_attach // "false"')
 
 # Tmux session name: repo-name/session-name
 TMUX_SESSION="ez:${REPO_NAME}/${SESSION_NAME}"
@@ -51,24 +53,94 @@ case "$HOOK" in
 
     on_session_enter)
         COMMANDS=()
-        if command -v tmux &>/dev/null; then
+        if command -v tmux &>/dev/null && [ "$AUTO_ATTACH" = "true" ]; then
             if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
-                # Session exists, prepare attach command
                 COMMANDS+=("tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\"")
             else
-                # Create and attach
                 COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && (tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\")")
             fi
         fi
 
-        jq -n \
-            --argjson cmds "$(printf '%s\n' "${COMMANDS[@]}" | jq -R . | jq -s .)" \
-            '{success: true, shell_commands: $cmds}'
+        if [ ${#COMMANDS[@]} -gt 0 ]; then
+            jq -n \
+                --argjson cmds "$(printf '%s\n' "${COMMANDS[@]}" | jq -R . | jq -s .)" \
+                '{success: true, post_shell_commands: $cmds}'
+        else
+            echo '{"success": true}'
+        fi
         ;;
 
     on_session_exit)
-        # Detach from tmux session if inside one
         echo '{"success": true}'
+        ;;
+
+    on_bind)
+        # ctrl-a in session picker: create tmux session if needed, then attach
+        if ! command -v tmux &>/dev/null; then
+            echo '{"success": false, "error": "tmux not installed"}'
+            exit 0
+        fi
+
+        if ! tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
+            tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
+        fi
+
+        CMD="tmux switch-client -t \"=${TMUX_SESSION}\" 2>/dev/null || tmux attach-session -t \"=${TMUX_SESSION}\""
+        jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
+        ;;
+
+    on_view)
+        # List all ez-managed tmux sessions (those starting with "ez:")
+        if ! command -v tmux &>/dev/null; then
+            echo '{"success": true, "view_items": [], "view_prompt": "tmux (not installed)"}'
+            exit 0
+        fi
+
+        if ! tmux list-sessions &>/dev/null; then
+            echo '{"success": true, "view_items": [], "view_prompt": "tmux (no server)"}'
+            exit 0
+        fi
+
+        # Get ez: sessions with window count and activity
+        ITEMS=$(tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}' 2>/dev/null \
+            | { grep '^ez:' || true; } \
+            | while IFS='|' read -r name windows attached; do
+                # Format display: "  ez:repo/session  [2 windows] (attached)"
+                attach_marker=""
+                if [ "$attached" != "0" ]; then
+                    attach_marker=" (attached)"
+                fi
+                display="  ${name}  [${windows} window(s)]${attach_marker}"
+                jq -n --arg d "$display" --arg v "$name" '{display: $d, value: $v}'
+            done \
+            | jq -s '.')
+
+        # If no ez sessions found
+        if [ -z "$ITEMS" ] || [ "$ITEMS" = "[]" ] || [ "$ITEMS" = "null" ]; then
+            ITEMS="[]"
+        fi
+
+        jq -n \
+            --argjson items "$ITEMS" \
+            '{
+                success: true,
+                view_items: $items,
+                view_prompt: "tmux sessions"
+            }'
+        ;;
+
+    on_view_select)
+        SELECTED=$(echo "$REQUEST" | jq -r '.view_context.selected_value // empty')
+
+        if [ -z "$SELECTED" ]; then
+            echo '{"success": false, "error": "no selection"}'
+            exit 0
+        fi
+
+        # Build the switch/attach command
+        CMD="tmux switch-client -t \"=${SELECTED}\" 2>/dev/null || tmux attach-session -t \"=${SELECTED}\""
+
+        jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
     *)

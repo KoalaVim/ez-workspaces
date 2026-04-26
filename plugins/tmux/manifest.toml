@@ -1,5 +1,25 @@
 name = "tmux"
-version = "0.1.0"
+version = "0.2.0"
 description = "Manages tmux sessions for workspaces"
-hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit"]
+hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_bind", "on_view", "on_view_select"]
 executable = "tmux-plugin"
+
+# In the session picker: ctrl-a creates/attaches to the tmux session for the selected session
+[[binds]]
+key = "ctrl-a"
+name = "tmux_attach"
+label = "tmux"
+contexts = ["session"]
+
+# In other views: ctrl-a shows a list of all ez-managed tmux sessions
+[[views]]
+name = "tmux"
+key = "ctrl-a"
+label = "tmux"
+contexts = ["repo", "owner", "workspace", "tree", "label"]
+
+[[config_schema]]
+name = "auto_attach"
+type = "bool"
+default = false
+description = "Automatically attach/switch to tmux session when entering a session"

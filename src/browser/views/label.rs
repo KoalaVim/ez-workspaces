@@ -6,6 +6,7 @@ use colored::Colorize;
 use crate::config;
 use crate::error::Result;
 use crate::paths;
+use crate::plugin;
 use crate::repo;
 use crate::session;
 
@@ -29,6 +30,7 @@ pub(super) fn run(
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     let mut by_label: BTreeMap<String, Vec<LabeledItem>> = BTreeMap::new();
@@ -64,6 +66,8 @@ pub(super) fn run(
         return Ok(Outcome::Done);
     }
 
+    let plugin_views = plugin::collect_plugin_views("label", config).unwrap_or_default();
+
     let labels: Vec<(String, Vec<LabeledItem>)> = by_label.into_iter().collect();
     let items: Vec<SelectItem> = labels
         .iter()
@@ -82,20 +86,20 @@ pub(super) fn run(
         })
         .collect();
 
-    let header = view_header("label", &config.keybinds);
+    let header = view_header("label", &config.keybinds, &plugin_views);
 
     let action = selector.select_with_actions(
         &items,
         "label",
         None,
-        &view_switch_keys(&config.keybinds),
+        &view_switch_keys(&config.keybinds, &plugin_views),
         Some(&header),
     )?;
 
     let label_idx = match action {
         ActionResult::Cancel => return Ok(Outcome::Done),
         ActionResult::Action(key, _) => {
-            return match match_view_switch(&config.keybinds, &key) {
+            return match match_view_switch(&config.keybinds, &plugin_views, &key) {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }
@@ -138,19 +142,19 @@ pub(super) fn run(
         &sub_items,
         "tagged",
         None,
-        &view_switch_keys(&config.keybinds),
+        &view_switch_keys(&config.keybinds, &plugin_views),
         Some(&header),
     )?;
 
     match sub_action {
         ActionResult::Cancel => Ok(Outcome::Switch(ViewMode::Label)),
-        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &key) {
+        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &plugin_views, &key) {
             Some(next) => Ok(Outcome::Switch(next)),
             None => Ok(Outcome::Done),
         },
         ActionResult::Select(idx) => match &tagged[idx] {
             LabeledItem::Repo(r) => {
-                browse_repo(&r.path, selector, cd_file, &config.keybinds)?;
+                browse_repo(&r.path, selector, cd_file, post_cmd_file, config)?;
                 Ok(Outcome::Done)
             }
             LabeledItem::Session(b) => {

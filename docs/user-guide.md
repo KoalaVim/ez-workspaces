@@ -26,7 +26,7 @@ eval "$(ez init-shell zsh)"
 ez init-shell fish | source
 ```
 
-This creates a shell wrapper that enables `cd`-on-enter when you select a session.
+This creates a shell wrapper that enables `cd`-on-enter when you select a session and runs post-exit commands from plugins (e.g., tmux attach).
 
 ### Shell Completions
 
@@ -97,7 +97,7 @@ ez session list
 # feature-login
 #   api-tests
 
-# Enter a session (cd's to worktree, attaches tmux)
+# Enter a session (cd's to worktree; attaches tmux if auto_attach is on)
 ez session enter feature-login
 
 # Delete (cascades with --force)
@@ -120,6 +120,9 @@ At any top-level selector, press a keybind to switch views:
 - **Ctrl-e** — Repo view: flat list of every registered repo
 - **Ctrl-o** — Owner view: repos grouped by GitHub-style owner (parsed from remote URL)
 - **Ctrl-g** — Label view: items grouped by user-defined labels
+- **Ctrl-a** — Tmux view (plugin): ez-managed tmux sessions — select to attach/switch
+
+Plugin views appear automatically when enabled plugins register them. The tmux plugin adds `Ctrl-a`.
 
 Inside the session picker:
 

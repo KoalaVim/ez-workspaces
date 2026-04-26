@@ -5,6 +5,7 @@ use colored::Colorize;
 use crate::config;
 use crate::error::Result;
 use crate::paths;
+use crate::plugin;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
@@ -15,12 +16,15 @@ pub(super) fn run(
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     if index.repos.is_empty() {
         println!("{}", "No registered repos. Use `ez add` or `ez clone`.".yellow());
         return Ok(Outcome::Done);
     }
+
+    let plugin_views = plugin::collect_plugin_views("repo", config).unwrap_or_default();
 
     let items: Vec<SelectItem> = index
         .repos
@@ -43,9 +47,9 @@ pub(super) fn run(
 
     let ez_bin = std::env::current_exe().ok();
     let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
-    let header = view_header("repo", &config.keybinds);
+    let header = view_header("repo", &config.keybinds, &plugin_views);
     let keys = {
-        let mut k = view_switch_keys(&config.keybinds);
+        let mut k = view_switch_keys(&config.keybinds, &plugin_views);
         k.push(config.keybinds.edit_labels.as_str());
         k
     };
@@ -62,7 +66,7 @@ pub(super) fn run(
         match action {
             ActionResult::Cancel => return Ok(Outcome::Done),
             ActionResult::Action(key, idx) => {
-                if let Some(next) = match_view_switch(&config.keybinds, &key) {
+                if let Some(next) = match_view_switch(&config.keybinds, &plugin_views, &key) {
                     return Ok(Outcome::Switch(next));
                 }
                 if key == config.keybinds.edit_labels {
@@ -90,7 +94,7 @@ pub(super) fn run(
             }
             ActionResult::Select(idx) => {
                 let entry = &index.repos[idx];
-                browse_repo(&entry.path, selector, cd_file, &config.keybinds)?;
+                browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)?;
                 return Ok(Outcome::Done);
             }
         }

@@ -46,16 +46,18 @@ docs/               Documentation
 - `mod.rs`: new, delete, enter, exit, rename, ensure_default_session
 
 ### plugin/ - Plugin System
-- `model.rs`: `PluginManifest`, `HookType` enum (10 hook types)
-- `protocol.rs`: `HookRequest`, `HookResponse` JSON types
+- `model.rs`: `PluginManifest`, `HookType` enum (13 hook types including `OnBind`, `OnView`, `OnViewSelect`), `PluginBind`, `PluginView`, `ConfigField`
+- `protocol.rs`: `HookRequest` (with `BindContext`, `ViewContext`), `HookResponse` (with `post_shell_commands`, `cd_target`, `view_items`), `PluginConfig` (with `user_config`), `ViewItem`
 - `runner.rs`: process execution with timeout
-- `mod.rs`: hook dispatch, enable/disable
+- `bundled.rs`: embedded plugins, auto-extracted and auto-updated on version change
+- `mod.rs`: hook dispatch, enable/disable, `collect_plugin_views()`, `run_view_hook()`, `run_view_select_hook()`
 
 ### browser/ - Interactive Browser
 - `selector.rs`: `InteractiveSelector` trait + `FzfSelector` impl
 - `mod.rs`: drill-down browse flow, session action loop, label input parser, shared git helpers
 - `preview.rs`: fzf preview pane renderer (repo, directory, keybind help)
-- `views.rs`: top-level view dispatcher (`ViewMode`: Tree/Workspace/Repo/Owner/Label) with view-switch keybind handling
+- `views/mod.rs`: top-level view dispatcher (`ViewMode`: Tree/Workspace/Repo/Owner/Label/Plugin) with view-switch keybind handling including plugin views
+- `views/plugin_view.rs`: renderer for plugin-provided views (OnView → fzf → OnViewSelect)
 
 ## Key Traits
 

@@ -12,6 +12,10 @@ pub struct Cli {
     #[arg(long, hide = true, global = true)]
     pub cd_file: Option<PathBuf>,
 
+    /// Write post-exit shell commands to this file (sourced by shell wrapper after ez exits)
+    #[arg(long, hide = true, global = true)]
+    pub post_cmd_file: Option<PathBuf>,
+
     /// Disable colored output
     #[arg(long, global = true)]
     pub no_color: bool,
@@ -28,8 +32,9 @@ pub struct Cli {
     #[arg(long, short)]
     pub repo: Option<PathBuf>,
 
-    /// Start the browser by a specific selection type (overrides `default_select_by` in config)
-    #[arg(long, value_name = "MODE", value_parser = ["tree", "workspace", "repo", "owner", "label"])]
+    /// Start the browser by a specific selection type (overrides `default_select_by` in config).
+    /// Built-in: tree, workspace, repo, owner, label. Plugins can register additional views.
+    #[arg(long, value_name = "MODE")]
     pub select_by: Option<String>,
 }
 
