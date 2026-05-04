@@ -77,6 +77,7 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez session enter <name>` | Enter a session |
 | `ez session delete <name>` | Delete session (`--force` for cascade) |
 | `ez session rename <old> <new>` | Rename a session |
+| `ez cd-to-session` | From inside a tmux session, cd back to that ez session's worktree (reads the `@ez_session_path` tmux option set by the tmux plugin) |
 | `ez session label add <name> <label>...` | Add labels to a session |
 | `ez session label remove <name> <label>...` | Remove labels from a session |
 | `ez session label list [<name>]` | List labels (or group sessions by label) |

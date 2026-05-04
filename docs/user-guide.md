@@ -124,6 +124,18 @@ At any top-level selector, press a keybind to switch views:
 
 Plugin views appear automatically when enabled plugins register them. The tmux plugin adds `Ctrl-a`.
 
+### Jumping back to a session's worktree from tmux
+
+When the tmux plugin creates a session it stamps the session's worktree path on the tmux session as the `@ez_session_path` user option. From any pane inside that tmux session you can return to the worktree with:
+
+```bash
+ez cd-to-session
+```
+
+This reads `@ez_session_path` from the current tmux session and `cd`s your shell to it (via the shell wrapper installed by `ez init-shell`). Useful after navigating elsewhere or when opening a new pane that didn't inherit the cwd.
+
+> The option is only set when the tmux session is created by the plugin (on `session new`, the `Ctrl-a` bind, or the tmux view). Pre-existing sessions created before this feature won't have it — recreate them or trigger `Ctrl-a` from the picker to stamp it.
+
 Inside the session picker:
 
 - **Alt-n** — New child session
