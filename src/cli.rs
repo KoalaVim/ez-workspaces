@@ -80,6 +80,11 @@ pub enum Command {
         command: Option<ConfigCommand>,
     },
 
+    /// Cd to the path of the current tmux session's ez session.
+    /// Reads the @ez_session_path tmux user option from the current tmux
+    /// session and writes it to --cd-file (or prints it).
+    CdToSession,
+
     /// Initialize shell integration (prints shell function to eval)
     InitShell {
         /// Shell type: bash, zsh, fish

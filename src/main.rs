@@ -22,6 +22,8 @@ fn main() {
             .filter_level(log::LevelFilter::Debug)
             .target(env_logger::Target::Pipe(Box::new(file)))
             .init();
+        // Plugins read EZ_DEBUG to decide whether to emit their own debug logs.
+        std::env::set_var("EZ_DEBUG", "1");
         log::debug!("ez debug session started: {:?}", std::env::args().collect::<Vec<_>>());
         Some(path)
     } else {
@@ -47,6 +49,7 @@ fn main() {
         Some(Command::Repo { command }) => repo::dispatch(command),
         Some(Command::Plugin { command }) => plugin::dispatch(command),
         Some(Command::Config { command }) => config::dispatch(command),
+        Some(Command::CdToSession) => cd_to_session(cli.cd_file.as_deref()),
         Some(Command::InitShell { shell }) => print_shell_init(&shell),
         Some(Command::Completions { shell }) => {
             generate_completions(shell);
@@ -75,6 +78,43 @@ fn main() {
         eprintln!("{} {e}", "ez:".red().bold());
         std::process::exit(1);
     }
+}
+
+fn cd_to_session(cd_file: Option<&std::path::Path>) -> error::Result<()> {
+    // Must be inside tmux: $TMUX is set by the server when a client is attached.
+    if std::env::var_os("TMUX").is_none() {
+        return Err(error::EzError::Config(
+            "ez cd-to-session must be run from inside a tmux session".into(),
+        ));
+    }
+
+    // Ask tmux for the @ez_session_path user option on the current session.
+    // -v prints the value only; -q stays quiet if the option is unset.
+    let output = std::process::Command::new("tmux")
+        .args(["show-options", "-v", "-q", "@ez_session_path"])
+        .output()
+        .map_err(|e| error::EzError::Config(format!("failed to run tmux: {e}")))?;
+
+    if !output.status.success() {
+        return Err(error::EzError::Config(format!(
+            "tmux show-options failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if path.is_empty() {
+        return Err(error::EzError::Config(
+            "current tmux session has no @ez_session_path (not an ez-managed session, or session was created before this feature)".into(),
+        ));
+    }
+
+    if let Some(cd_path) = cd_file {
+        std::fs::write(cd_path, path.as_bytes())?;
+    } else {
+        println!("{path}");
+    }
+    Ok(())
 }
 
 fn print_shell_init(shell: &str) -> error::Result<()> {

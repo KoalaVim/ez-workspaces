@@ -106,35 +106,71 @@ pub fn run_hooks(
 
     log::debug!("run_hooks: hook={:?} repo={} enabled_plugins={:?}", hook, repo_entry.name, config.plugins.enabled);
 
+    // Load manifests for all enabled plugins that handle this hook, then
+    // sort so plugins that mutate session.path run first. This ensures
+    // downstream plugins (e.g. tmux) see the resolved worktree path set by
+    // earlier plugins (e.g. git-worktree).
+    let mut plugins: Vec<(String, PluginManifest)> = Vec::new();
     for plugin_name in &config.plugins.enabled {
-        let plugin_dir = plugins_dir.join(plugin_name);
-        let manifest_path = plugin_dir.join("manifest.toml");
-
+        let manifest_path = plugins_dir.join(plugin_name).join("manifest.toml");
         if !manifest_path.exists() {
             log::debug!("plugin [{}]: manifest not found at {}", plugin_name, manifest_path.display());
             continue;
         }
-
         let manifest_contents = fs::read_to_string(&manifest_path)?;
         let manifest: PluginManifest = toml::from_str(&manifest_contents)?;
-
-        // Skip if this plugin doesn't handle this hook
         if !manifest.hooks.contains(&hook) {
             log::debug!("plugin [{}]: skipping, does not handle {:?}", plugin_name, hook);
             continue;
         }
+        plugins.push((plugin_name.clone(), manifest));
+    }
+    // Stable sort: path-mutators first, preserving enable-order otherwise.
+    plugins.sort_by_key(|(_, m)| !m.mutates_session_path);
+    log::debug!(
+        "hook={:?} plugin order: {:?}",
+        hook,
+        plugins
+            .iter()
+            .map(|(n, m)| format!("{}(mutates_path={})", n, m.mutates_session_path))
+            .collect::<Vec<_>>()
+    );
+
+    for (plugin_name, manifest) in &plugins {
+        let plugin_dir = plugins_dir.join(plugin_name);
 
         log::debug!("plugin [{}]: running {:?} hook", plugin_name, hook);
 
-        let request = build_request(&hook, repo_entry, repo_meta, session, plugin_name, config);
+        // Refresh session from tree so this plugin sees mutations applied by
+        // earlier plugins in this hook batch (e.g. git-worktree sets
+        // session.path, which tmux then needs to start its session in the
+        // worktree dir rather than the repo root).
+        let current_session = session.and_then(|s| tree.find_by_id(&s.id)).or(session);
+        log::debug!(
+            "plugin [{}]: input session.path={:?}",
+            plugin_name,
+            current_session.and_then(|s| s.path.as_ref())
+        );
+        let request = build_request(&hook, repo_entry, repo_meta, current_session, plugin_name, config);
 
-        match runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout) {
+        match runner::execute(manifest, &plugin_dir, &request, config.plugin_timeout) {
             Ok(response) => {
+                log::debug!(
+                    "plugin [{}]: response success={} mutations.path={:?}",
+                    plugin_name,
+                    response.success,
+                    response.session_mutations.as_ref().and_then(|m| m.path.as_ref())
+                );
                 // Apply session mutations
                 if let (Some(mutations), Some(sess)) = (&response.session_mutations, session) {
                     if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == sess.id) {
                         if let Some(path) = &mutations.path {
                             s.path = Some(path.clone());
+                            log::debug!(
+                                "plugin [{}]: applied path mutation; session.path={:?}",
+                                plugin_name,
+                                s.path
+                            );
                         }
                         s.env.extend(mutations.env.clone());
                         s.plugin_state.extend(

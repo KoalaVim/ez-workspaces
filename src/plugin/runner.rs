@@ -43,6 +43,29 @@ pub fn execute(
         cmd.env("EZ_CONFIG_DIR", config_dir);
     }
 
+    // In --debug mode, give each plugin invocation its own log file so the
+    // plugin can write rich diagnostics without polluting stderr/stdout.
+    // Plugins should append to $EZ_PLUGIN_DEBUG_LOG only when it's set.
+    if std::env::var_os("EZ_DEBUG").is_some() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let log_path = std::env::temp_dir().join(format!(
+            "ez-plugin-{}-{}-{}-{}.log",
+            manifest.name,
+            request.hook,
+            std::process::id(),
+            ts,
+        ));
+        log::debug!(
+            "plugin [{}]: debug log -> {}",
+            manifest.name,
+            log_path.display()
+        );
+        cmd.env("EZ_PLUGIN_DEBUG_LOG", &log_path);
+    }
+
     let mut child = cmd
         .spawn()
         .map_err(|e| EzError::PluginFailed(manifest.name.clone(), e.to_string()))?;

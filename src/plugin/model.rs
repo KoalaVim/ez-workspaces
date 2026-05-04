@@ -18,6 +18,11 @@ pub struct PluginManifest {
     /// User-facing configuration schema
     #[serde(default)]
     pub config_schema: Vec<ConfigField>,
+    /// Whether this plugin mutates `session.path` (e.g. sets the worktree
+    /// directory). Plugins with this flag run before plugins without it for
+    /// each hook, so downstream plugins see the resolved path.
+    #[serde(default)]
+    pub mutates_session_path: bool,
 }
 
 /// A keybind registered by a plugin for actions on the currently selected item.

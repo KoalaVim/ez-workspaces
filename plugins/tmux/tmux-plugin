@@ -7,6 +7,34 @@
 
 set -euo pipefail
 
+# Debug logger: ez sets EZ_PLUGIN_DEBUG_LOG to a per-invocation path when
+# invoked with --debug. Without that env var, dbg() is a no-op so production
+# runs stay silent. Initialize the file with a header on first call.
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== tmux-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# Run a tmux command and log argv + rc + combined output. Echoes the output
+# to stdout so callers can still capture it.
+dbg_tmux() {
+    if [ -z "${EZ_PLUGIN_DEBUG_LOG:-}" ]; then
+        tmux "$@"
+        return $?
+    fi
+    local out rc
+    out=$(tmux "$@" 2>&1) || rc=$?
+    rc=${rc:-0}
+    dbg "tmux $* -> rc=$rc out='$out'"
+    [ -n "$out" ] && printf '%s\n' "$out"
+    return $rc
+}
+
 REQUEST=$(cat)
 
 HOOK=$(echo "$REQUEST" | jq -r '.hook')
@@ -28,19 +56,35 @@ TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.:' '__')
 # Args: $1 = tmux session name
 mark_ez_managed() {
     local sess="$1"
-    tmux set-option -t "=${sess}" -q @ez_managed "1" 2>/dev/null || true
-    tmux set-option -t "=${sess}" -q @ez_repo_id "${REPO_ID}" 2>/dev/null || true
-    tmux set-option -t "=${sess}" -q @ez_session_id "${SESSION_ID}" 2>/dev/null || true
-    tmux set-option -t "=${sess}" -q @ez_session_name "${SESSION_NAME}" 2>/dev/null || true
+    dbg "--- mark_ez_managed sess='${sess}' ---"
+
+    dbg_tmux set-option -t "${sess}" @ez_managed "1"                  >/dev/null || true
+    dbg_tmux set-option -t "${sess}" @ez_repo_id "${REPO_ID}"         >/dev/null || true
+    dbg_tmux set-option -t "${sess}" @ez_session_id "${SESSION_ID}"   >/dev/null || true
+    dbg_tmux set-option -t "${sess}" @ez_session_name "${SESSION_NAME}" >/dev/null || true
+    dbg_tmux set-option -t "${sess}" @ez_session_path "${SESSION_PATH}" >/dev/null || true
 }
 
 case "$HOOK" in
     on_session_create)
         # Create tmux session if tmux is running
         if command -v tmux &>/dev/null; then
-            if ! tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
-                tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
+            dbg "env: TMUX='${TMUX:-}' TMUX_PANE='${TMUX_PANE:-}' TMUX_TMPDIR='${TMUX_TMPDIR:-}'"
+            dbg "target session: '${TMUX_SESSION}'"
+            dbg "session path: '${SESSION_PATH}'"
+
+            dbg "before: list-sessions:"
+            dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
+
+            if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" >/dev/null || true
+            else
+                dbg "session already exists, skipping new-session"
             fi
+
+            dbg "after: list-sessions:"
+            dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
+
             mark_ez_managed "$TMUX_SESSION"
         fi
 
@@ -61,7 +105,7 @@ case "$HOOK" in
 
     on_session_delete)
         if command -v tmux &>/dev/null; then
-            tmux kill-session -t "=${TMUX_SESSION}" 2>/dev/null || true
+            tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null || true
         fi
         echo '{"success": true}'
         ;;
@@ -69,8 +113,8 @@ case "$HOOK" in
     on_session_enter)
         COMMANDS=()
         if command -v tmux &>/dev/null && [ "$AUTO_ATTACH" = "true" ]; then
-            ATTACH="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_SESSION}\"; else tmux attach-session -t \"=${TMUX_SESSION}\"; fi"
-            if tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
+            ATTACH="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION}\"; else tmux attach-session -t \"${TMUX_SESSION}\"; fi"
+            if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
                 COMMANDS+=("$ATTACH")
             else
                 COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && ${ATTACH}")
@@ -97,12 +141,12 @@ case "$HOOK" in
             exit 0
         fi
 
-        if ! tmux has-session -t "=${TMUX_SESSION}" 2>/dev/null; then
+        if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
             tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
         fi
         mark_ez_managed "$TMUX_SESSION"
 
-        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_SESSION}\"; else tmux attach-session -t \"=${TMUX_SESSION}\"; fi"
+        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION}\"; else tmux attach-session -t \"${TMUX_SESSION}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
@@ -223,15 +267,17 @@ case "$HOOK" in
         fi
 
         # Create the tmux session if it doesn't exist
-        if ! tmux has-session -t "=${TMUX_NAME}" 2>/dev/null; then
+        if ! tmux has-session -t "${TMUX_NAME}" 2>/dev/null; then
             tmux new-session -d -s "$TMUX_NAME" -c "$SESS_PATH" 2>&1 >&2 || true
         fi
+        # Stamp the session path so `ez cd-to-session` can recover it.
+        tmux set-option -t "${TMUX_NAME}" -q @ez_session_path "${SESS_PATH}" 2>/dev/null || true
 
         # If the user's shell is inside tmux ($TMUX set), switch the current
         # client. Otherwise, attach in the current terminal — never call
         # switch-client without $TMUX, since tmux will switch some random
         # other client in another terminal.
-        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_NAME}\"; else tmux attach-session -t \"=${TMUX_NAME}\"; fi"
+        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_NAME}\"; else tmux attach-session -t \"${TMUX_NAME}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
