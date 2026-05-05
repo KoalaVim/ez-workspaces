@@ -64,10 +64,24 @@ pub struct EzConfig {
 pub struct SessionNameStage {
     /// Prompt label shown to the user.
     pub name: String,
-    /// Pickable choices. May be empty — the user can still type a custom
-    /// value or pick "(none)".
+    /// Stage kind: "choice" shows an fzf list (with `(custom)` and `(none)`
+    /// sentinels); "text" goes straight to a free-text prompt.
+    #[serde(default)]
+    pub kind: StageKind,
+    /// Pickable choices for `kind = "choice"` stages. Ignored for `text`.
+    /// May be empty — the user can still pick `(custom)` or `(none)`.
     #[serde(default)]
     pub choices: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum StageKind {
+    #[default]
+    Choice,
+    /// Free-text input. Empty input is treated like `(none)` — the part is
+    /// skipped. Ctrl-P still goes back to the previous stage.
+    Text,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -259,10 +273,17 @@ fn default_session_name_stages() -> Vec<SessionNameStage> {
     vec![
         SessionNameStage {
             name: "prefix".into(),
+            kind: StageKind::Choice,
             choices: vec!["feat".into(), "fix".into(), "chore".into()],
         },
         SessionNameStage {
-            name: "ticket".into(),
+            name: "ticket-prefix".into(),
+            kind: StageKind::Choice,
+            choices: Vec::new(),
+        },
+        SessionNameStage {
+            name: "ticket-number".into(),
+            kind: StageKind::Text,
             choices: Vec::new(),
         },
     ]

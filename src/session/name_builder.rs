@@ -11,7 +11,7 @@
 //! joined name must be non-empty.
 
 use crate::browser::selector::{InteractiveSelector, SelectItem, StageOutcome};
-use crate::config::model::EzConfig;
+use crate::config::model::{EzConfig, StageKind};
 use crate::error::{EzError, Result};
 
 const NONE_VALUE: &str = "__none__";
@@ -43,52 +43,51 @@ pub fn prompt_session_name(
 
     loop {
         let is_final = idx == stages.len();
-        let prompt: String = if is_final {
-            "name".into()
+        let (prompt, kind, choices): (String, StageKind, &[String]) = if is_final {
+            // Implicit final descriptive-name stage: always free text, no
+            // (none) (the joined name must be non-empty), but back works.
+            ("name".into(), StageKind::Text, &[])
         } else {
-            stages[idx].name.clone()
+            let s = &stages[idx];
+            (s.name.clone(), s.kind.clone(), s.choices.as_slice())
         };
-        let choices: &[String] = if is_final { &[] } else { &stages[idx].choices };
-        let items = build_items(choices, /*include_none=*/ !is_final);
+        let allow_back = idx > 0;
 
-        match selector.select_with_back(&prompt, &items, /*allow_back=*/ idx > 0)? {
-            StageOutcome::Picked(value) => {
-                if value == NONE_VALUE {
-                    parts[idx] = None;
-                    idx += 1;
-                } else if value == CUSTOM_VALUE {
-                    let typed = selector.input(&prompt, None)?;
-                    let trimmed = typed.trim();
-                    if trimmed.is_empty() {
-                        // Empty/Esc on the input prompt — fall back to the
-                        // selection screen rather than treating as cancel.
-                        continue;
+        let outcome = match kind {
+            StageKind::Choice => {
+                let items = build_items(choices, /*include_none=*/ !is_final);
+                selector.select_with_back(&prompt, &items, allow_back)?
+            }
+            StageKind::Text => selector.input_with_back(&prompt, None, allow_back)?,
+        };
+
+        match outcome {
+            StageOutcome::Picked(raw) => {
+                let value = handle_pick(&kind, &raw, selector, &prompt)?;
+                match value {
+                    PickResolution::Use(s) => {
+                        parts[idx] = Some(s);
+                        if is_final {
+                            let joined = join_parts(&parts);
+                            if joined.is_empty() {
+                                eprintln!("Session name cannot be empty.");
+                                parts[idx] = None;
+                                continue;
+                            }
+                            return Ok(NamePromptResult::Done(joined));
+                        }
+                        idx += 1;
                     }
-                    parts[idx] = Some(trimmed.to_string());
-                    if is_final {
-                        let joined = join_parts(&parts);
-                        if joined.is_empty() {
+                    PickResolution::None => {
+                        if is_final {
+                            // Final stage cannot be empty; re-prompt.
                             eprintln!("Session name cannot be empty.");
-                            parts[idx] = None;
                             continue;
                         }
-                        return Ok(NamePromptResult::Done(joined));
+                        parts[idx] = None;
+                        idx += 1;
                     }
-                    idx += 1;
-                } else {
-                    parts[idx] = Some(value);
-                    if is_final {
-                        // The final stage has no preset choices, so this
-                        // branch is unreachable in practice. Defensive:
-                        let joined = join_parts(&parts);
-                        if joined.is_empty() {
-                            eprintln!("Session name cannot be empty.");
-                            parts[idx] = None;
-                            continue;
-                        }
-                        return Ok(NamePromptResult::Done(joined));
-                    }
-                    idx += 1;
+                    PickResolution::Reprompt => continue,
                 }
             }
             StageOutcome::Back => {
@@ -97,6 +96,49 @@ pub fn prompt_session_name(
                 }
             }
             StageOutcome::Cancel => return Ok(NamePromptResult::Cancelled),
+        }
+    }
+}
+
+enum PickResolution {
+    /// Use this string for the part.
+    Use(String),
+    /// Skip this part (treated as `(none)`).
+    None,
+    /// Stay on this stage (e.g. user cancelled the (custom) sub-prompt).
+    Reprompt,
+}
+
+fn handle_pick(
+    kind: &StageKind,
+    raw: &str,
+    selector: &dyn InteractiveSelector,
+    prompt: &str,
+) -> Result<PickResolution> {
+    match kind {
+        StageKind::Text => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Ok(PickResolution::None)
+            } else {
+                Ok(PickResolution::Use(trimmed.to_string()))
+            }
+        }
+        StageKind::Choice => {
+            if raw == NONE_VALUE {
+                Ok(PickResolution::None)
+            } else if raw == CUSTOM_VALUE {
+                let typed = selector.input(prompt, None)?;
+                let trimmed = typed.trim();
+                if trimmed.is_empty() {
+                    // User Esc'd the input prompt — go back to the choice list.
+                    Ok(PickResolution::Reprompt)
+                } else {
+                    Ok(PickResolution::Use(trimmed.to_string()))
+                }
+            } else {
+                Ok(PickResolution::Use(raw.to_string()))
+            }
         }
     }
 }

@@ -67,6 +67,16 @@ pub trait InteractiveSelector {
         allow_back: bool,
     ) -> Result<StageOutcome>;
 
+    /// Free-text input with optional Ctrl-P back keybind. Returns
+    /// `StageOutcome::Picked(s)` (where `s` may be empty), `Back`, or
+    /// `Cancel`. Used by free-text stages that still want back navigation.
+    fn input_with_back(
+        &self,
+        prompt: &str,
+        default: Option<&str>,
+        allow_back: bool,
+    ) -> Result<StageOutcome>;
+
     /// Present items with keybind actions. Returns which key was pressed + selected index.
     fn select_with_actions(
         &self,
@@ -407,6 +417,86 @@ impl InteractiveSelector for FzfSelector {
             return Ok(StageOutcome::Cancel);
         }
         Ok(StageOutcome::Picked(selection_value))
+    }
+
+    fn input_with_back(
+        &self,
+        prompt: &str,
+        default: Option<&str>,
+        allow_back: bool,
+    ) -> Result<StageOutcome> {
+        // fzf with no items, --print-query, and (optionally) --expect=ctrl-p.
+        // With both flags, fzf's output ordering is: query, key. (Selection
+        // is absent because there are no items.)
+        let mut args = vec![
+            "--prompt".to_string(),
+            format!("{prompt}: "),
+            "--print-query".to_string(),
+            "--height".to_string(),
+            "~10%".to_string(),
+            "--layout".to_string(),
+            "reverse".to_string(),
+        ];
+
+        let header_hint = if allow_back {
+            "Enter: confirm · Ctrl-P: back · Esc: cancel"
+        } else {
+            "Enter: confirm · Esc: cancel"
+        };
+        args.push("--header".to_string());
+        args.push(header_hint.to_string());
+        args.push("--header-first".to_string());
+
+        if allow_back {
+            args.push("--expect".to_string());
+            args.push("ctrl-p".to_string());
+        }
+
+        if let Some(def) = default {
+            args.push("--query".to_string());
+            args.push(def.to_string());
+        }
+
+        let mut child = Command::new("fzf")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| EzError::SelectorUnavailable(e.to_string()))?;
+
+        // No items.
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output()?;
+        let code = output.status.code().unwrap_or(-1);
+
+        if code == 130 {
+            return Ok(StageOutcome::Cancel);
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let mut lines = raw.lines();
+        // With --print-query, line 1 is the query. With --expect, the next
+        // line is the pressed key (empty for Enter). When --expect is not
+        // set, there's no key line at all.
+        let query = lines.next().unwrap_or("").to_string();
+        let key = if allow_back {
+            lines.next().unwrap_or("").to_string()
+        } else {
+            String::new()
+        };
+
+        log::debug!(
+            "input_with_back: query={query:?} key={key:?} exit={code} allow_back={allow_back}"
+        );
+
+        if key == "ctrl-p" {
+            return Ok(StageOutcome::Back);
+        }
+
+        // Empty query on Enter is allowed — caller decides what to do.
+        Ok(StageOutcome::Picked(query))
     }
 
     fn select_with_actions(

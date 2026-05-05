@@ -110,16 +110,17 @@ When you create a new session *without* passing a name (`ez session new` with no
 arg, or `Alt-n` in the browser), ez walks you through a short staged prompt and
 joins the parts with `-`:
 
-1. Each configured stage shows an fzf list with: the configured choices, a
-   `(custom)` row, and a `(none)` row.
-   - Pick a choice → that value is used.
-   - Pick `(custom)` → a separate text-input prompt opens; what you type
-     becomes this part. Empty input returns you to the selection list.
-   - Pick `(none)` → skip this part of the name.
-   - `Ctrl-P` goes back to the previous stage; `Esc` cancels.
-2. The final stage is the descriptive name. It shows just `(custom)` (and
-   `Ctrl-P` for back) — pick `(custom)` and type the name. The joined name
-   can't be empty.
+Stages come in two kinds:
+
+- **`choice` (default)** — fzf list with the configured choices plus
+  `(custom)` and `(none)` rows. Picking `(custom)` opens a separate text
+  prompt; picking `(none)` skips the part.
+- **`text`** — skips fzf entirely and goes straight to a text prompt. Empty
+  input is treated like `(none)` (the part is skipped).
+
+`Ctrl-P` goes back to the previous stage in either kind; `Esc` cancels. The
+final descriptive-name stage is implicit (always added), text-mode, and
+cannot be empty.
 
 `(none)` parts contribute nothing to the joined name. Default stages produce
 names like `feat-PROJ-123-add-login-button`:
@@ -128,15 +129,22 @@ names like `feat-PROJ-123-add-login-button`:
 # in ~/.config/ez/config.toml — these are the defaults
 [[session_name_stages]]
 name = "prefix"
+kind = "choice"
 choices = ["feat", "fix", "chore"]
 
 [[session_name_stages]]
-name = "ticket"
-choices = []  # always free-text or (none)
+name = "ticket-prefix"
+kind = "choice"
+choices = []  # add e.g. ["JIRA", "PROJ"]; empty falls back to (custom)/(none)
+
+[[session_name_stages]]
+name = "ticket-number"
+kind = "text"  # skips fzf, prompts for free text directly
 ```
 
 > Stage order is the order of `[[session_name_stages]]` blocks in the file.
-> Move a block up or down to reorder the prompts.
+> Move a block up or down to reorder the prompts. `kind` defaults to
+> `"choice"` if omitted.
 
 Passing a name on the CLI (`ez session new my-name`) skips the staged prompt
 entirely. The default `main` session is also unaffected — it's always named
