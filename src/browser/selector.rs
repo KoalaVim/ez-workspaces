@@ -331,6 +331,10 @@ impl InteractiveSelector for FzfSelector {
         // Tab-prefix items: line is "<value>\t<display>". --with-nth 2..
         // shows only the display portion, but stdout always carries the raw
         // line so we can match on value reliably.
+        // --print-query lets the user type a custom value and Enter to use it
+        // (when the typed query doesn't match any item). With both
+        // --print-query and --expect set, fzf's stdout order is: query, key,
+        // selection — which is what we parse below.
         let mut args = vec![
             "--prompt".to_string(),
             format!("{prompt}> "),
@@ -343,12 +347,13 @@ impl InteractiveSelector for FzfSelector {
             "\t".to_string(),
             "--with-nth".to_string(),
             "2..".to_string(),
+            "--print-query".to_string(),
         ];
 
         let header_hint = if allow_back {
-            "Enter: pick · Ctrl-P: back · Esc: cancel"
+            "Enter: pick or use typed value · Ctrl-P: back · Esc: cancel"
         } else {
-            "Enter: pick · Esc: cancel"
+            "Enter: pick or use typed value · Esc: cancel"
         };
         args.push("--header".to_string());
         args.push(header_hint.to_string());
@@ -380,27 +385,31 @@ impl InteractiveSelector for FzfSelector {
         let output = child.wait_with_output()?;
         let code = output.status.code().unwrap_or(-1);
 
-        // Esc / Ctrl-C / no-match-on-Enter all give non-zero — treat as cancel.
-        if !output.status.success() {
-            log::debug!("select_with_back: non-zero exit {code}, cancel");
+        // Exit codes with --print-query:
+        //   0  → Enter on a matching list item
+        //   1  → Enter with no matching item (typed-query path)
+        //   130 → Esc / Ctrl-C
+        if code == 130 {
+            log::debug!("select_with_back: cancelled (exit 130)");
             return Ok(StageOutcome::Cancel);
         }
 
         let raw = String::from_utf8_lossy(&output.stdout);
         let mut lines = raw.lines();
 
-        // With --expect, line 1 = pressed key (empty = Enter), line 2 =
-        // selection. Without --expect, line 1 = selection.
-        let (key_line, selection_line) = if allow_back {
-            let k = lines.next().unwrap_or("").to_string();
-            let s = lines.next().unwrap_or("").to_string();
-            (k, s)
+        // Order: query, [key], [selection]. The key line only appears when
+        // --expect is set; the selection line only appears when an item
+        // actually matched (exit 0).
+        let query_line = lines.next().unwrap_or("").to_string();
+        let key_line = if allow_back {
+            lines.next().unwrap_or("").to_string()
         } else {
-            (String::new(), lines.next().unwrap_or("").to_string())
+            String::new()
         };
+        let selection_line = lines.next().unwrap_or("").to_string();
 
         log::debug!(
-            "select_with_back: key={key_line:?} selection={selection_line:?} exit={code}"
+            "select_with_back: query={query_line:?} key={key_line:?} selection={selection_line:?} exit={code}"
         );
 
         if key_line == "ctrl-p" {
@@ -412,11 +421,18 @@ impl InteractiveSelector for FzfSelector {
             .next()
             .unwrap_or("")
             .to_string();
+        let query = query_line.trim().to_string();
 
-        if selection_value.is_empty() {
-            return Ok(StageOutcome::Cancel);
+        // Picked an item from the list.
+        if !selection_value.is_empty() {
+            return Ok(StageOutcome::Picked(selection_value));
         }
-        Ok(StageOutcome::Picked(selection_value))
+        // No item matched → use the typed query if it's non-empty.
+        if !query.is_empty() {
+            return Ok(StageOutcome::Picked(query));
+        }
+        // Empty query, no selection → user pressed Enter on nothing.
+        Ok(StageOutcome::Cancel)
     }
 
     fn input_with_back(

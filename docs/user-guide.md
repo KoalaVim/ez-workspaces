@@ -112,10 +112,11 @@ joins the parts with `-`:
 
 Stages come in two kinds:
 
-- **`choice` (default)** — fzf list with the configured choices plus
-  `(custom)` and `(none)` rows. Picking `(custom)` opens a separate text
-  prompt; picking `(none)` skips the part.
-- **`text`** — skips fzf entirely and goes straight to a text prompt. Empty
+- **`choice` (default)** — fzf list with the configured choices plus a
+  `(none)` row. You can pick a choice, type a custom value and Enter to use
+  it (when the typed text doesn't match any item), or pick `(none)` to skip
+  the part.
+- **`text`** — skips the fzf list and goes straight to a text prompt. Empty
   input is treated like `(none)` (the part is skipped).
 
 `Ctrl-P` goes back to the previous stage in either kind; `Esc` cancels. The
@@ -135,7 +136,7 @@ choices = ["feat", "fix", "chore"]
 [[session_name_stages]]
 name = "ticket-prefix"
 kind = "choice"
-choices = []  # add e.g. ["JIRA", "PROJ"]; empty falls back to (custom)/(none)
+choices = []  # add e.g. ["JIRA", "PROJ"]; empty just shows (none) — type your prefix and Enter
 
 [[session_name_stages]]
 name = "ticket-number"

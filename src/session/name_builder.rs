@@ -1,13 +1,12 @@
 //! Interactive multi-stage session name builder.
 //!
-//! Each stage shows an fzf list of choices plus two sentinel rows:
-//!   - "(custom)" — drops to a separate text-input prompt for free-text
-//!   - "(none)"   — skip this part (omitted on the final stage)
-//! Picking "(custom)" never happens through fzf typing — fzf is selection-only
-//! to avoid the picked-vs-typed ambiguity. Free-text comes from a follow-up
-//! `selector.input` call. Ctrl-P goes back to the previous stage.
+//! Each `choice`-kind stage shows an fzf list of choices plus a `(none)`
+//! sentinel row. The user can either pick an item, type a custom value (the
+//! typed query becomes the part on Enter when no item matches), or pick
+//! `(none)` to skip the part. `text`-kind stages skip fzf entirely and use
+//! a free-text prompt. Ctrl-P goes back to the previous stage.
 //!
-//! Parts are joined with "-"; "(none)" parts contribute nothing. The final
+//! Parts are joined with "-"; `(none)` parts contribute nothing. The final
 //! joined name must be non-empty.
 
 use crate::browser::selector::{InteractiveSelector, SelectItem, StageOutcome};
@@ -16,8 +15,6 @@ use crate::error::{EzError, Result};
 
 const NONE_VALUE: &str = "__none__";
 const NONE_DISPLAY: &str = "(none)";
-const CUSTOM_VALUE: &str = "__custom__";
-const CUSTOM_DISPLAY: &str = "(custom)";
 
 /// Result of running the staged prompt.
 pub enum NamePromptResult {
@@ -63,7 +60,7 @@ pub fn prompt_session_name(
 
         match outcome {
             StageOutcome::Picked(raw) => {
-                let value = handle_pick(&kind, &raw, selector, &prompt)?;
+                let value = handle_pick(&kind, &raw)?;
                 match value {
                     PickResolution::Use(s) => {
                         parts[idx] = Some(s);
@@ -80,14 +77,12 @@ pub fn prompt_session_name(
                     }
                     PickResolution::None => {
                         if is_final {
-                            // Final stage cannot be empty; re-prompt.
                             eprintln!("Session name cannot be empty.");
                             continue;
                         }
                         parts[idx] = None;
                         idx += 1;
                     }
-                    PickResolution::Reprompt => continue,
                 }
             }
             StageOutcome::Back => {
@@ -105,42 +100,17 @@ enum PickResolution {
     Use(String),
     /// Skip this part (treated as `(none)`).
     None,
-    /// Stay on this stage (e.g. user cancelled the (custom) sub-prompt).
-    Reprompt,
 }
 
-fn handle_pick(
-    kind: &StageKind,
-    raw: &str,
-    selector: &dyn InteractiveSelector,
-    prompt: &str,
-) -> Result<PickResolution> {
-    match kind {
-        StageKind::Text => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                Ok(PickResolution::None)
-            } else {
-                Ok(PickResolution::Use(trimmed.to_string()))
-            }
-        }
-        StageKind::Choice => {
-            if raw == NONE_VALUE {
-                Ok(PickResolution::None)
-            } else if raw == CUSTOM_VALUE {
-                let typed = selector.input(prompt, None)?;
-                let trimmed = typed.trim();
-                if trimmed.is_empty() {
-                    // User Esc'd the input prompt — go back to the choice list.
-                    Ok(PickResolution::Reprompt)
-                } else {
-                    Ok(PickResolution::Use(trimmed.to_string()))
-                }
-            } else {
-                Ok(PickResolution::Use(raw.to_string()))
-            }
-        }
+fn handle_pick(kind: &StageKind, raw: &str) -> Result<PickResolution> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(PickResolution::None);
     }
+    if matches!(kind, StageKind::Choice) && trimmed == NONE_VALUE {
+        return Ok(PickResolution::None);
+    }
+    Ok(PickResolution::Use(trimmed.to_string()))
 }
 
 fn build_items(choices: &[String], include_none: bool) -> Vec<SelectItem> {
@@ -151,10 +121,6 @@ fn build_items(choices: &[String], include_none: bool) -> Vec<SelectItem> {
             value: v.clone(),
         })
         .collect();
-    items.push(SelectItem {
-        display: CUSTOM_DISPLAY.into(),
-        value: CUSTOM_VALUE.into(),
-    });
     if include_none {
         items.push(SelectItem {
             display: NONE_DISPLAY.into(),
