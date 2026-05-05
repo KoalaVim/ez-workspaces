@@ -207,19 +207,24 @@ pub(crate) fn session_action_loop(
                 let selected = rendered[idx].1;
                 match key.as_str() {
                     key if key == keybinds.new_session => {
-                        let name = selector.input("Session name", None)?;
-                        if !name.is_empty() {
-                            session::create_child_session(
-                                &repo_entry.id,
-                                &selected.id,
-                                &name,
-                            )?;
-                            eprintln!(
-                                "{} {} → {}",
-                                "Created:".green(),
-                                name.bold(),
-                                selected.name.dimmed()
-                            );
+                        match session::name_builder::prompt_session_name(
+                            selector,
+                            config,
+                        )? {
+                            session::name_builder::NamePromptResult::Done(name) => {
+                                session::create_child_session(
+                                    &repo_entry.id,
+                                    &selected.id,
+                                    &name,
+                                )?;
+                                eprintln!(
+                                    "{} {} → {}",
+                                    "Created:".green(),
+                                    name.bold(),
+                                    selected.name.dimmed()
+                                );
+                            }
+                            session::name_builder::NamePromptResult::Cancelled => {}
                         }
                     }
                     key if key == keybinds.delete_session => {

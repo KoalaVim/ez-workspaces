@@ -48,6 +48,26 @@ pub struct EzConfig {
     ///   auto_attach = true
     #[serde(default)]
     pub plugin_settings: HashMap<String, HashMap<String, toml::Value>>,
+
+    /// Stages used to build new session names interactively. Each stage
+    /// becomes a separate prompt (with choices, "(none)", custom text, and a
+    /// back keybind). After all configured stages, an additional final
+    /// free-text prompt is always shown for the descriptive part. The parts
+    /// are joined with "-"; "(none)" stages contribute nothing.
+    /// Skipped entirely when a name is passed on the CLI or when creating
+    /// the default ("main") session.
+    #[serde(default = "default_session_name_stages")]
+    pub session_name_stages: Vec<SessionNameStage>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SessionNameStage {
+    /// Prompt label shown to the user.
+    pub name: String,
+    /// Pickable choices. May be empty — the user can still type a custom
+    /// value or pick "(none)".
+    #[serde(default)]
+    pub choices: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -135,6 +155,7 @@ impl Default for EzConfig {
             plugin_timeout: default_plugin_timeout(),
             default_select_by: default_select_by(),
             plugin_settings: HashMap::new(),
+            session_name_stages: default_session_name_stages(),
         }
     }
 }
@@ -232,4 +253,17 @@ fn default_plugin_timeout() -> u64 {
 
 fn default_select_by() -> String {
     "workspace".into()
+}
+
+fn default_session_name_stages() -> Vec<SessionNameStage> {
+    vec![
+        SessionNameStage {
+            name: "prefix".into(),
+            choices: vec!["feat".into(), "fix".into(), "chore".into()],
+        },
+        SessionNameStage {
+            name: "ticket".into(),
+            choices: Vec::new(),
+        },
+    ]
 }

@@ -21,6 +21,18 @@ pub enum ActionResult {
     Cancel,
 }
 
+/// Outcome of a back-aware selection prompt used by multi-stage flows.
+/// Selection-only — free-text input is a separate `input` call.
+pub enum StageOutcome {
+    /// User picked an item; the string is the SelectItem.value. Sentinel
+    /// values like "(custom)" or "(none)" are matched by the caller.
+    Picked(String),
+    /// User asked to go back to the previous stage.
+    Back,
+    /// User cancelled the whole flow (Esc / Ctrl-C).
+    Cancel,
+}
+
 /// Trait for interactive selection UIs. Default impl uses fzf.
 /// Implementors can swap in skim, dialoguer, or a TUI framework.
 pub trait InteractiveSelector {
@@ -44,6 +56,16 @@ pub trait InteractiveSelector {
 
     /// Confirm yes/no.
     fn confirm(&self, prompt: &str, default: bool) -> Result<bool>;
+
+    /// Selection-only prompt with optional Ctrl-P back keybind. Free-text
+    /// input is intentionally not supported here — call `input` separately
+    /// after the user picks a "(custom)"-style sentinel row.
+    fn select_with_back(
+        &self,
+        prompt: &str,
+        items: &[SelectItem],
+        allow_back: bool,
+    ) -> Result<StageOutcome>;
 
     /// Present items with keybind actions. Returns which key was pressed + selected index.
     fn select_with_actions(
@@ -284,6 +306,107 @@ impl InteractiveSelector for FzfSelector {
             return Ok(default);
         }
         Ok(input == "y" || input == "yes")
+    }
+
+    fn select_with_back(
+        &self,
+        prompt: &str,
+        items: &[SelectItem],
+        allow_back: bool,
+    ) -> Result<StageOutcome> {
+        if items.is_empty() {
+            return Ok(StageOutcome::Cancel);
+        }
+
+        // Tab-prefix items: line is "<value>\t<display>". --with-nth 2..
+        // shows only the display portion, but stdout always carries the raw
+        // line so we can match on value reliably.
+        let mut args = vec![
+            "--prompt".to_string(),
+            format!("{prompt}> "),
+            "--height".to_string(),
+            self.height.clone(),
+            "--layout".to_string(),
+            "reverse".to_string(),
+            "--ansi".to_string(),
+            "--delimiter".to_string(),
+            "\t".to_string(),
+            "--with-nth".to_string(),
+            "2..".to_string(),
+        ];
+
+        let header_hint = if allow_back {
+            "Enter: pick · Ctrl-P: back · Esc: cancel"
+        } else {
+            "Enter: pick · Esc: cancel"
+        };
+        args.push("--header".to_string());
+        args.push(header_hint.to_string());
+        args.push("--header-first".to_string());
+
+        if allow_back {
+            args.push("--expect".to_string());
+            args.push("ctrl-p".to_string());
+        }
+
+        if let Some(opts) = &self.extra_opts {
+            args.extend(opts.split_whitespace().map(String::from));
+        }
+
+        let mut child = Command::new("fzf")
+            .args(&args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .map_err(|e| EzError::SelectorUnavailable(e.to_string()))?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            for item in items {
+                let _ = writeln!(stdin, "{}\t{}", item.value, item.display);
+            }
+        }
+
+        let output = child.wait_with_output()?;
+        let code = output.status.code().unwrap_or(-1);
+
+        // Esc / Ctrl-C / no-match-on-Enter all give non-zero — treat as cancel.
+        if !output.status.success() {
+            log::debug!("select_with_back: non-zero exit {code}, cancel");
+            return Ok(StageOutcome::Cancel);
+        }
+
+        let raw = String::from_utf8_lossy(&output.stdout);
+        let mut lines = raw.lines();
+
+        // With --expect, line 1 = pressed key (empty = Enter), line 2 =
+        // selection. Without --expect, line 1 = selection.
+        let (key_line, selection_line) = if allow_back {
+            let k = lines.next().unwrap_or("").to_string();
+            let s = lines.next().unwrap_or("").to_string();
+            (k, s)
+        } else {
+            (String::new(), lines.next().unwrap_or("").to_string())
+        };
+
+        log::debug!(
+            "select_with_back: key={key_line:?} selection={selection_line:?} exit={code}"
+        );
+
+        if key_line == "ctrl-p" {
+            return Ok(StageOutcome::Back);
+        }
+
+        let selection_value = selection_line
+            .splitn(2, '\t')
+            .next()
+            .unwrap_or("")
+            .to_string();
+
+        if selection_value.is_empty() {
+            return Ok(StageOutcome::Cancel);
+        }
+        Ok(StageOutcome::Picked(selection_value))
     }
 
     fn select_with_actions(

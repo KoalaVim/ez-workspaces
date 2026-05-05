@@ -1,4 +1,5 @@
 pub mod model;
+pub mod name_builder;
 pub mod store;
 pub mod tree;
 
@@ -157,9 +158,15 @@ fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>)
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
 
-    let session_name = name
-        .map(|s| s.to_string())
-        .unwrap_or_else(|| format!("session-{}", &Uuid::new_v4().to_string()[..8]));
+    // If a name was provided on the CLI, use it verbatim. Otherwise, run the
+    // configured staged-name prompt.
+    let session_name = match name {
+        Some(s) => s.to_string(),
+        None => {
+            let config = crate::config::load()?;
+            name_builder::prompt_session_name_default(&config)?
+        }
+    };
 
     let parent_id = if let Some(parent_name) = parent {
         let parent_session = tree

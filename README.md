@@ -72,7 +72,7 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez --repo <path>` | Jump straight to a repo's session picker |
 | `ez clone <url> [path]` | Clone + register repo |
 | `ez add [path]` | Register existing repo |
-| `ez session new [name]` | Create session (`--parent` for nesting) |
+| `ez session new [name]` | Create session (`--parent` for nesting); without `name` you'll be prompted through configured stages (`prefix`, `ticket`, free-text) |
 | `ez session list` | List sessions as tree (`--flat` for flat) |
 | `ez session enter <name>` | Enter a session |
 | `ez session delete <name>` | Delete session (`--force` for cascade) |

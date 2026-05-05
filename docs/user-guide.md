@@ -104,6 +104,44 @@ ez session enter feature-login
 ez session delete feature-login --force
 ```
 
+#### Interactive session naming
+
+When you create a new session *without* passing a name (`ez session new` with no
+arg, or `Alt-n` in the browser), ez walks you through a short staged prompt and
+joins the parts with `-`:
+
+1. Each configured stage shows an fzf list with: the configured choices, a
+   `(custom)` row, and a `(none)` row.
+   - Pick a choice → that value is used.
+   - Pick `(custom)` → a separate text-input prompt opens; what you type
+     becomes this part. Empty input returns you to the selection list.
+   - Pick `(none)` → skip this part of the name.
+   - `Ctrl-P` goes back to the previous stage; `Esc` cancels.
+2. The final stage is the descriptive name. It shows just `(custom)` (and
+   `Ctrl-P` for back) — pick `(custom)` and type the name. The joined name
+   can't be empty.
+
+`(none)` parts contribute nothing to the joined name. Default stages produce
+names like `feat-PROJ-123-add-login-button`:
+
+```toml
+# in ~/.config/ez/config.toml — these are the defaults
+[[session_name_stages]]
+name = "prefix"
+choices = ["feat", "fix", "chore"]
+
+[[session_name_stages]]
+name = "ticket"
+choices = []  # always free-text or (none)
+```
+
+> Stage order is the order of `[[session_name_stages]]` blocks in the file.
+> Move a block up or down to reorder the prompts.
+
+Passing a name on the CLI (`ez session new my-name`) skips the staged prompt
+entirely. The default `main` session is also unaffected — it's always named
+`main`.
+
 ### 5. Browse interactively
 
 Run bare `ez` to get an fzf-powered browser:
