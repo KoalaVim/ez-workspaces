@@ -36,6 +36,10 @@ pub struct Cli {
     /// Built-in: tree, workspace, repo, owner, label. Plugins can register additional views.
     #[arg(long, value_name = "MODE")]
     pub select_by: Option<String>,
+
+    /// Show the full browser instead of auto-detecting the current repo
+    #[arg(long, short)]
+    pub all: bool,
 }
 
 #[derive(Subcommand)]

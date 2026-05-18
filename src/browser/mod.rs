@@ -3,7 +3,7 @@ pub mod selector;
 pub mod views;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use colored::Colorize;
 
@@ -23,6 +23,7 @@ pub fn browse(
     workspace: Option<&str>,
     repo_flag: Option<&Path>,
     select_by: Option<&str>,
+    all: bool,
 ) -> Result<()> {
     let config = config::load()?;
     let selector = FzfSelector::new(&config.fzf)?;
@@ -35,6 +36,17 @@ pub fn browse(
             std::env::current_dir()?.join(repo_path)
         };
         return browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config);
+    }
+
+    // Auto-detect: if cwd is inside a registered repo (or one of its worktrees),
+    // jump straight to that repo's session picker. Skipped with --all.
+    if !all {
+        if let Some(repo_root) = detect_repo_root() {
+            let index = repo::store::load_index()?;
+            if let Some(entry) = index.find_by_path(&repo_root) {
+                return session_action_loop(entry, &selector, cd_file, post_cmd_file, &config);
+            }
+        }
     }
 
     // Decide starting view: CLI flag > config default > Workspace.
@@ -465,6 +477,23 @@ pub(crate) fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
 /// Get the current branch of a git repo.
 pub(crate) fn get_branch(path: &Path) -> Option<String> {
     git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
+}
+
+/// Resolve the main repository root from the current directory.
+/// Works from both the repo itself and any of its worktrees by using
+/// `git rev-parse --git-common-dir` which always points to the main
+/// repo's `.git` directory.
+fn detect_repo_root() -> Option<PathBuf> {
+    let cwd = std::env::current_dir().ok()?;
+    let common_dir = git_cmd(&cwd, &["rev-parse", "--git-common-dir"])?;
+    let common_path = PathBuf::from(&common_dir);
+    let abs = if common_path.is_absolute() {
+        common_path
+    } else {
+        cwd.join(&common_path)
+    };
+    // --git-common-dir returns the .git dir; the repo root is its parent
+    abs.canonicalize().ok()?.parent().map(|p| p.to_path_buf())
 }
 
 /// Shared display style for a repository row in any picker (drill-down,
