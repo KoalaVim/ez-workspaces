@@ -50,12 +50,12 @@ Sessions are tree-based — a session can have child sessions, enabling branchin
 
 ### Where worktrees live
 
-The git-worktree plugin creates worktrees as siblings of the repo in a `.ez-worktrees` directory:
+The git-worktree plugin creates worktrees as siblings of the repo in a `.ez` directory:
 
 ```
 ~/workspace/personal/
   my-repo/                          # original repo
-  .ez-worktrees/my-repo/
+  .ez/my-repo/
     feature-auth/                   # worktree for session "feature-auth"
     bugfix-crash/                   # worktree for session "bugfix-crash"
 ```

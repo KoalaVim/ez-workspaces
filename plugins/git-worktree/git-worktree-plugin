@@ -22,7 +22,7 @@ fi
 
 # Worktree base directory: alongside the repo (sibling directory)
 REPO_BASENAME=$(basename "$REPO_PATH")
-WORKTREE_BASE=$(dirname "$REPO_PATH")/.ez-worktrees/${REPO_BASENAME}
+WORKTREE_BASE=$(dirname "$REPO_PATH")/.ez/${REPO_BASENAME}
 WORKTREE_PATH="${WORKTREE_BASE}/${SESSION_NAME}"
 
 case "$HOOK" in
