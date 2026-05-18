@@ -5,6 +5,7 @@ use colored::Colorize;
 
 use crate::config;
 use crate::error::Result;
+use crate::plugin;
 use crate::repo;
 use crate::session;
 
@@ -232,7 +233,8 @@ fn preview_directory(path: &Path) {
 }
 
 fn preview_keybind_help() {
-    let keybinds = config::load().map(|c| c.keybinds).unwrap_or_default();
+    let config = config::load().unwrap_or_default();
+    let keybinds = &config.keybinds;
 
     let fmt_key = |k: &str| k.replace("alt-", "Alt-").replace("ctrl-", "Ctrl-");
 
@@ -258,6 +260,10 @@ fn preview_keybind_help() {
         fmt_key(&keybinds.edit_labels).bold().magenta(),
         "Edit labels"
     );
+    for pb in plugin::collect_plugin_binds("session", &config).unwrap_or_default() {
+        let desc = pb.description.as_deref().unwrap_or(&pb.label);
+        println!("  {}  {}", fmt_key(&pb.key).bold().cyan(), desc);
+    }
     println!("  {}  {}", "Esc".bold().dimmed(), "Go back");
 }
 

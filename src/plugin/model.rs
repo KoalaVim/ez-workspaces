@@ -34,6 +34,9 @@ pub struct PluginBind {
     pub name: String,
     /// Human-readable label shown in fzf header
     pub label: String,
+    /// Longer description shown in the preview pane
+    #[serde(default)]
+    pub description: Option<String>,
     /// Which view contexts this bind is active in
     pub contexts: Vec<String>,
 }

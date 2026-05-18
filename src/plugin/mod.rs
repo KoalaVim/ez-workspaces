@@ -446,6 +446,7 @@ pub struct PluginBindInfo {
     pub plugin_name: String,
     pub key: String,
     pub label: String,
+    pub description: Option<String>,
 }
 
 /// Collect all plugin action binds from enabled plugins for a given context.
@@ -484,6 +485,7 @@ pub fn collect_plugin_binds(
                 plugin_name: plugin_name.clone(),
                 key: bind.key.clone(),
                 label: bind.label.clone(),
+                description: bind.description.clone(),
             });
         }
     }

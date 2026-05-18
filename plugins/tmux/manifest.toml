@@ -4,11 +4,12 @@ description = "Manages tmux sessions for workspaces"
 hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_bind", "on_view", "on_view_select"]
 executable = "tmux-plugin"
 
-# In the session picker: ctrl-a creates/attaches to the tmux session for the selected session
+# In the session picker: alt-a creates/attaches to the tmux session for the selected session
 [[binds]]
-key = "ctrl-a"
+key = "alt-a"
 name = "tmux_attach"
 label = "tmux"
+description = "Attach to tmux session"
 contexts = ["session"]
 
 # In other views: ctrl-a shows a list of all ez-managed tmux sessions

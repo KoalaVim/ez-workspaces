@@ -135,7 +135,7 @@ case "$HOOK" in
         ;;
 
     on_bind)
-        # ctrl-a in session picker: create tmux session if needed, then attach
+        # alt-a in session picker: create tmux session if needed, then attach
         if ! command -v tmux &>/dev/null; then
             echo '{"success": false, "error": "tmux not installed"}'
             exit 0
