@@ -62,6 +62,8 @@ pub struct SessionInfo {
     pub id: String,
     pub name: String,
     pub parent_id: Option<String>,
+    pub parent_name: Option<String>,
+    pub parent_is_default: Option<bool>,
     pub path: Option<PathBuf>,
     pub env: HashMap<String, String>,
     pub plugin_state: HashMap<String, toml::Value>,

@@ -151,7 +151,7 @@ pub fn run_hooks(
             plugin_name,
             current_session.and_then(|s| s.path.as_ref())
         );
-        let request = build_request(&hook, repo_entry, repo_meta, current_session, plugin_name, config);
+        let request = build_request(&hook, repo_entry, repo_meta, current_session, tree, plugin_name, config);
 
         match runner::execute(manifest, &plugin_dir, &request, config.plugin_timeout) {
             Ok(response) => {
@@ -207,6 +207,7 @@ fn build_request(
     repo_entry: &RepoEntry,
     repo_meta: &RepoMeta,
     session: Option<&Session>,
+    tree: &SessionTree,
     plugin_name: &str,
     config: &EzConfig,
 ) -> HookRequest {
@@ -217,14 +218,19 @@ fn build_request(
         default_branch: repo_meta.default_branch.clone(),
     };
 
-    let session_info = session.map(|s| SessionInfo {
-        id: s.id.clone(),
-        name: s.name.clone(),
-        parent_id: s.parent_id.clone(),
-        path: s.path.clone(),
-        env: s.env.clone(),
-        plugin_state: s.plugin_state.clone(),
-        is_default: s.is_default,
+    let session_info = session.map(|s| {
+        let parent = s.parent_id.as_ref().and_then(|pid| tree.find_by_id(pid));
+        SessionInfo {
+            id: s.id.clone(),
+            name: s.name.clone(),
+            parent_id: s.parent_id.clone(),
+            parent_name: parent.map(|p| p.name.clone()),
+            parent_is_default: parent.map(|p| p.is_default),
+            path: s.path.clone(),
+            env: s.env.clone(),
+            plugin_state: s.plugin_state.clone(),
+            is_default: s.is_default,
+        }
     });
 
     let user_config = config
@@ -512,11 +518,13 @@ pub fn run_bind_hook(
     let manifest: PluginManifest = toml::from_str(&manifest_contents)?;
 
     let repo_meta = crate::repo::store::load_repo_meta(&repo_entry.id).unwrap_or_default();
+    let tree = crate::session::store::load_sessions(&repo_entry.id).unwrap_or_default();
     let mut request = build_request(
         &HookType::OnBind,
         repo_entry,
         &repo_meta,
         session,
+        &tree,
         plugin_name,
         config,
     );
