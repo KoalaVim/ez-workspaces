@@ -50,12 +50,22 @@ pub fn prompt_session_name(
         };
         let allow_back = idx > 0;
 
+        // Show the name accumulated from prior stages as a header hint so
+        // the user can track what they're building. We show a trailing "-"
+        // to make it clear the next part will be appended.
+        let so_far = join_parts(&parts[..idx]);
+        let context = if so_far.is_empty() {
+            None
+        } else {
+            Some(format!("{so_far}-"))
+        };
+
         let outcome = match kind {
             StageKind::Choice => {
                 let items = build_items(choices, /*include_none=*/ !is_final);
-                selector.select_with_back(&prompt, &items, allow_back)?
+                selector.select_with_back(&prompt, &items, allow_back, context.as_deref())?
             }
-            StageKind::Text => selector.input_with_back(&prompt, None, allow_back)?,
+            StageKind::Text => selector.input_with_back(&prompt, None, allow_back, context.as_deref())?,
         };
 
         match outcome {

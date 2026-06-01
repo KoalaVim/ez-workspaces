@@ -60,21 +60,29 @@ pub trait InteractiveSelector {
     /// Selection-only prompt with optional Ctrl-P back keybind. Free-text
     /// input is intentionally not supported here — call `input` separately
     /// after the user picks a "(custom)"-style sentinel row.
+    ///
+    /// `context` is the name accumulated from previous stages (e.g.
+    /// `"feat-ABC-"`). When `Some`, it is shown as a "Building: …" header
+    /// line above the keybind hints so the user can track progress.
     fn select_with_back(
         &self,
         prompt: &str,
         items: &[SelectItem],
         allow_back: bool,
+        context: Option<&str>,
     ) -> Result<StageOutcome>;
 
     /// Free-text input with optional Ctrl-P back keybind. Returns
     /// `StageOutcome::Picked(s)` (where `s` may be empty), `Back`, or
     /// `Cancel`. Used by free-text stages that still want back navigation.
+    ///
+    /// `context` works the same as in `select_with_back`.
     fn input_with_back(
         &self,
         prompt: &str,
         default: Option<&str>,
         allow_back: bool,
+        context: Option<&str>,
     ) -> Result<StageOutcome>;
 
     /// Present items with keybind actions. Returns which key was pressed + selected index.
@@ -323,6 +331,7 @@ impl InteractiveSelector for FzfSelector {
         prompt: &str,
         items: &[SelectItem],
         allow_back: bool,
+        context: Option<&str>,
     ) -> Result<StageOutcome> {
         if items.is_empty() {
             return Ok(StageOutcome::Cancel);
@@ -350,13 +359,17 @@ impl InteractiveSelector for FzfSelector {
             "--print-query".to_string(),
         ];
 
-        let header_hint = if allow_back {
+        let hint = if allow_back {
             "Enter: pick or use typed value · Ctrl-P: back · Esc: cancel"
         } else {
             "Enter: pick or use typed value · Esc: cancel"
         };
+        let header = match context {
+            Some(c) if !c.is_empty() => format!("{c}\n{hint}"),
+            _ => hint.to_string(),
+        };
         args.push("--header".to_string());
-        args.push(header_hint.to_string());
+        args.push(header);
         args.push("--header-first".to_string());
 
         if allow_back {
@@ -440,6 +453,7 @@ impl InteractiveSelector for FzfSelector {
         prompt: &str,
         default: Option<&str>,
         allow_back: bool,
+        context: Option<&str>,
     ) -> Result<StageOutcome> {
         // fzf with no items, --print-query, and (optionally) --expect=ctrl-p.
         // With both flags, fzf's output ordering is: query, key. (Selection
@@ -454,13 +468,17 @@ impl InteractiveSelector for FzfSelector {
             "reverse".to_string(),
         ];
 
-        let header_hint = if allow_back {
+        let hint = if allow_back {
             "Enter: confirm · Ctrl-P: back · Esc: cancel"
         } else {
             "Enter: confirm · Esc: cancel"
         };
+        let header = match context {
+            Some(c) if !c.is_empty() => format!("{c}\n{hint}"),
+            _ => hint.to_string(),
+        };
         args.push("--header".to_string());
-        args.push(header_hint.to_string());
+        args.push(header);
         args.push("--header-first".to_string());
 
         if allow_back {

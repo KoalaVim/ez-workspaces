@@ -119,6 +119,10 @@ Stages come in two kinds:
 - **`text`** — skips the fzf list and goes straight to a text prompt. Empty
   input is treated like `(none)` (the part is skipped).
 
+Once you've picked at least one part, each subsequent stage shows the
+name-so-far (e.g. `feat-ABC-`) as a header above the keybind hints so you can
+see the name taking shape as you go.
+
 `Ctrl-P` goes back to the previous stage in either kind; `Esc` cancels. The
 final descriptive-name stage is implicit (always added), text-mode, and
 cannot be empty.
