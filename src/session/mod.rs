@@ -4,10 +4,12 @@ pub mod store;
 pub mod tree;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 
 use chrono::Utc;
 use colored::Colorize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::cli::{SessionCommand, SessionLabelCommand};
@@ -15,6 +17,13 @@ use crate::error::{EzError, Result};
 use crate::plugin;
 use crate::repo;
 use model::{Session, SessionTree};
+
+/// Payload written to a temp file and consumed by the `reap-delete` subcommand.
+#[derive(Serialize, Deserialize)]
+struct ReapPayload {
+    repo_id: String,
+    sessions: Vec<Session>,
+}
 
 /// Dispatch session subcommands.
 pub fn dispatch(
@@ -42,6 +51,7 @@ pub fn dispatch(
             repo,
         } => rename_session(&name, &new_name, repo.as_deref()),
         SessionCommand::Label { command } => dispatch_label(command),
+        SessionCommand::ReapDelete { payload } => reap_delete(&payload),
     }
 }
 
@@ -298,44 +308,27 @@ fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()>
         });
     }
 
-    // Delete children first (bottom-up)
-    let config = crate::config::load()?;
-    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
-
-    // Collect descendant IDs in reverse order (deepest first)
-    let descendant_ids: Vec<String> = {
+    // Snapshot sessions to reap: descendants deepest-first, then the session itself.
+    let to_reap: Vec<Session> = {
         let descs = tree.descendants(&session.id);
-        descs.iter().rev().map(|s| s.id.clone()).collect()
+        let mut v: Vec<Session> = descs.into_iter().rev().cloned().collect();
+        v.push(session.clone());
+        v
     };
 
-    for desc_id in &descendant_ids {
-        let desc = tree.find_by_id(desc_id).cloned();
-        if let Some(desc_session) = desc {
-            plugin::run_hooks(
-                plugin::model::HookType::OnSessionDelete,
-                &repo_entry,
-                &repo_meta,
-                Some(&desc_session),
-                &config,
-                &mut tree,
-            )?;
-            tree.remove(desc_id)?;
-        }
+    // Persist the removal synchronously BEFORE running hooks.  A hook (e.g.
+    // tmux kill-session) may destroy the controlling terminal and SIGHUP this
+    // process; the record must already be gone before that can happen.
+    for s in &to_reap {
+        tree.remove(&s.id)?;
     }
-
-    // Delete the session itself
-    plugin::run_hooks(
-        plugin::model::HookType::OnSessionDelete,
-        &repo_entry,
-        &repo_meta,
-        Some(&session),
-        &config,
-        &mut tree,
-    )?;
-    tree.remove(&session.id)?;
-
     store::save_sessions(&repo_entry.id, &tree)?;
     println!("{} {}", "Deleted session:".green(), name.bold());
+
+    // Run plugin teardown (worktree removal, tmux kill, …) in a detached
+    // worker that outlives any terminal teardown triggered by the hooks.
+    spawn_detached_reap(&repo_entry.id, &to_reap)?;
+
     Ok(())
 }
 
@@ -473,7 +466,8 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
 
 /// Delete a session by ID (with forced cascade). Used by the browser action menu.
 pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Result<()> {
-    let repo_entry = repo::store::load_index()?
+    // Verify the repo exists before doing anything.
+    let _repo_entry = repo::store::load_index()?
         .repos
         .iter()
         .find(|r| r.id == repo_id)
@@ -497,40 +491,23 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
         });
     }
 
-    let config = crate::config::load()?;
-    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
-
-    let descendant_ids: Vec<String> = {
+    // Snapshot sessions to reap: descendants deepest-first, then the session itself.
+    let to_reap: Vec<Session> = {
         let descs = tree.descendants(&session.id);
-        descs.iter().rev().map(|s| s.id.clone()).collect()
+        let mut v: Vec<Session> = descs.into_iter().rev().cloned().collect();
+        v.push(session.clone());
+        v
     };
 
-    for desc_id in &descendant_ids {
-        let desc = tree.find_by_id(desc_id).cloned();
-        if let Some(desc_session) = desc {
-            plugin::run_hooks(
-                plugin::model::HookType::OnSessionDelete,
-                &repo_entry,
-                &repo_meta,
-                Some(&desc_session),
-                &config,
-                &mut tree,
-            )?;
-            tree.remove(desc_id)?;
-        }
+    // Persist removal synchronously before any hook can tear down the terminal.
+    for s in &to_reap {
+        tree.remove(&s.id)?;
     }
-
-    plugin::run_hooks(
-        plugin::model::HookType::OnSessionDelete,
-        &repo_entry,
-        &repo_meta,
-        Some(&session),
-        &config,
-        &mut tree,
-    )?;
-    tree.remove(&session.id)?;
-
     store::save_sessions(repo_id, &tree)?;
+
+    // Run plugin teardown in a detached worker.
+    spawn_detached_reap(repo_id, &to_reap)?;
+
     Ok(())
 }
 
@@ -551,6 +528,101 @@ pub fn rename_session_by_id(repo_id: &str, session_id: &str, new_name: &str) -> 
     session.name = new_name.to_string();
 
     store::save_sessions(repo_id, &tree)?;
+    Ok(())
+}
+
+/// Spawn a detached worker process to run the OnSessionDelete plugin hooks for
+/// sessions that have already been removed from the store.
+///
+/// The worker runs in a new process session (via `setsid`) so it has no
+/// controlling terminal.  When a hook tears down the terminal (e.g.
+/// `tmux kill-session` destroys the pane we're in), the worker is unaffected
+/// and runs to completion.  The foreground `ez` has already persisted the
+/// store and printed its output before this returns, so there is no data race.
+fn spawn_detached_reap(repo_id: &str, sessions: &[Session]) -> Result<()> {
+    let payload = ReapPayload {
+        repo_id: repo_id.to_string(),
+        sessions: sessions.to_vec(),
+    };
+    let json = serde_json::to_string(&payload)
+        .map_err(|e| EzError::Config(format!("reap payload serialize error: {e}")))?;
+
+    // Use the ez pid as part of the name so concurrent deletes don't collide.
+    let tmp_path: PathBuf =
+        std::env::temp_dir().join(format!("ez-reap-{}.json", std::process::id()));
+    std::fs::write(&tmp_path, &json)?;
+
+    let exe = std::env::current_exe()
+        .map_err(|e| EzError::Config(format!("cannot resolve current exe: {e}")))?;
+
+    let mut cmd = Command::new(&exe);
+    cmd.args(["session", "reap-delete", "--payload"])
+        .arg(&tmp_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // setsid() puts the child in a new session with no controlling terminal,
+        // making it immune to SIGHUP when the current terminal is torn down.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+
+    cmd.spawn()
+        .map_err(|e| EzError::Config(format!("failed to spawn reap worker: {e}")))?;
+    // Intentionally not awaited — returning immediately is the whole point.
+
+    Ok(())
+}
+
+/// Entry point for the hidden `session reap-delete` subcommand.
+///
+/// Reads the session snapshot from the temp payload file, runs the
+/// OnSessionDelete plugin hooks (worktree removal, tmux kill, …), then
+/// deletes the file.  Never writes to `sessions.toml`.
+fn reap_delete(payload_path: &Path) -> Result<()> {
+    let json = std::fs::read_to_string(payload_path)?;
+    // Remove the temp file right away so it doesn't linger on error paths.
+    let _ = std::fs::remove_file(payload_path);
+
+    let payload: ReapPayload = serde_json::from_str(&json)
+        .map_err(|e| EzError::Config(format!("reap payload parse error: {e}")))?;
+
+    let repo_entry = repo::store::load_index()?
+        .repos
+        .into_iter()
+        .find(|r| r.id == payload.repo_id)
+        .ok_or_else(|| EzError::RepoNotFound(payload.repo_id.clone()))?;
+
+    let config = crate::config::load()?;
+    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+
+    // Build a throwaway SessionTree from the snapshot so plugin::run_hooks
+    // can resolve parent information.  This tree is never saved to disk.
+    let mut tree = SessionTree {
+        sessions: payload.sessions.clone(),
+    };
+
+    for session in &payload.sessions {
+        // Swallow hook errors — the record is already removed; this is
+        // best-effort external cleanup.
+        let _ = plugin::run_hooks(
+            plugin::model::HookType::OnSessionDelete,
+            &repo_entry,
+            &repo_meta,
+            Some(session),
+            &config,
+            &mut tree,
+        );
+    }
+
     Ok(())
 }
 

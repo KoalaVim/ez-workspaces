@@ -152,7 +152,13 @@ case "$HOOK" in
         if [ -d "$WORKTREE_PATH" ]; then
             t2=$(t_ms)
             dbg "worktree remove: $WORKTREE_PATH"
-            git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force >/dev/null 2>&1 || true
+            if ! git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force >/dev/null 2>&1; then
+                # git refuses to remove the worktree when CWD is inside it.
+                # cd to the repo root and retry.
+                dbg "worktree remove: git failed (likely cwd inside worktree), cding to repo and retrying"
+                cd "$REPO_PATH"
+                git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force >/dev/null 2>&1 || true
+            fi
             dbg "worktree remove: done ($(( $(t_ms) - t2 ))ms)"
 
             # Optionally delete the branch

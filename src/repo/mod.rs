@@ -316,7 +316,41 @@ pub fn resolve_repo(repo_arg: Option<&str>) -> Result<RepoEntry> {
         }
     }
 
+    // If cwd didn't match directly, we may be inside a git worktree.
+    // Use `git rev-parse --git-common-dir` to find the main repo root.
+    if let Some(repo_root) = detect_repo_root_from(&cwd) {
+        for repo in &index.repos {
+            if repo_root == repo.path {
+                return Ok(repo.clone());
+            }
+        }
+    }
+
     Err(EzError::RepoNotFound(
         "Could not detect repo from current directory. Use --repo to specify.".into(),
     ))
+}
+
+/// Resolve the main repository root from `dir` using `git rev-parse
+/// --git-common-dir`, which works from both the repo itself and any worktree.
+fn detect_repo_root_from(dir: &Path) -> Option<std::path::PathBuf> {
+    let output = std::process::Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .current_dir(dir)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let common_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if common_dir.is_empty() {
+        return None;
+    }
+    let common_path = std::path::PathBuf::from(&common_dir);
+    let abs = if common_path.is_absolute() {
+        common_path
+    } else {
+        dir.join(&common_path)
+    };
+    abs.canonicalize().ok()?.parent().map(|p| p.to_path_buf())
 }

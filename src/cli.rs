@@ -194,6 +194,14 @@ pub enum SessionCommand {
         #[command(subcommand)]
         command: SessionLabelCommand,
     },
+
+    /// Internal: run detached OnSessionDelete hooks for already-removed sessions
+    #[command(hide = true)]
+    ReapDelete {
+        /// Path to temp payload JSON file
+        #[arg(long)]
+        payload: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]

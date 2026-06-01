@@ -309,6 +309,7 @@ dependencies = [
  "colored",
  "dirs",
  "env_logger",
+ "libc",
  "log",
  "predicates",
  "serde",
