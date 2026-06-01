@@ -215,6 +215,9 @@ fn new_session(
         is_default: false,
     };
 
+    if tree.find_by_name(&session_name).is_some() {
+        return Err(EzError::SessionAlreadyExists(session_name));
+    }
     handle_branch_conflict(&repo_entry.path, &session_name)?;
     tree.add(session.clone())?;
 
