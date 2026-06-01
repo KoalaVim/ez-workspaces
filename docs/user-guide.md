@@ -155,6 +155,28 @@ Passing a name on the CLI (`ez session new my-name`) skips the staged prompt
 entirely. The default `main` session is also unaffected — it's always named
 `main`.
 
+#### Branch-name collision prompt
+
+When the session name (however it was determined) matches an **existing local git
+branch**, ez pauses and asks how you want to proceed:
+
+```
+Branch 'feature-login' already exists.
+  [N] use the existing branch  (default)
+  [y] recreate from the latest base (origin/main or parent) — discards 'feature-login'
+Recreate? [y/N]:
+```
+
+- **Press Enter (or N)** — the existing branch is checked out into the new worktree as-is.
+  Its commits, stashes, and history are preserved.
+- **Type `y`** — the branch is deleted and re-created from the latest base (same start
+  point the git-worktree plugin would use for a brand-new branch: `origin/main`,
+  `origin/master`, or the parent session's HEAD). All previous commits on that branch
+  are discarded.
+
+In a non-interactive context (e.g. piped stdin), the prompt receives EOF and defaults
+to **reuse**, so existing scripts keep working without modification.
+
 ### 5. Browse interactively
 
 Run bare `ez` to get an fzf-powered browser:

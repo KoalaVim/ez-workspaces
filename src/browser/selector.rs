@@ -96,6 +96,22 @@ pub trait InteractiveSelector {
     ) -> Result<ActionResult>;
 }
 
+/// Prompts the user with a yes/no question on stderr, reads from stdin.
+/// Safe in non-interactive/piped contexts — EOF falls through to `default`.
+/// This is the canonical confirm implementation; `FzfSelector::confirm` delegates here.
+pub(crate) fn confirm_prompt(prompt: &str, default: bool) -> Result<bool> {
+    use std::io::BufRead as _;
+    let default_hint = if default { "Y/n" } else { "y/N" };
+    eprint!("{prompt} [{default_hint}]: ");
+    let mut input = String::new();
+    std::io::stdin().lock().read_line(&mut input)?;
+    let input = input.trim().to_lowercase();
+    if input.is_empty() {
+        return Ok(default);
+    }
+    Ok(input == "y" || input == "yes")
+}
+
 /// fzf-based interactive selector.
 pub struct FzfSelector {
     pub height: String,
@@ -314,16 +330,7 @@ impl InteractiveSelector for FzfSelector {
     }
 
     fn confirm(&self, prompt: &str, default: bool) -> Result<bool> {
-        let default_hint = if default { "Y/n" } else { "y/N" };
-        eprint!("{prompt} [{default_hint}]: ");
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-        let input = input.trim().to_lowercase();
-
-        if input.is_empty() {
-            return Ok(default);
-        }
-        Ok(input == "y" || input == "yes")
+        confirm_prompt(prompt, default)
     }
 
     fn select_with_back(

@@ -595,6 +595,21 @@ pub(crate) fn is_dirty(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Run a git command, returning whether it exited successfully (output is discarded).
+pub(crate) fn git_run(path: &Path, args: &[&str]) -> bool {
+    std::process::Command::new("git")
+        .args(args)
+        .current_dir(path)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// True if a local branch with this exact name exists in the repo at `path`.
+pub(crate) fn branch_exists(path: &Path, name: &str) -> bool {
+    git_run(path, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{name}")])
+}
+
 /// Resolve the main repository root from the current directory.
 /// Works from both the repo itself and any of its worktrees by using
 /// `git rev-parse --git-common-dir` which always points to the main

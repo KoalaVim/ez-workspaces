@@ -215,6 +215,7 @@ fn new_session(
         is_default: false,
     };
 
+    handle_branch_conflict(&repo_entry.path, &session_name)?;
     tree.add(session.clone())?;
 
     // Run plugin hooks
@@ -475,6 +476,7 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
         is_default: false,
     };
 
+    handle_branch_conflict(&repo_entry.path, name)?;
     tree.add(session.clone())?;
 
     let config = crate::config::load()?;
@@ -496,6 +498,34 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
         .cloned()
         .unwrap_or(session);
     Ok(created)
+}
+
+/// When the new session's name matches an existing local branch, prompt the user to
+/// choose between reusing the existing branch or recreating it from the updated base.
+///
+/// Must be called BEFORE `tree.add` so that a cancelled or failed prompt leaves no
+/// orphan session record behind.
+fn handle_branch_conflict(repo_path: &Path, name: &str) -> Result<()> {
+    if !crate::browser::branch_exists(repo_path, name) {
+        return Ok(());
+    }
+    let recreate = crate::browser::selector::confirm_prompt(
+        &format!(
+            "Branch '{name}' already exists.\n  \
+             [N] use the existing branch  (default)\n  \
+             [y] recreate from the latest base (origin/main or parent) — discards '{name}'\n\
+             Recreate?"
+        ),
+        false,
+    )?;
+    if recreate && !crate::browser::git_run(repo_path, &["branch", "-D", name]) {
+        return Err(EzError::Git(format!(
+            "Cannot recreate branch '{name}': delete failed \
+             (it may be checked out in another worktree). \
+             Remove that session first, or reuse the branch."
+        )));
+    }
+    Ok(())
 }
 
 /// Delete a session by ID (with forced cascade). Used by the browser action menu.
