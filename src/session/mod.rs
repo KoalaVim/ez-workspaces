@@ -289,6 +289,32 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
     Ok(())
 }
 
+/// Returns the names of sessions in `to_reap` whose worktree has uncommitted changes.
+/// Skips default/main sessions (no dedicated worktree) and paths that don't exist.
+fn dirty_worktrees(to_reap: &[model::Session]) -> Vec<String> {
+    to_reap
+        .iter()
+        .filter(|s| !s.is_default)
+        .filter_map(|s| s.path.as_ref().map(|p| (s, p)))
+        .filter(|(_, p)| p.exists() && crate::browser::is_dirty(p))
+        .map(|(s, _)| s.name.clone())
+        .collect()
+}
+
+/// Returns the names of sessions (target + descendants) that have uncommitted changes.
+/// Used by the TUI to warn the user before performing a forced delete.
+pub fn cascade_dirty(repo_id: &str, session_id: &str) -> Result<Vec<String>> {
+    let tree = store::load_sessions(repo_id)?;
+    let sid = session_id.to_string();
+    let session = tree
+        .find_by_id(&sid)
+        .ok_or_else(|| EzError::SessionNotFound(session_id.into()))?;
+    let mut to_reap: Vec<model::Session> =
+        tree.descendants(&session.id).into_iter().cloned().collect();
+    to_reap.push(session.clone());
+    Ok(dirty_worktrees(&to_reap))
+}
+
 fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()> {
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
@@ -315,6 +341,14 @@ fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()>
         v.push(session.clone());
         v
     };
+
+    // Pre-flight: abort if any worktree in the cascade has uncommitted changes.
+    if !force {
+        let dirty = dirty_worktrees(&to_reap);
+        if !dirty.is_empty() {
+            return Err(EzError::SessionWorktreeDirty { dirty });
+        }
+    }
 
     // Persist the removal synchronously BEFORE running hooks.  A hook (e.g.
     // tmux kill-session) may destroy the controlling terminal and SIGHUP this
@@ -498,6 +532,14 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
         v.push(session.clone());
         v
     };
+
+    // Pre-flight: abort if any worktree in the cascade has uncommitted changes.
+    if !force {
+        let dirty = dirty_worktrees(&to_reap);
+        if !dirty.is_empty() {
+            return Err(EzError::SessionWorktreeDirty { dirty });
+        }
+    }
 
     // Persist removal synchronously before any hook can tear down the terminal.
     for s in &to_reap {

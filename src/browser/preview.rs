@@ -106,14 +106,14 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
         println!("  {} {}", "remote:".bold(), remote.dimmed());
     }
 
-    let dirty = git_cmd(path, &["status", "--porcelain"])
+    let dirty_count = git_cmd(path, &["status", "--porcelain"])
         .map(|s| s.lines().count())
         .unwrap_or(0);
-    if dirty > 0 {
+    if dirty_count > 0 {
         println!(
             "  {} {}",
             "status:".bold(),
-            format!("{dirty} modified file(s)").yellow()
+            format!("{dirty_count} modified file(s)").yellow()
         );
     } else {
         println!("  {} {}", "status:".bold(), "clean".green());

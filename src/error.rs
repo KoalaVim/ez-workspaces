@@ -23,6 +23,9 @@ pub enum EzError {
         children: Vec<String>,
     },
 
+    #[error("Uncommitted changes in worktree(s): {dirty:?}. Commit/stash, or use --force to delete anyway.")]
+    SessionWorktreeDirty { dirty: Vec<String> },
+
     #[error("Plugin '{0}' failed: {1}")]
     PluginFailed(String, String),
 

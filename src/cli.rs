@@ -161,7 +161,7 @@ pub enum SessionCommand {
         /// Repository name or path (default: current repo)
         #[arg(long, short)]
         repo: Option<String>,
-        /// Delete children without prompting
+        /// Delete children and dirty worktrees without prompting
         #[arg(long)]
         force: bool,
     },

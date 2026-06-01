@@ -360,7 +360,16 @@ pub(crate) fn session_action_loop(
                         }
                     }
                     key if key == keybinds.delete_session => {
-                        let msg = format!("Delete session '{}'?", selected.name);
+                        let dirty =
+                            session::cascade_dirty(&repo_entry.id, &selected.id)?;
+                        let msg = if dirty.is_empty() {
+                            format!("Delete session '{}'?", selected.name)
+                        } else {
+                            format!(
+                                "Worktree(s) {:?} have uncommitted changes. Delete anyway?",
+                                dirty
+                            )
+                        };
                         if selector.confirm(&msg, false)? {
                             session::delete_session_by_id(
                                 &repo_entry.id,
@@ -577,6 +586,13 @@ pub(crate) fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
 /// Get the current branch of a git repo.
 pub(crate) fn get_branch(path: &Path) -> Option<String> {
     git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
+}
+
+/// True if the git worktree at `path` has uncommitted changes.
+pub(crate) fn is_dirty(path: &Path) -> bool {
+    git_cmd(path, &["status", "--porcelain"])
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
 }
 
 /// Resolve the main repository root from the current directory.
