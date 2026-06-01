@@ -40,6 +40,13 @@ pub struct Cli {
     /// Show the full browser instead of auto-detecting the current repo
     #[arg(long, short)]
     pub all: bool,
+
+    /// Action to perform when a session is accepted (Enter in the browser, or `ez session enter`).
+    /// Overrides `on_enter` in config.
+    /// "cd" (default): cd into the session's worktree.
+    /// A session plugin-bind label/name such as "tmux": run that bind instead.
+    #[arg(long, value_name = "ACTION")]
+    pub on_enter: Option<String>,
 }
 
 #[derive(Subcommand)]

@@ -17,7 +17,12 @@ use crate::repo;
 use model::{Session, SessionTree};
 
 /// Dispatch session subcommands.
-pub fn dispatch(command: SessionCommand, cd_file: Option<&Path>) -> Result<()> {
+pub fn dispatch(
+    command: SessionCommand,
+    cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
+    on_enter: Option<&str>,
+) -> Result<()> {
     match command {
         SessionCommand::New { name, parent, repo } => {
             new_session(name.as_deref(), parent.as_deref(), repo.as_deref())
@@ -27,7 +32,7 @@ pub fn dispatch(command: SessionCommand, cd_file: Option<&Path>) -> Result<()> {
             delete_session(&name, repo.as_deref(), force)
         }
         SessionCommand::Enter { name, repo } => {
-            enter_session(&name, repo.as_deref(), cd_file)
+            enter_session(&name, repo.as_deref(), cd_file, post_cmd_file, on_enter)
         }
         SessionCommand::Exit => exit_session(),
         SessionCommand::Rename {
@@ -303,7 +308,13 @@ fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()>
     Ok(())
 }
 
-fn enter_session(name: &str, repo_arg: Option<&str>, cd_file: Option<&Path>) -> Result<()> {
+fn enter_session(
+    name: &str,
+    repo_arg: Option<&str>,
+    cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
+    on_enter: Option<&str>,
+) -> Result<()> {
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
 
@@ -312,7 +323,10 @@ fn enter_session(name: &str, repo_arg: Option<&str>, cd_file: Option<&Path>) -> 
         .ok_or_else(|| EzError::SessionNotFound(name.into()))?
         .clone();
 
-    let config = crate::config::load()?;
+    let mut config = crate::config::load()?;
+    if let Some(v) = on_enter {
+        config.on_enter = v.into();
+    }
     let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
 
     plugin::run_hooks(
@@ -326,20 +340,22 @@ fn enter_session(name: &str, repo_arg: Option<&str>, cd_file: Option<&Path>) -> 
 
     store::save_sessions(&repo_entry.id, &tree)?;
 
-    // Determine the target directory
+    // Determine the target directory, then apply the on_enter action.
     let target_dir = session
         .path
         .as_ref()
         .cloned()
         .unwrap_or_else(|| repo_entry.path.clone());
 
-    if let Some(cd_path) = cd_file {
-        std::fs::write(cd_path, target_dir.to_string_lossy().as_bytes())?;
-    } else {
-        println!("{}", target_dir.display());
-    }
-
-    Ok(())
+    crate::browser::accept_session(
+        &config.on_enter,
+        &repo_entry,
+        &session,
+        &target_dir,
+        cd_file,
+        post_cmd_file,
+        &config,
+    )
 }
 
 fn exit_session() -> Result<()> {

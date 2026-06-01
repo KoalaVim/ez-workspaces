@@ -119,6 +119,7 @@ fn set_value(key: &str, value: &str) -> Result<()> {
             crate::browser::views::ViewMode::from_flag(value, &config)?;
             config.default_select_by = value.to_string();
         }
+        "on_enter" => config.on_enter = value.to_string(),
         "selector.backend" => config.selector.backend = value.to_string(),
         "selector.fzf_opts" => config.selector.fzf_opts = Some(value.to_string()),
         _ => return Err(EzError::Config(format!("Unknown key: {key}"))),
@@ -136,6 +137,7 @@ fn get_value(key: &str) -> Result<()> {
         "editor" => config.editor.unwrap_or_default(),
         "plugin_timeout" => config.plugin_timeout.to_string(),
         "default_select_by" => config.default_select_by,
+        "on_enter" => config.on_enter,
         "selector.backend" => config.selector.backend,
         "selector.fzf_opts" => config.selector.fzf_opts.unwrap_or_default(),
         "plugins.enabled" => format!("{:?}", config.plugins.enabled),

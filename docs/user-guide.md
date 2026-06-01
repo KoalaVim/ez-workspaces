@@ -97,7 +97,7 @@ ez session list
 # feature-login
 #   api-tests
 
-# Enter a session (cd's to worktree; attaches tmux if auto_attach is on)
+# Enter a session (cd's to worktree by default; see on_enter below)
 ez session enter feature-login
 
 # Delete (cascades with --force)
@@ -195,6 +195,27 @@ Inside the session picker:
 - **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
 
 You can also launch a specific view directly: `ez --select-by repo`, `ez --select-by label`, etc. To change the default view, set `default_select_by = "repo"` in your config (or run `ez config set default_select_by repo`).
+
+### Configuring what Enter does (`on_enter`)
+
+By default, pressing **Enter** on a session (or running `ez session enter <name>`) **cd's into the session's worktree**. You can change this to any session plugin-bind by name:
+
+```bash
+# Attach to (or create) the tmux session instead of cd-ing
+ez config set on_enter tmux
+
+# Override per-invocation (overrides config)
+ez --on-enter tmux
+ez --on-enter cd          # force cd even if config says tmux
+```
+
+`on_enter` is matched against a session plugin-bind's **label**, **bind name**, or **plugin name** — so `"tmux"` resolves to the tmux plugin's `tmux_attach` bind (the same action as pressing **Alt-a** in the picker). If the named bind is unavailable (plugin disabled, tmux not installed), ez silently falls back to `cd`.
+
+Set it in `~/.config/ez/config.toml`:
+
+```toml
+on_enter = "tmux"   # cd | tmux (or any session plugin-bind label/name)
+```
 
 ## Labels
 

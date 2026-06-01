@@ -24,8 +24,12 @@ pub fn browse(
     repo_flag: Option<&Path>,
     select_by: Option<&str>,
     all: bool,
+    on_enter: Option<&str>,
 ) -> Result<()> {
-    let config = config::load()?;
+    let mut config = config::load()?;
+    if let Some(v) = on_enter {
+        config.on_enter = v.into();
+    }
     let selector = FzfSelector::new(&config.fzf)?;
 
     // --repo: jump straight to session picker for a specific repo
@@ -100,6 +104,88 @@ pub(crate) fn write_post_commands(post_cmd_file: Option<&Path>, commands: &[Stri
         fs::write(path, commands.join("\n"))?;
     }
     Ok(())
+}
+
+/// Apply a plugin HookResponse's side-effects (cd target, post-exit commands, inline commands).
+fn apply_bind_response(
+    response: &plugin::protocol::HookResponse,
+    cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
+) -> Result<()> {
+    if let Some(ref cd) = response.cd_target {
+        write_cd_target(cd_file, cd)?;
+    }
+    if !response.post_shell_commands.is_empty() {
+        if post_cmd_file.is_some() {
+            write_post_commands(post_cmd_file, &response.post_shell_commands)?;
+        } else {
+            eprintln!("warning: shell wrapper is outdated. Re-run: eval \"$(ez init-shell zsh)\"");
+            plugin::runner::run_shell_commands(&response.post_shell_commands)?;
+        }
+    }
+    if !response.shell_commands.is_empty() {
+        plugin::runner::run_shell_commands(&response.shell_commands)?;
+    }
+    Ok(())
+}
+
+/// Accept a session: either cd into it (default) or run a named plugin bind's hook.
+///
+/// The `on_enter` value is matched against each session-context bind's `label`, `bind_name`,
+/// and `plugin_name` (in that order). On a match the bind's hook is invoked; if the response
+/// carries a `cd_target` or `post_shell_commands` the function returns `Ok(())` after applying
+/// them. When there is no match, or the bind produces no navigation effect, the function falls
+/// back to a plain `cd` into `target_dir`.
+pub(crate) fn accept_session(
+    on_enter: &str,
+    repo_entry: &repo::model::RepoEntry,
+    selected: &session::model::Session,
+    target_dir: &std::path::Path,
+    cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
+    config: &config::model::EzConfig,
+) -> Result<()> {
+    if on_enter == "cd" {
+        return write_cd_target(cd_file, target_dir);
+    }
+
+    // Look for a matching session-context plugin bind by label, bind_name, or plugin_name.
+    let binds = plugin::collect_plugin_binds("session", config).unwrap_or_default();
+    let matching = binds.iter().find(|b| {
+        b.label == on_enter || b.bind_name == on_enter || b.plugin_name == on_enter
+    });
+
+    if let Some(bind) = matching {
+        match plugin::run_bind_hook(
+            &bind.plugin_name,
+            &bind.bind_name,
+            &bind.key,
+            "session",
+            &selected.id,
+            &selected.name,
+            repo_entry,
+            Some(selected),
+            config,
+        ) {
+            Ok(response) => {
+                let has_effect =
+                    response.cd_target.is_some() || !response.post_shell_commands.is_empty();
+                if has_effect {
+                    apply_bind_response(&response, cd_file, post_cmd_file)?;
+                    return Ok(());
+                }
+                // Plugin produced no navigation effect — fall through to cd.
+            }
+            Err(e) => {
+                log::debug!("on_enter bind hook failed, falling back to cd: {e}");
+                // Fall through to cd.
+            }
+        }
+    } else {
+        log::debug!("on_enter=\"{on_enter}\": no matching session bind found, falling back to cd");
+    }
+
+    write_cd_target(cd_file, target_dir)
 }
 
 /// Session selection loop with action keybinds.
@@ -213,7 +299,15 @@ pub(crate) fn session_action_loop(
                     .as_ref()
                     .cloned()
                     .unwrap_or_else(|| repo_entry.path.clone());
-                return write_cd_target(cd_file, &target_dir);
+                return accept_session(
+                    &config.on_enter,
+                    repo_entry,
+                    selected,
+                    &target_dir,
+                    cd_file,
+                    post_cmd_file,
+                    config,
+                );
             }
             ActionResult::Action(key, idx) => {
                 let selected = rendered[idx].1;
@@ -311,29 +405,9 @@ pub(crate) fn session_action_loop(
                                     Some(selected),
                                     config,
                                 )?;
-                                if let Some(ref cd) = response.cd_target {
-                                    write_cd_target(cd_file, cd)?;
-                                }
-                                if !response.post_shell_commands.is_empty() {
-                                    if post_cmd_file.is_some() {
-                                        write_post_commands(
-                                            post_cmd_file,
-                                            &response.post_shell_commands,
-                                        )?;
-                                    } else {
-                                        eprintln!("warning: shell wrapper is outdated. Re-run: eval \"$(ez init-shell zsh)\"");
-                                        plugin::runner::run_shell_commands(
-                                            &response.post_shell_commands,
-                                        )?;
-                                    }
-                                }
-                                if !response.shell_commands.is_empty() {
-                                    plugin::runner::run_shell_commands(
-                                        &response.shell_commands,
-                                    )?;
-                                }
-                                if !response.post_shell_commands.is_empty()
-                                    || response.cd_target.is_some()
+                                apply_bind_response(&response, cd_file, post_cmd_file)?;
+                                if response.cd_target.is_some()
+                                    || !response.post_shell_commands.is_empty()
                                 {
                                     return Ok(());
                                 }

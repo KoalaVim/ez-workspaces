@@ -58,6 +58,13 @@ pub struct EzConfig {
     /// the default ("main") session.
     #[serde(default = "default_session_name_stages")]
     pub session_name_stages: Vec<SessionNameStage>,
+
+    /// Action to perform when a session is accepted (Enter in the picker or `ez session enter`).
+    /// `"cd"` (default): cd into the session's worktree.
+    /// A session plugin-bind label/name such as `"tmux"`: run that bind's hook instead.
+    /// Overridden per-invocation by `--on-accept <ACTION>`.
+    #[serde(default = "default_on_enter")]
+    pub on_enter: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -170,6 +177,7 @@ impl Default for EzConfig {
             default_select_by: default_select_by(),
             plugin_settings: HashMap::new(),
             session_name_stages: default_session_name_stages(),
+            on_enter: default_on_enter(),
         }
     }
 }
@@ -267,6 +275,10 @@ fn default_plugin_timeout() -> u64 {
 
 fn default_select_by() -> String {
     "workspace".into()
+}
+
+fn default_on_enter() -> String {
+    "cd".into()
 }
 
 fn default_session_name_stages() -> Vec<SessionNameStage> {
