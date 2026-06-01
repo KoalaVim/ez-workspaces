@@ -214,8 +214,28 @@ ez --on-enter cd          # force cd even if config says tmux
 Set it in `~/.config/ez/config.toml`:
 
 ```toml
-on_enter = "tmux"   # cd | tmux (or any session plugin-bind label/name)
+on_enter = "tmux"    # cd | tmux (or any session plugin-bind label/name)
+on_create = "tmux"   # none | cd | tmux (or any session plugin-bind label/name)
 ```
+
+### Configuring what happens after creating a session (`on_create`)
+
+By default, creating a session (picker **Alt-n** or `ez session new <name>`) just creates it and does nothing else. You can make it immediately jump in:
+
+```bash
+# After creating a session, cd into its worktree
+ez config set on_create cd
+
+# After creating a session, attach to (or create) its tmux session
+ez config set on_create tmux
+
+# Per-invocation override
+ez --on-create tmux session new my-feature
+```
+
+In the interactive picker, when `on_create` is set, **Alt-n** creates the session, performs the action, and exits (just like pressing Enter on an existing session). With `"none"` (default) it stays in the picker as it does today.
+
+If the named bind is unavailable (plugin disabled, tmux not installed), ez silently falls back to `cd`.
 
 ## Labels
 

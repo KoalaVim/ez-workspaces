@@ -22,10 +22,11 @@ pub fn dispatch(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     on_enter: Option<&str>,
+    on_create: Option<&str>,
 ) -> Result<()> {
     match command {
         SessionCommand::New { name, parent, repo } => {
-            new_session(name.as_deref(), parent.as_deref(), repo.as_deref())
+            new_session(name.as_deref(), parent.as_deref(), repo.as_deref(), cd_file, post_cmd_file, on_create)
         }
         SessionCommand::List { repo, flat } => list_sessions(repo.as_deref(), flat),
         SessionCommand::Delete { name, repo, force } => {
@@ -159,18 +160,27 @@ fn format_label_change(labels: &[String]) -> String {
     }
 }
 
-fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>) -> Result<()> {
+fn new_session(
+    name: Option<&str>,
+    parent: Option<&str>,
+    repo_arg: Option<&str>,
+    cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
+    on_create: Option<&str>,
+) -> Result<()> {
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
 
     // If a name was provided on the CLI, use it verbatim. Otherwise, run the
     // configured staged-name prompt.
+    let mut config = crate::config::load()?;
+    if let Some(v) = on_create {
+        config.on_create = v.into();
+    }
+
     let session_name = match name {
         Some(s) => s.to_string(),
-        None => {
-            let config = crate::config::load()?;
-            name_builder::prompt_session_name_default(&config)?
-        }
+        None => name_builder::prompt_session_name_default(&config)?,
     };
 
     let parent_id = if let Some(parent_name) = parent {
@@ -182,8 +192,9 @@ fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>)
         None
     };
 
+    let session_id = Uuid::new_v4().to_string();
     let session = Session {
-        id: Uuid::new_v4().to_string(),
+        id: session_id.clone(),
         name: session_name.clone(),
         parent_id,
         path: None,
@@ -197,7 +208,6 @@ fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>)
     tree.add(session.clone())?;
 
     // Run plugin hooks
-    let config = crate::config::load()?;
     let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
     plugin::run_hooks(
         plugin::model::HookType::OnSessionCreate,
@@ -209,7 +219,28 @@ fn new_session(name: Option<&str>, parent: Option<&str>, repo_arg: Option<&str>)
     )?;
 
     store::save_sessions(&repo_entry.id, &tree)?;
-    println!("{} {}", "Created session:".green(), session_name.bold());
+
+    if crate::browser::on_create_is_noop(&config.on_create) {
+        println!("{} {}", "Created session:".green(), session_name.bold());
+    } else {
+        // Get post-hook session (path may have been set by a plugin such as git-worktree).
+        let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
+        let target_dir = created
+            .path
+            .as_ref()
+            .cloned()
+            .unwrap_or_else(|| repo_entry.path.clone());
+        crate::browser::accept_session(
+            &config.on_create,
+            &repo_entry,
+            &created,
+            &target_dir,
+            cd_file,
+            post_cmd_file,
+            &config,
+        )?;
+    }
+
     Ok(())
 }
 
@@ -388,7 +419,9 @@ fn rename_session(name: &str, new_name: &str, repo_arg: Option<&str>) -> Result<
 }
 
 /// Create a child session under a given parent (by ID). Used by the browser action menu.
-pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Result<()> {
+/// Create a new child session and return the post-hook `Session` (which may have a
+/// `path` set by plugins such as git-worktree).
+pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Result<Session> {
     let repo_entry = repo::store::load_index()?
         .repos
         .iter()
@@ -402,8 +435,9 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
         return Err(EzError::SessionAlreadyExists(name.into()));
     }
 
+    let session_id = Uuid::new_v4().to_string();
     let session = Session {
-        id: Uuid::new_v4().to_string(),
+        id: session_id.clone(),
         name: name.to_string(),
         parent_id: Some(parent_id.to_string()),
         path: None,
@@ -428,7 +462,13 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
     )?;
 
     store::save_sessions(repo_id, &tree)?;
-    Ok(())
+
+    // Return the post-hook session so callers can read the updated path.
+    let created = tree
+        .find_by_id(&session_id)
+        .cloned()
+        .unwrap_or(session);
+    Ok(created)
 }
 
 /// Delete a session by ID (with forced cascade). Used by the browser action menu.

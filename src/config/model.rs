@@ -62,9 +62,17 @@ pub struct EzConfig {
     /// Action to perform when a session is accepted (Enter in the picker or `ez session enter`).
     /// `"cd"` (default): cd into the session's worktree.
     /// A session plugin-bind label/name such as `"tmux"`: run that bind's hook instead.
-    /// Overridden per-invocation by `--on-accept <ACTION>`.
+    /// Overridden per-invocation by `--on-enter <ACTION>`.
     #[serde(default = "default_on_enter")]
     pub on_enter: String,
+
+    /// Action to perform right after a session is created (picker Alt-n or `ez session new`).
+    /// `"none"` (default): do nothing after creation.
+    /// `"cd"`: cd into the new session's worktree.
+    /// A session plugin-bind label/name such as `"tmux"`: attach/create its tmux session.
+    /// Overridden per-invocation by `--on-create <ACTION>`.
+    #[serde(default = "default_on_create")]
+    pub on_create: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -178,6 +186,7 @@ impl Default for EzConfig {
             plugin_settings: HashMap::new(),
             session_name_stages: default_session_name_stages(),
             on_enter: default_on_enter(),
+            on_create: default_on_create(),
         }
     }
 }
@@ -279,6 +288,10 @@ fn default_select_by() -> String {
 
 fn default_on_enter() -> String {
     "cd".into()
+}
+
+fn default_on_create() -> String {
+    "none".into()
 }
 
 fn default_session_name_stages() -> Vec<SessionNameStage> {

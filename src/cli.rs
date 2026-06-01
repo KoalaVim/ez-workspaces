@@ -47,6 +47,13 @@ pub struct Cli {
     /// A session plugin-bind label/name such as "tmux": run that bind instead.
     #[arg(long, value_name = "ACTION")]
     pub on_enter: Option<String>,
+
+    /// Action to perform right after a session is created (picker Alt-n, or `ez session new`).
+    /// Overrides `on_create` in config.
+    /// "none" (default): do nothing. "cd": cd into the new worktree.
+    /// A session plugin-bind label/name such as "tmux": attach/create its tmux session.
+    #[arg(long, value_name = "ACTION")]
+    pub on_create: Option<String>,
 }
 
 #[derive(Subcommand)]

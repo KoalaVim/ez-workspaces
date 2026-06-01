@@ -69,6 +69,7 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez` | Interactive fzf browser (default view is `default_select_by` in config, else `workspace`) |
 | `ez --select-by <mode>` | Start the browser by `tree`, `workspace`, `repo`, `owner`, or `label` |
 | `ez --on-enter <action>` | Override accept behavior: `cd` (default) or a plugin-bind name such as `tmux` |
+| `ez --on-create <action>` | Override post-create behavior: `none` (default), `cd`, or a plugin-bind name such as `tmux` |
 | `ez --workspace <name>` | Jump directly to a workspace root |
 | `ez --repo <path>` | Jump straight to a repo's session picker |
 | `ez clone <url> [path]` | Clone + register repo |
@@ -180,6 +181,7 @@ default_shell = "zsh"
 plugin_timeout = 30
 default_select_by = "workspace"  # tree | workspace | repo | owner | label
 on_enter = "cd"               # cd | tmux (or any session plugin-bind label/name)
+on_create = "none"            # none | cd | tmux (or any session plugin-bind label/name)
 
 [selector]
 backend = "fzf"

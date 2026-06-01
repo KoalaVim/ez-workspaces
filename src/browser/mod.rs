@@ -25,10 +25,14 @@ pub fn browse(
     select_by: Option<&str>,
     all: bool,
     on_enter: Option<&str>,
+    on_create: Option<&str>,
 ) -> Result<()> {
     let mut config = config::load()?;
     if let Some(v) = on_enter {
         config.on_enter = v.into();
+    }
+    if let Some(v) = on_create {
+        config.on_create = v.into();
     }
     let selector = FzfSelector::new(&config.fzf)?;
 
@@ -104,6 +108,11 @@ pub(crate) fn write_post_commands(post_cmd_file: Option<&Path>, commands: &[Stri
         fs::write(path, commands.join("\n"))?;
     }
     Ok(())
+}
+
+/// Returns true if the `on_create` value means "do nothing" (skip navigation after create).
+pub(crate) fn on_create_is_noop(v: &str) -> bool {
+    v.is_empty() || v == "none"
 }
 
 /// Apply a plugin HookResponse's side-effects (cd target, post-exit commands, inline commands).
@@ -318,17 +327,34 @@ pub(crate) fn session_action_loop(
                             config,
                         )? {
                             session::name_builder::NamePromptResult::Done(name) => {
-                                session::create_child_session(
+                                let created = session::create_child_session(
                                     &repo_entry.id,
                                     &selected.id,
                                     &name,
                                 )?;
-                                eprintln!(
-                                    "{} {} → {}",
-                                    "Created:".green(),
-                                    name.bold(),
-                                    selected.name.dimmed()
-                                );
+                                if on_create_is_noop(&config.on_create) {
+                                    eprintln!(
+                                        "{} {} → {}",
+                                        "Created:".green(),
+                                        name.bold(),
+                                        selected.name.dimmed()
+                                    );
+                                } else {
+                                    let target_dir = created
+                                        .path
+                                        .as_ref()
+                                        .cloned()
+                                        .unwrap_or_else(|| repo_entry.path.clone());
+                                    return accept_session(
+                                        &config.on_create,
+                                        repo_entry,
+                                        &created,
+                                        &target_dir,
+                                        cd_file,
+                                        post_cmd_file,
+                                        config,
+                                    );
+                                }
                             }
                             session::name_builder::NamePromptResult::Cancelled => {}
                         }
