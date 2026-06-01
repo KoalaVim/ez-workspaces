@@ -73,8 +73,10 @@ case "$HOOK" in
             dbg "target session: '${TMUX_SESSION}'"
             dbg "session path: '${SESSION_PATH}'"
 
-            dbg "before: list-sessions:"
-            dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
+            if [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ]; then
+                dbg "before: list-sessions:"
+                dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
+            fi
 
             if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
                 dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" >/dev/null || true
@@ -82,8 +84,10 @@ case "$HOOK" in
                 dbg "session already exists, skipping new-session"
             fi
 
-            dbg "after: list-sessions:"
-            dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
+            if [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ]; then
+                dbg "after: list-sessions:"
+                dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
+            fi
 
             mark_ez_managed "$TMUX_SESSION"
         fi

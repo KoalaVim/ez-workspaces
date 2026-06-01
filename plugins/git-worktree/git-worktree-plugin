@@ -6,6 +6,20 @@
 
 set -euo pipefail
 
+# Debug logger: writes to EZ_PLUGIN_DEBUG_LOG when set (injected by --debug).
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== git-worktree-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# Returns current time in milliseconds.
+t_ms() { date +%s%3N; }
+
 # Read the full JSON request from stdin
 REQUEST=$(cat)
 
@@ -16,8 +30,32 @@ SESSION_IS_DEFAULT=$(echo "$REQUEST" | jq -r '.session.is_default // false')
 PARENT_IS_DEFAULT=$(echo "$REQUEST" | jq -r '.session.parent_is_default // false')
 PARENT_NAME=$(echo "$REQUEST" | jq -r '.session.parent_name // empty')
 
+# Fetch TTL in seconds: only refetch origin if the last fetch was older than this.
+# Set to 0 to always fetch. Configurable via [plugin_settings.git-worktree] fetch_ttl.
+FETCH_TTL=$(echo "$REQUEST" | jq -r '.config.user_config.fetch_ttl // 60')
+
+# Absolute path to the git dir (used for the fetch timestamp file).
+GIT_DIR_ABS=$(git -C "$REPO_PATH" rev-parse --absolute-git-dir 2>/dev/null || echo "$REPO_PATH/.git")
+FETCH_STAMP="${GIT_DIR_ABS}/ez-fetch-stamp"
+
+# Returns 0 (true) if we should fetch, 1 (false) if we can skip.
+should_fetch() {
+    [ "$FETCH_TTL" -le 0 ] && return 0
+    [ ! -f "$FETCH_STAMP" ] && return 0
+    local last now elapsed
+    last=$(cat "$FETCH_STAMP" 2>/dev/null || echo 0)
+    now=$(date +%s)
+    elapsed=$(( now - last ))
+    [ "$elapsed" -ge "$FETCH_TTL" ] && return 0
+    dbg "fetch: skipped (cached, ${elapsed}s old, ttl=${FETCH_TTL}s)"
+    return 1
+}
+
+dbg "hook=$HOOK repo=$REPO_PATH session=$SESSION_NAME is_default=$SESSION_IS_DEFAULT parent=$PARENT_NAME parent_is_default=$PARENT_IS_DEFAULT"
+
 # Don't create worktrees for the default "main" session
 if [ "$SESSION_IS_DEFAULT" = "true" ]; then
+    dbg "skipping: default session"
     echo '{"success": true}'
     exit 0
 fi
@@ -27,13 +65,25 @@ REPO_BASENAME=$(basename "$REPO_PATH")
 WORKTREE_BASE=$(dirname "$REPO_PATH")/.ez/${REPO_BASENAME}
 WORKTREE_PATH="${WORKTREE_BASE}/${SESSION_NAME}"
 
+dbg "worktree_base=$WORKTREE_BASE worktree_path=$WORKTREE_PATH"
+
 resolve_default_start_point() {
-    git -C "$REPO_PATH" fetch origin >/dev/null 2>&1 || true
+    if should_fetch; then
+        local t0; t0=$(t_ms)
+        echo "fetching origin/main and origin/master..." >&2
+        dbg "fetch: start"
+        git -C "$REPO_PATH" fetch origin main master >&2 || true
+        date +%s > "$FETCH_STAMP" 2>/dev/null || true
+        dbg "fetch: done ($(( $(t_ms) - t0 ))ms)"
+    fi
     if git -C "$REPO_PATH" rev-parse --verify origin/main &>/dev/null; then
+        dbg "start point: origin/main"
         echo "origin/main"
     elif git -C "$REPO_PATH" rev-parse --verify origin/master &>/dev/null; then
+        dbg "start point: origin/master"
         echo "origin/master"
     else
+        dbg "start point: HEAD (no origin/main or origin/master found)"
         echo "HEAD"
     fi
 }
@@ -44,12 +94,15 @@ resolve_default_start_point() {
 #   - Child of non-default session without a worktree: fall back to default
 resolve_start_point() {
     if [ "$PARENT_IS_DEFAULT" = "true" ] || [ -z "$PARENT_NAME" ]; then
+        dbg "start point strategy: fetch (parent is default or absent)"
         resolve_default_start_point
     else
         local parent_worktree="${WORKTREE_BASE}/${PARENT_NAME}"
         if [ -d "$parent_worktree/.git" ] || [ -f "$parent_worktree/.git" ]; then
+            dbg "start point strategy: HEAD of parent worktree ($parent_worktree)"
             git -C "$parent_worktree" rev-parse HEAD 2>/dev/null || resolve_default_start_point
         else
+            dbg "start point strategy: fetch (parent worktree $parent_worktree not found)"
             resolve_default_start_point
         fi
     fi
@@ -61,13 +114,18 @@ case "$HOOK" in
 
         BRANCH_NAME="${SESSION_NAME}"
         START_POINT=$(resolve_start_point)
+        dbg "branch=$BRANCH_NAME start_point=$START_POINT"
 
+        t1=$(t_ms)
         # Check if branch already exists
         if git -C "$REPO_PATH" show-ref --verify --quiet "refs/heads/${BRANCH_NAME}" 2>/dev/null; then
+            dbg "worktree add: branch exists, checking out"
             git -C "$REPO_PATH" worktree add "$WORKTREE_PATH" "$BRANCH_NAME" >/dev/null 2>&1
         else
+            dbg "worktree add: creating new branch from $START_POINT"
             git -C "$REPO_PATH" worktree add --no-track -b "$BRANCH_NAME" "$WORKTREE_PATH" "$START_POINT" >/dev/null 2>&1
         fi
+        dbg "worktree add: done ($(( $(t_ms) - t1 ))ms)"
 
         if [ $? -eq 0 ]; then
             # Return mutations to set the session's path
@@ -92,11 +150,17 @@ case "$HOOK" in
 
     on_session_delete)
         if [ -d "$WORKTREE_PATH" ]; then
+            t2=$(t_ms)
+            dbg "worktree remove: $WORKTREE_PATH"
             git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force >/dev/null 2>&1 || true
+            dbg "worktree remove: done ($(( $(t_ms) - t2 ))ms)"
 
             # Optionally delete the branch
             BRANCH_NAME="${SESSION_NAME}"
+            dbg "branch delete: $BRANCH_NAME"
             git -C "$REPO_PATH" branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
+        else
+            dbg "worktree path not found, nothing to remove: $WORKTREE_PATH"
         fi
         echo '{"success": true}'
         ;;

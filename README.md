@@ -191,6 +191,9 @@ enabled = ["git-worktree", "tmux"]
 
 [plugin_settings.tmux]
 auto_attach = true  # auto-attach to tmux session on session enter
+
+[plugin_settings.git-worktree]
+fetch_ttl = 60  # seconds to cache `git fetch`; 0 = always fetch on session create
 ```
 
 ## Shell Completions
