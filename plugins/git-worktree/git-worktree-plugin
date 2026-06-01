@@ -160,11 +160,6 @@ case "$HOOK" in
                 git -C "$REPO_PATH" worktree remove "$WORKTREE_PATH" --force >/dev/null 2>&1 || true
             fi
             dbg "worktree remove: done ($(( $(t_ms) - t2 ))ms)"
-
-            # Optionally delete the branch
-            BRANCH_NAME="${SESSION_NAME}"
-            dbg "branch delete: $BRANCH_NAME"
-            git -C "$REPO_PATH" branch -D "$BRANCH_NAME" >/dev/null 2>&1 || true
         else
             dbg "worktree path not found, nothing to remove: $WORKTREE_PATH"
         fi
