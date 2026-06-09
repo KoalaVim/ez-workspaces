@@ -44,6 +44,17 @@ pub fn dispatch(
             on_create,
         ),
         SessionCommand::List { repo, flat } => list_sessions(repo.as_deref(), flat),
+        SessionCommand::Register {
+            path,
+            name,
+            parent,
+            repo,
+        } => register_existing_worktree(
+            path.as_deref(),
+            name.as_deref(),
+            parent.as_deref(),
+            repo.as_deref(),
+        ),
         SessionCommand::Delete { name, repo, force } => {
             delete_session(name.as_deref(), repo.as_deref(), force)
         }
@@ -262,6 +273,207 @@ fn new_session(
     }
 
     Ok(())
+}
+
+fn register_existing_worktree(
+    path: Option<&Path>,
+    name: Option<&str>,
+    parent: Option<&str>,
+    repo_arg: Option<&str>,
+) -> Result<()> {
+    let requested_path = match path {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(path) => std::env::current_dir()?.join(path),
+        None => std::env::current_dir()?,
+    };
+    let worktree = detect_existing_worktree(&requested_path)?;
+    let repo_entry = resolve_registered_repo_for_worktree(repo_arg, &worktree.main_repo_path)?;
+    let session_name = match name {
+        Some(name) if !name.trim().is_empty() => name.trim().to_string(),
+        Some(_) => {
+            return Err(EzError::Config(
+                "session name cannot be empty when registering a worktree".into(),
+            ));
+        }
+        None => worktree.branch.clone().ok_or_else(|| {
+            EzError::Config(
+                "could not detect a branch for this worktree; pass --name explicitly".into(),
+            )
+        })?,
+    };
+
+    let mut tree = store::load_sessions(&repo_entry.id)?;
+    if tree.find_by_name(&session_name).is_some() {
+        return Err(EzError::SessionAlreadyExists(session_name));
+    }
+
+    if let Some(existing) = find_session_by_path(&tree, &worktree.worktree_path) {
+        return Err(EzError::Config(format!(
+            "worktree '{}' is already registered as session '{}'",
+            worktree.worktree_path.display(),
+            existing.name
+        )));
+    }
+
+    let parent_id = if let Some(parent_name) = parent {
+        let parent_session = tree
+            .find_by_name(parent_name)
+            .ok_or_else(|| EzError::SessionNotFound(parent_name.into()))?;
+        Some(parent_session.id.clone())
+    } else {
+        None
+    };
+
+    let mut plugin_state = HashMap::new();
+    plugin_state.insert(
+        "worktree_path".to_string(),
+        toml::Value::String(worktree.worktree_path.display().to_string()),
+    );
+    if let Some(branch) = &worktree.branch {
+        plugin_state.insert("branch".to_string(), toml::Value::String(branch.clone()));
+    }
+
+    let session = Session {
+        id: Uuid::new_v4().to_string(),
+        name: session_name.clone(),
+        parent_id,
+        path: Some(worktree.worktree_path.clone()),
+        env: HashMap::new(),
+        plugin_state,
+        labels: Vec::new(),
+        created_at: Utc::now(),
+        is_default: false,
+    };
+
+    tree.add(session)?;
+    store::save_sessions(&repo_entry.id, &tree)?;
+
+    println!(
+        "{} {} {} {}",
+        "Registered session:".green(),
+        session_name.bold(),
+        "->".dimmed(),
+        worktree.worktree_path.display()
+    );
+    Ok(())
+}
+
+struct ExistingWorktree {
+    worktree_path: PathBuf,
+    main_repo_path: PathBuf,
+    branch: Option<String>,
+}
+
+fn detect_existing_worktree(path: &Path) -> Result<ExistingWorktree> {
+    if !path.exists() {
+        return Err(EzError::Path(format!(
+            "worktree path does not exist: {}",
+            path.display()
+        )));
+    }
+
+    let worktree_path = git_output(path, &["rev-parse", "--show-toplevel"])?;
+    let worktree_path = PathBuf::from(worktree_path);
+    let worktree_path = worktree_path.canonicalize()?;
+
+    let common_dir = git_output(&worktree_path, &["rev-parse", "--git-common-dir"])?;
+    let common_dir = PathBuf::from(common_dir);
+    let common_dir = if common_dir.is_absolute() {
+        common_dir
+    } else {
+        worktree_path.join(common_dir)
+    };
+    let common_dir = common_dir.canonicalize()?;
+    let main_repo_path = common_dir
+        .file_name()
+        .filter(|name| *name == ".git")
+        .and_then(|_| common_dir.parent())
+        .ok_or_else(|| {
+            EzError::Git(format!(
+                "could not resolve main repo from git common dir: {}",
+                common_dir.display()
+            ))
+        })?
+        .canonicalize()?;
+
+    let branch = git_output(
+        &worktree_path,
+        &["symbolic-ref", "--quiet", "--short", "HEAD"],
+    )
+    .ok()
+    .filter(|branch| !branch.trim().is_empty());
+
+    Ok(ExistingWorktree {
+        worktree_path,
+        main_repo_path,
+        branch,
+    })
+}
+
+fn resolve_registered_repo_for_worktree(
+    repo_arg: Option<&str>,
+    main_repo_path: &Path,
+) -> Result<repo::model::RepoEntry> {
+    if let Some(repo_arg) = repo_arg {
+        let repo_entry = repo::resolve_repo(Some(repo_arg))?;
+        let registered_path = repo_entry.path.canonicalize()?;
+        if registered_path != main_repo_path {
+            return Err(EzError::RepoNotFound(format!(
+                "worktree belongs to '{}', but --repo resolved to '{}'",
+                main_repo_path.display(),
+                repo_entry.path.display()
+            )));
+        }
+        return Ok(repo_entry);
+    }
+
+    let index = repo::store::load_index()?;
+    index
+        .repos
+        .into_iter()
+        .find(|repo| {
+            repo.path
+                .canonicalize()
+                .map(|path| path == main_repo_path)
+                .unwrap_or(false)
+        })
+        .ok_or_else(|| {
+            EzError::RepoNotFound(format!(
+                "{} (register the main repo with `ez add {}` first)",
+                main_repo_path.display(),
+                main_repo_path.display()
+            ))
+        })
+}
+
+fn find_session_by_path<'a>(tree: &'a SessionTree, worktree_path: &Path) -> Option<&'a Session> {
+    tree.sessions.iter().find(|session| {
+        session
+            .path
+            .as_deref()
+            .and_then(|path| path.canonicalize().ok())
+            .map(|path| path == worktree_path)
+            .unwrap_or(false)
+    })
+}
+
+fn git_output(path: &Path, args: &[&str]) -> Result<String> {
+    let output = Command::new("git").args(args).current_dir(path).output()?;
+    if output.status.success() {
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !value.is_empty() {
+            return Ok(value);
+        }
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(EzError::Git(format!(
+        "git {} failed in {}{}{}",
+        args.join(" "),
+        path.display(),
+        if stderr.is_empty() { "" } else { ": " },
+        stderr
+    )))
 }
 
 fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {

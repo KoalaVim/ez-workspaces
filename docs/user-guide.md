@@ -97,6 +97,9 @@ ez session list
 # feature-login
 #   api-tests
 
+# Register an existing worktree as a session (defaults to current directory and branch name)
+ez session register /path/to/worktree
+
 # Enter a session (cd's to worktree by default; see on_enter below)
 ez session enter feature-login
 
@@ -106,6 +109,8 @@ ez session delete feature-login --force
 # Delete the current session (detects tmux @ez_session_path or current worktree, then prompts)
 ez session delete
 ```
+
+If `ez session new <name>` finds that the branch is already checked out in another git worktree, the git-worktree plugin reports the existing path and suggests `ez session register <path> --name <name>`. Registered worktrees are treated as session worktrees, so deleting that session runs the normal worktree cleanup hook.
 
 #### Interactive session naming
 

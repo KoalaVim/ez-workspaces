@@ -153,6 +153,21 @@ pub enum SessionCommand {
         flat: bool,
     },
 
+    /// Register an existing git worktree as a session
+    Register {
+        /// Path inside the existing worktree (default: current directory)
+        path: Option<PathBuf>,
+        /// Session name (default: current branch name)
+        #[arg(long, short)]
+        name: Option<String>,
+        /// Parent session name
+        #[arg(long, short)]
+        parent: Option<String>,
+        /// Repository name or path (default: detected from worktree)
+        #[arg(long, short)]
+        repo: Option<String>,
+    },
+
     /// Delete a session
     #[command(alias = "rm")]
     Delete {

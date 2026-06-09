@@ -44,7 +44,7 @@ docs/               Documentation
 - `tree.rs`: tree operations (roots, children, ancestors, descendants, render)
 - `store.rs`: filesystem persistence
 - `current.rs`: current-session detection from tmux `@ez_session_path` and worktree paths
-- `mod.rs`: new, delete, enter, exit, rename, ensure_default_session
+- `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session
 
 ### plugin/ - Plugin System
 - `model.rs`: `PluginManifest`, `HookType` enum (13 hook types including `OnBind`, `OnView`, `OnViewSelect`), `PluginBind`, `PluginView`, `ConfigField`

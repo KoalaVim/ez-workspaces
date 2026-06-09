@@ -68,6 +68,8 @@ sequenceDiagram
     S-->>U: Created session: feature-x
 ```
 
+`ez session register [path]` follows a shorter session flow: it resolves the git worktree root and common repo with `git rev-parse`, matches that repo to the registered repo index, then writes a `Session` with `path` set to the existing worktree. It does not run `OnSessionCreate`, because no worktree should be created.
+
 ## Interactive Browse Flow
 
 ```mermaid

@@ -76,6 +76,7 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez add [path]` | Register existing repo |
 | `ez session new [name]` | Create session (`--parent` for nesting); without `name` you'll be prompted through configured stages (`prefix`, `ticket`, free-text). If the name matches an existing git branch you'll be asked to **reuse** it or **recreate** from the latest base. |
 | `ez session list` | List sessions as tree (`--flat` for flat) |
+| `ez session register [path]` | Register an existing git worktree as a session; defaults to current directory and branch name |
 | `ez session enter <name>` | Enter a session |
 | `ez session delete [name]` | Delete session; without `name`, detect the current session from tmux or the worktree directory and prompt (`--force` for cascade/dirty worktrees) |
 | `ez session rename <old> <new>` | Rename a session |
