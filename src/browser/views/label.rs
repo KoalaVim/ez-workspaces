@@ -148,10 +148,12 @@ pub(super) fn run(
 
     match sub_action {
         ActionResult::Cancel => Ok(Outcome::Switch(ViewMode::Label)),
-        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &plugin_views, &key) {
-            Some(next) => Ok(Outcome::Switch(next)),
-            None => Ok(Outcome::Done),
-        },
+        ActionResult::Action(key, _) => {
+            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+                Some(next) => Ok(Outcome::Switch(next)),
+                None => Ok(Outcome::Done),
+            }
+        }
         ActionResult::Select(idx) => match &tagged[idx] {
             LabeledItem::Repo(r) => {
                 browse_repo(&r.path, selector, cd_file, post_cmd_file, config)?;

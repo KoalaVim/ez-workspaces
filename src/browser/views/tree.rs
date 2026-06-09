@@ -28,7 +28,11 @@ pub(super) fn run(
     for (root_i, root) in config.workspace_roots.iter().enumerate() {
         let root_path = paths::expand_tilde(root);
         let is_last_root = root_i == num_roots - 1;
-        let root_connector = if is_last_root { "└── " } else { "├── " };
+        let root_connector = if is_last_root {
+            "└── "
+        } else {
+            "├── "
+        };
         let root_cont = if is_last_root { "    " } else { "│   " };
 
         nodes.push((
@@ -65,7 +69,11 @@ pub(super) fn run(
         let num_repos = repos.len();
         for (repo_i, (repo_name, repo_path)) in repos.iter().enumerate() {
             let is_last_repo = repo_i == num_repos - 1;
-            let repo_connector = if is_last_repo { "└── " } else { "├── " };
+            let repo_connector = if is_last_repo {
+                "└── "
+            } else {
+                "├── "
+            };
             let repo_cont = if is_last_repo { "    " } else { "│   " };
 
             let branch = get_branch(repo_path).unwrap_or_else(|| "?".into());
@@ -89,8 +97,11 @@ pub(super) fn run(
                         let num_sessions = rendered.len();
                         for (sess_i, (depth, s)) in rendered.iter().enumerate() {
                             let is_last_session = sess_i == num_sessions - 1;
-                            let sess_connector =
-                                if is_last_session { "└── " } else { "├── " };
+                            let sess_connector = if is_last_session {
+                                "└── "
+                            } else {
+                                "├── "
+                            };
                             let session_indent = "    ".repeat(*depth);
                             let marker = if s.is_default {
                                 " ★".yellow().to_string()
@@ -153,10 +164,12 @@ pub(super) fn run(
 
     match action {
         ActionResult::Cancel => Ok(Outcome::Done),
-        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &plugin_views, &key) {
-            Some(next) => Ok(Outcome::Switch(next)),
-            None => Ok(Outcome::Done),
-        },
+        ActionResult::Action(key, _) => {
+            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+                Some(next) => Ok(Outcome::Switch(next)),
+                None => Ok(Outcome::Done),
+            }
+        }
         ActionResult::Select(idx) => match &nodes[idx].1 {
             Some(target) => {
                 write_cd_target(cd_file, target)?;

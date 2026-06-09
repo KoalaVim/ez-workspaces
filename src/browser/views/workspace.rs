@@ -20,7 +20,10 @@ pub(super) fn run(
 ) -> Result<Outcome> {
     if config.workspace_roots.is_empty() {
         println!("{}", "No workspace roots configured.".yellow());
-        println!("Add roots to your config with: {}", "ez config --edit".bold());
+        println!(
+            "Add roots to your config with: {}",
+            "ez config --edit".bold()
+        );
         println!("Example: workspace_roots = [\"~/workspace\"]");
         return Ok(Outcome::Done);
     }
@@ -34,16 +37,12 @@ pub(super) fn run(
             let expanded = paths::expand_tilde(r);
             let collapsed = paths::collapse_tilde(&expanded.to_string_lossy());
             let collapsed_trimmed = collapsed.trim_end_matches('/');
-            let expanded_trimmed =
-                expanded.to_string_lossy().trim_end_matches('/').to_string();
+            let expanded_trimmed = expanded.to_string_lossy().trim_end_matches('/').to_string();
             let dir_name = expanded
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            r_trimmed == ws
-                || collapsed_trimmed == ws
-                || expanded_trimmed == ws
-                || dir_name == ws
+            r_trimmed == ws || collapsed_trimmed == ws || expanded_trimmed == ws || dir_name == ws
         });
         match matched {
             Some(r) => paths::expand_tilde(r),

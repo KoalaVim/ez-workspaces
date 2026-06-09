@@ -160,7 +160,7 @@ pub struct KeybindsConfig {
     pub edit_labels: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct PluginsConfig {
     /// List of enabled plugin names
     #[serde(default)]
@@ -221,15 +221,6 @@ impl Default for KeybindsConfig {
             view_owner: default_bind_view_owner(),
             view_label: default_bind_view_label(),
             edit_labels: default_bind_edit_labels(),
-        }
-    }
-}
-
-impl Default for PluginsConfig {
-    fn default() -> Self {
-        Self {
-            enabled: Vec::new(),
-            plugin_dir: None,
         }
     }
 }

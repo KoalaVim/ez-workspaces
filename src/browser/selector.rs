@@ -45,11 +45,7 @@ pub trait InteractiveSelector {
     ) -> Result<Option<usize>>;
 
     /// Present items and allow multiple selection (Tab to toggle in fzf).
-    fn select_many(
-        &self,
-        items: &[SelectItem],
-        prompt: &str,
-    ) -> Result<Vec<usize>>;
+    fn select_many(&self, items: &[SelectItem], prompt: &str) -> Result<Vec<usize>>;
 
     /// Prompt for free-text input with optional default.
     fn input(&self, prompt: &str, default: Option<&str>) -> Result<String>;
@@ -200,7 +196,11 @@ impl InteractiveSelector for FzfSelector {
 
         let output = child.wait_with_output()?;
 
-        log::debug!("select_one: fzf exit={}, stdout={:?}", output.status, String::from_utf8_lossy(&output.stdout));
+        log::debug!(
+            "select_one: fzf exit={}, stdout={:?}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         if !output.status.success() {
             return Ok(None);
@@ -210,15 +210,16 @@ impl InteractiveSelector for FzfSelector {
         // When using value prefix, match on value (first field) since fzf
         // strips ANSI codes from the display portion in its output.
         let (match_field, match_on_value) = if use_value_prefix {
-            let value = raw.splitn(2, '\t')
-                .next()
-                .unwrap_or(&raw)
-                .to_string();
+            let value = raw.split('\t').next().unwrap_or(&raw).to_string();
             (value, true)
         } else {
             (raw, false)
         };
-        log::debug!("select_one: match_field={:?} on_value={}", match_field, match_on_value);
+        log::debug!(
+            "select_one: match_field={:?} on_value={}",
+            match_field,
+            match_on_value
+        );
         let index = if match_on_value {
             items.iter().position(|item| item.value == match_field)
         } else {
@@ -228,11 +229,7 @@ impl InteractiveSelector for FzfSelector {
         Ok(index)
     }
 
-    fn select_many(
-        &self,
-        items: &[SelectItem],
-        prompt: &str,
-    ) -> Result<Vec<usize>> {
+    fn select_many(&self, items: &[SelectItem], prompt: &str) -> Result<Vec<usize>> {
         if items.is_empty() {
             return Ok(Vec::new());
         }
@@ -436,11 +433,7 @@ impl InteractiveSelector for FzfSelector {
             return Ok(StageOutcome::Back);
         }
 
-        let selection_value = selection_line
-            .splitn(2, '\t')
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let selection_value = selection_line.split('\t').next().unwrap_or("").to_string();
         let query = query_line.trim().to_string();
 
         // Picked an item from the list.
@@ -619,7 +612,10 @@ impl InteractiveSelector for FzfSelector {
         let output = child.wait_with_output()?;
 
         log::debug!("fzf exit status: {}", output.status);
-        log::debug!("fzf stdout raw: {:?}", String::from_utf8_lossy(&output.stdout));
+        log::debug!(
+            "fzf stdout raw: {:?}",
+            String::from_utf8_lossy(&output.stdout)
+        );
 
         if !output.status.success() {
             log::debug!("fzf exited with non-zero status, returning Cancel");
@@ -640,7 +636,7 @@ impl InteractiveSelector for FzfSelector {
         // because fzf strips ANSI codes from the display portion in its output.
         let (match_field, match_on_value) = if use_value_prefix {
             let value = selection_line
-                .splitn(2, '\t')
+                .split('\t')
                 .next()
                 .unwrap_or(&selection_line)
                 .to_string();
@@ -649,7 +645,11 @@ impl InteractiveSelector for FzfSelector {
             (selection_line, false)
         };
 
-        log::debug!("fzf match_field: {:?} (on_value={})", match_field, match_on_value);
+        log::debug!(
+            "fzf match_field: {:?} (on_value={})",
+            match_field,
+            match_on_value
+        );
 
         let index = match if match_on_value {
             items.iter().position(|item| item.value == match_field)
@@ -660,7 +660,12 @@ impl InteractiveSelector for FzfSelector {
             None => {
                 log::debug!("fzf match failed, items:");
                 for (i, item) in items.iter().enumerate() {
-                    log::debug!("  [{}] display={:?} value={:?}", i, item.display, item.value);
+                    log::debug!(
+                        "  [{}] display={:?} value={:?}",
+                        i,
+                        item.display,
+                        item.value
+                    );
                 }
                 return Ok(ActionResult::Cancel);
             }

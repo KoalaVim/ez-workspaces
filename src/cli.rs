@@ -156,8 +156,8 @@ pub enum SessionCommand {
     /// Delete a session
     #[command(alias = "rm")]
     Delete {
-        /// Session name
-        name: String,
+        /// Session name (default: detect current session and prompt)
+        name: Option<String>,
         /// Repository name or path (default: current repo)
         #[arg(long, short)]
         repo: Option<String>,

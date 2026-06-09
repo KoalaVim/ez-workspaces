@@ -61,7 +61,6 @@ impl ViewMode {
             }
         }
     }
-
 }
 
 /// Dispatch loop that renders views and handles view-switch keybinds.
@@ -170,12 +169,7 @@ pub(super) fn view_header(
 ) -> String {
     let mut header = format!(
         "view: {} │ {}:tree {}:workspace {}:repo {}:owner {}:label",
-        current,
-        kb.view_tree,
-        kb.view_workspace,
-        kb.view_repo,
-        kb.view_owner,
-        kb.view_label,
+        current, kb.view_tree, kb.view_workspace, kb.view_repo, kb.view_owner, kb.view_label,
     );
     for pv in plugin_views {
         header.push_str(&format!(" {}:{}", pv.key, pv.label));

@@ -48,7 +48,9 @@ fn list_plugins() -> Result<()> {
                         };
                         println!(
                             "{:<20} {:<19} {}",
-                            manifest.name.cyan(), status, manifest.description
+                            manifest.name.cyan(),
+                            status,
+                            manifest.description
                         );
                         found = true;
                     }
@@ -58,7 +60,11 @@ fn list_plugins() -> Result<()> {
     }
 
     if !found {
-        println!("{} {}", "No plugins found in".yellow(), plugins_dir.display());
+        println!(
+            "{} {}",
+            "No plugins found in".yellow(),
+            plugins_dir.display()
+        );
     }
     Ok(())
 }
@@ -66,7 +72,10 @@ fn list_plugins() -> Result<()> {
 fn enable_plugin(name: &str) -> Result<()> {
     let mut config = crate::config::load()?;
     if config.plugins.enabled.contains(&name.to_string()) {
-        println!("{}", format!("Plugin '{name}' is already enabled.").yellow());
+        println!(
+            "{}",
+            format!("Plugin '{name}' is already enabled.").yellow()
+        );
         return Ok(());
     }
 
@@ -104,7 +113,12 @@ pub fn run_hooks(
     let plugins_dir = resolve_plugins_dir(config)?;
     bundled::ensure_bundled_plugins(&plugins_dir)?;
 
-    log::debug!("run_hooks: hook={:?} repo={} enabled_plugins={:?}", hook, repo_entry.name, config.plugins.enabled);
+    log::debug!(
+        "run_hooks: hook={:?} repo={} enabled_plugins={:?}",
+        hook,
+        repo_entry.name,
+        config.plugins.enabled
+    );
 
     // Load manifests for all enabled plugins that handle this hook, then
     // sort so plugins that mutate session.path run first. This ensures
@@ -114,13 +128,21 @@ pub fn run_hooks(
     for plugin_name in &config.plugins.enabled {
         let manifest_path = plugins_dir.join(plugin_name).join("manifest.toml");
         if !manifest_path.exists() {
-            log::debug!("plugin [{}]: manifest not found at {}", plugin_name, manifest_path.display());
+            log::debug!(
+                "plugin [{}]: manifest not found at {}",
+                plugin_name,
+                manifest_path.display()
+            );
             continue;
         }
         let manifest_contents = fs::read_to_string(&manifest_path)?;
         let manifest: PluginManifest = toml::from_str(&manifest_contents)?;
         if !manifest.hooks.contains(&hook) {
-            log::debug!("plugin [{}]: skipping, does not handle {:?}", plugin_name, hook);
+            log::debug!(
+                "plugin [{}]: skipping, does not handle {:?}",
+                plugin_name,
+                hook
+            );
             continue;
         }
         plugins.push((plugin_name.clone(), manifest));
@@ -151,7 +173,15 @@ pub fn run_hooks(
             plugin_name,
             current_session.and_then(|s| s.path.as_ref())
         );
-        let request = build_request(&hook, repo_entry, repo_meta, current_session, tree, plugin_name, config);
+        let request = build_request(
+            &hook,
+            repo_entry,
+            repo_meta,
+            current_session,
+            tree,
+            plugin_name,
+            config,
+        );
 
         match runner::execute(manifest, &plugin_dir, &request, config.plugin_timeout) {
             Ok(response) => {
@@ -159,7 +189,10 @@ pub fn run_hooks(
                     "plugin [{}]: response success={} mutations.path={:?}",
                     plugin_name,
                     response.success,
-                    response.session_mutations.as_ref().and_then(|m| m.path.as_ref())
+                    response
+                        .session_mutations
+                        .as_ref()
+                        .and_then(|m| m.path.as_ref())
                 );
                 // Apply session mutations
                 if let (Some(mutations), Some(sess)) = (&response.session_mutations, session) {
@@ -245,11 +278,7 @@ fn build_request(
             .get(plugin_name)
             .and_then(|v| {
                 if let toml::Value::Table(t) = v {
-                    Some(
-                        t.iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect(),
-                    )
+                    Some(t.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
                 } else {
                     None
                 }
@@ -317,10 +346,7 @@ pub fn find_plugin_view(name: &str, config: &EzConfig) -> Result<Option<PluginVi
 /// Collect all plugin views from enabled plugins for a given context.
 /// Returns (key, label, plugin_name, view_name) tuples.
 /// Filters out views whose key conflicts with a core keybind.
-pub fn collect_plugin_views(
-    context: &str,
-    config: &EzConfig,
-) -> Result<Vec<PluginViewInfo>> {
+pub fn collect_plugin_views(context: &str, config: &EzConfig) -> Result<Vec<PluginViewInfo>> {
     let plugins_dir = resolve_plugins_dir(config)?;
     bundled::ensure_bundled_plugins(&plugins_dir)?;
 
@@ -342,7 +368,9 @@ pub fn collect_plugin_views(
             if core_keys.contains(&view.key.as_str()) {
                 log::debug!(
                     "plugin [{}]: view '{}' key '{}' conflicts with core keybind, skipping",
-                    plugin_name, view.name, view.key
+                    plugin_name,
+                    view.name,
+                    view.key
                 );
                 continue;
             }
@@ -457,10 +485,7 @@ pub struct PluginBindInfo {
 
 /// Collect all plugin action binds from enabled plugins for a given context.
 /// Filters out binds whose key conflicts with a core keybind.
-pub fn collect_plugin_binds(
-    context: &str,
-    config: &EzConfig,
-) -> Result<Vec<PluginBindInfo>> {
+pub fn collect_plugin_binds(context: &str, config: &EzConfig) -> Result<Vec<PluginBindInfo>> {
     let plugins_dir = resolve_plugins_dir(config)?;
     bundled::ensure_bundled_plugins(&plugins_dir)?;
 
@@ -482,7 +507,9 @@ pub fn collect_plugin_binds(
             if core_keys.contains(&bind.key.as_str()) {
                 log::debug!(
                     "plugin [{}]: bind '{}' key '{}' conflicts with core keybind, skipping",
-                    plugin_name, bind.name, bind.key
+                    plugin_name,
+                    bind.name,
+                    bind.key
                 );
                 continue;
             }
@@ -500,6 +527,8 @@ pub fn collect_plugin_binds(
 }
 
 /// Execute a plugin's OnBind hook and return the response.
+/// The bind protocol keeps these fields explicit at call sites.
+#[allow(clippy::too_many_arguments)]
 pub fn run_bind_hook(
     plugin_name: &str,
     bind_name: &str,

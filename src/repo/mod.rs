@@ -32,7 +32,9 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
         .status()?;
 
     if !status.success() {
-        return Err(EzError::Git(format!("git clone failed with status {status}")));
+        return Err(EzError::Git(format!(
+            "git clone failed with status {status}"
+        )));
     }
 
     let canonical = std::fs::canonicalize(&target)?;
@@ -146,7 +148,10 @@ pub fn dispatch(command: RepoCommand) -> Result<()> {
 fn list_repos(label_filter: Option<&str>) -> Result<()> {
     let index = store::load_index()?;
     if index.repos.is_empty() {
-        println!("{}", "No repositories registered. Use `ez add` or `ez clone` to get started.".yellow());
+        println!(
+            "{}",
+            "No repositories registered. Use `ez add` or `ez clone` to get started.".yellow()
+        );
         return Ok(());
     }
 

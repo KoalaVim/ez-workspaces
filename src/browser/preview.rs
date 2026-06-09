@@ -135,7 +135,10 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
 
     // ── Recent Commits ──
     preview_section("Recent Commits");
-    if let Some(log) = git_cmd(path, &["log", "--oneline", "--decorate", "--no-color", "-8"]) {
+    if let Some(log) = git_cmd(
+        path,
+        &["log", "--oneline", "--decorate", "--no-color", "-8"],
+    ) {
         for line in log.lines() {
             if let Some((hash, msg)) = line.split_once(' ') {
                 println!("  {} {}", hash.yellow(), msg);
@@ -239,32 +242,28 @@ fn preview_keybind_help() {
     let fmt_key = |k: &str| k.replace("alt-", "Alt-").replace("ctrl-", "Ctrl-");
 
     preview_section("Keybinds");
-    println!("  {}  {}", "Enter".bold().green(), "Enter session");
+    println!("  {}  Enter session", "Enter".bold().green());
     println!(
-        "  {}  {}",
-        fmt_key(&keybinds.new_session).bold().yellow(),
-        "New child session"
+        "  {}  New child session",
+        fmt_key(&keybinds.new_session).bold().yellow()
     );
     println!(
-        "  {}  {}",
-        fmt_key(&keybinds.rename_session).bold().yellow(),
-        "Rename session"
+        "  {}  Rename session",
+        fmt_key(&keybinds.rename_session).bold().yellow()
     );
     println!(
-        "  {}  {}",
-        fmt_key(&keybinds.delete_session).bold().red(),
-        "Delete session"
+        "  {}  Delete session",
+        fmt_key(&keybinds.delete_session).bold().red()
     );
     println!(
-        "  {}  {}",
-        fmt_key(&keybinds.edit_labels).bold().magenta(),
-        "Edit labels"
+        "  {}  Edit labels",
+        fmt_key(&keybinds.edit_labels).bold().magenta()
     );
     for pb in plugin::collect_plugin_binds("session", &config).unwrap_or_default() {
         let desc = pb.description.as_deref().unwrap_or(&pb.label);
         println!("  {}  {}", fmt_key(&pb.key).bold().cyan(), desc);
     }
-    println!("  {}  {}", "Esc".bold().dimmed(), "Go back");
+    println!("  {}  Go back", "Esc".bold().dimmed());
 }
 
 fn preview_section(title: &str) {

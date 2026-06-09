@@ -16,17 +16,29 @@ use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
 
 pub use preview::preview;
 
+pub struct BrowseOptions<'a> {
+    pub cd_file: Option<&'a Path>,
+    pub post_cmd_file: Option<&'a Path>,
+    pub workspace: Option<&'a str>,
+    pub repo_flag: Option<&'a Path>,
+    pub select_by: Option<&'a str>,
+    pub all: bool,
+    pub on_enter: Option<&'a str>,
+    pub on_create: Option<&'a str>,
+}
+
 /// Main interactive browser entry point (bare `ez` command).
-pub fn browse(
-    cd_file: Option<&Path>,
-    post_cmd_file: Option<&Path>,
-    workspace: Option<&str>,
-    repo_flag: Option<&Path>,
-    select_by: Option<&str>,
-    all: bool,
-    on_enter: Option<&str>,
-    on_create: Option<&str>,
-) -> Result<()> {
+pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
+    let BrowseOptions {
+        cd_file,
+        post_cmd_file,
+        workspace,
+        repo_flag,
+        select_by,
+        all,
+        on_enter,
+        on_create,
+    } = options;
     let mut config = config::load()?;
     if let Some(v) = on_enter {
         config.on_enter = v.into();
@@ -160,9 +172,9 @@ pub(crate) fn accept_session(
 
     // Look for a matching session-context plugin bind by label, bind_name, or plugin_name.
     let binds = plugin::collect_plugin_binds("session", config).unwrap_or_default();
-    let matching = binds.iter().find(|b| {
-        b.label == on_enter || b.bind_name == on_enter || b.plugin_name == on_enter
-    });
+    let matching = binds
+        .iter()
+        .find(|b| b.label == on_enter || b.bind_name == on_enter || b.plugin_name == on_enter);
 
     if let Some(bind) = matching {
         match plugin::run_bind_hook(
@@ -322,10 +334,7 @@ pub(crate) fn session_action_loop(
                 let selected = rendered[idx].1;
                 match key.as_str() {
                     key if key == keybinds.new_session => {
-                        match session::name_builder::prompt_session_name(
-                            selector,
-                            config,
-                        )? {
+                        match session::name_builder::prompt_session_name(selector, config)? {
                             session::name_builder::NamePromptResult::Done(name) => {
                                 let created = session::create_child_session(
                                     &repo_entry.id,
@@ -360,8 +369,7 @@ pub(crate) fn session_action_loop(
                         }
                     }
                     key if key == keybinds.delete_session => {
-                        let dirty =
-                            session::cascade_dirty(&repo_entry.id, &selected.id)?;
+                        let dirty = session::cascade_dirty(&repo_entry.id, &selected.id)?;
                         let msg = if dirty.is_empty() {
                             format!("Delete session '{}'?", selected.name)
                         } else {
@@ -371,29 +379,14 @@ pub(crate) fn session_action_loop(
                             )
                         };
                         if selector.confirm(&msg, false)? {
-                            session::delete_session_by_id(
-                                &repo_entry.id,
-                                &selected.id,
-                                true,
-                            )?;
-                            eprintln!(
-                                "{} {}",
-                                "Deleted:".green(),
-                                selected.name.bold()
-                            );
+                            session::delete_session_by_id(&repo_entry.id, &selected.id, true)?;
+                            eprintln!("{} {}", "Deleted:".green(), selected.name.bold());
                         }
                     }
                     key if key == keybinds.rename_session => {
-                        let new_name = selector.input(
-                            "New name",
-                            Some(&selected.name),
-                        )?;
+                        let new_name = selector.input("New name", Some(&selected.name))?;
                         if !new_name.is_empty() && new_name != selected.name {
-                            session::rename_session_by_id(
-                                &repo_entry.id,
-                                &selected.id,
-                                &new_name,
-                            )?;
+                            session::rename_session_by_id(&repo_entry.id, &selected.id, &new_name)?;
                             eprintln!(
                                 "{} {} → {}",
                                 "Renamed:".green(),
@@ -404,15 +397,17 @@ pub(crate) fn session_action_loop(
                     }
                     key if key == keybinds.edit_labels => {
                         let current = selected.labels.join(",");
-                        let input = selector.input(
-                            "Labels (comma-sep; prefix - to remove)",
-                            Some(&current),
-                        )?;
+                        let input = selector
+                            .input("Labels (comma-sep; prefix - to remove)", Some(&current))?;
                         let (add, remove) = parse_label_input(&input);
                         let session_id = selected.id.clone();
                         let session_name = selected.name.clone();
-                        let result =
-                            session::set_session_labels(&repo_entry.id, &session_id, &add, &remove)?;
+                        let result = session::set_session_labels(
+                            &repo_entry.id,
+                            &session_id,
+                            &add,
+                            &remove,
+                        )?;
                         eprintln!(
                             "{} {} → {}",
                             "Labels on".green(),
@@ -503,7 +498,7 @@ pub(crate) fn drill_into_directory(
                 if path.is_dir()
                     && !path
                         .file_name()
-                        .map_or(true, |n| n.to_string_lossy().starts_with('.'))
+                        .is_none_or(|n| n.to_string_lossy().starts_with('.'))
                 {
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
 
@@ -576,7 +571,11 @@ pub(crate) fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
         .and_then(|o| {
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if s.is_empty() { None } else { Some(s) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
             } else {
                 None
             }
@@ -607,7 +606,15 @@ pub(crate) fn git_run(path: &Path, args: &[&str]) -> bool {
 
 /// True if a local branch with this exact name exists in the repo at `path`.
 pub(crate) fn branch_exists(path: &Path, name: &str) -> bool {
-    git_run(path, &["show-ref", "--verify", "--quiet", &format!("refs/heads/{name}")])
+    git_run(
+        path,
+        &[
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{name}"),
+        ],
+    )
 }
 
 /// Resolve the main repository root from the current directory.

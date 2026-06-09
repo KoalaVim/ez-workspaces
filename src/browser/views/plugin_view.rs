@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use colored::Colorize;
+
 use crate::config;
 use crate::error::Result;
 use crate::plugin;
@@ -39,10 +41,7 @@ pub(super) fn run(
         })
         .collect();
 
-    let prompt = response
-        .view_prompt
-        .as_deref()
-        .unwrap_or(view_name);
+    let prompt = response.view_prompt.as_deref().unwrap_or(view_name);
 
     let header = view_header(view_name, &config.keybinds, &plugin_views);
 
@@ -88,7 +87,8 @@ pub(super) fn run(
                 } else {
                     eprintln!(
                         "{}",
-                        "warning: shell wrapper is outdated. Re-run: eval \"$(ez init-shell zsh)\"".to_string()
+                        "warning: shell wrapper is outdated. Re-run: eval \"$(ez init-shell zsh)\""
+                            .yellow()
                     );
                     plugin::runner::run_shell_commands(&select_response.post_shell_commands)?;
                 }

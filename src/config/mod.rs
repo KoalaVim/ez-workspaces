@@ -71,9 +71,7 @@ fn edit() -> Result<()> {
     let path = paths::config_file()?;
     let _ = load()?;
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
-    let status = std::process::Command::new(&editor)
-        .arg(&path)
-        .status()?;
+    let status = std::process::Command::new(&editor).arg(&path).status()?;
     if !status.success() {
         eprintln!("Editor exited with status: {status}");
     }
@@ -110,9 +108,9 @@ fn set_value(key: &str, value: &str) -> Result<()> {
         "default_shell" => config.default_shell = Some(value.to_string()),
         "editor" => config.editor = Some(value.to_string()),
         "plugin_timeout" => {
-            config.plugin_timeout = value.parse().map_err(|_| {
-                EzError::Config(format!("Invalid number: {value}"))
-            })?;
+            config.plugin_timeout = value
+                .parse()
+                .map_err(|_| EzError::Config(format!("Invalid number: {value}")))?;
         }
         "default_select_by" => {
             // Validate early so we never persist an unusable value.
@@ -159,7 +157,10 @@ fn interactive_init() -> Result<()> {
     // Workspace roots — keep or clear existing
     if !config.workspace_roots.is_empty() {
         let keep = selector.confirm(
-            &format!("Keep existing roots? ({})", config.workspace_roots.join(", ")),
+            &format!(
+                "Keep existing roots? ({})",
+                config.workspace_roots.join(", ")
+            ),
             true,
         )?;
         if !keep {
@@ -168,10 +169,8 @@ fn interactive_init() -> Result<()> {
     }
 
     // Add workspace roots by browsing directories interactively
-    let mut last_root: Option<std::path::PathBuf> = config
-        .workspace_roots
-        .last()
-        .map(|r| std::path::PathBuf::from(r));
+    let mut last_root: Option<std::path::PathBuf> =
+        config.workspace_roots.last().map(std::path::PathBuf::from);
     loop {
         let action_items = vec![
             SelectItem {
@@ -238,13 +237,15 @@ fn interactive_init() -> Result<()> {
     config.default_shell = Some(shell_items[idx].value.clone());
 
     // Selector backend
-    let backend_items = vec![
-        SelectItem {
-            display: "fzf".into(),
-            value: "fzf".into(),
-        },
-    ];
-    println!("\n{} {}", "Current selector:".bold(), config.selector.backend);
+    let backend_items = vec![SelectItem {
+        display: "fzf".into(),
+        value: "fzf".into(),
+    }];
+    println!(
+        "\n{} {}",
+        "Current selector:".bold(),
+        config.selector.backend
+    );
     let idx = require_select(&selector, &backend_items, "selector backend", None)?;
     config.selector.backend = backend_items[idx].value.clone();
 
@@ -258,7 +259,7 @@ fn interactive_init() -> Result<()> {
         .plugins
         .plugin_dir
         .clone()
-        .map_or_else(|| paths::plugins_dir(), Ok)?;
+        .map_or_else(paths::plugins_dir, Ok)?;
 
     let available = discover_plugins(&plugins_dir);
     if !available.is_empty() {
@@ -283,8 +284,15 @@ fn interactive_init() -> Result<()> {
             .map(|&idx| plugin_items[idx].value.clone())
             .collect();
     } else {
-        println!("\n{} {}", "No plugins found in".yellow(), plugins_dir.display());
-        println!("Copy bundled plugins: cp -r plugins/* {}/", plugins_dir.display());
+        println!(
+            "\n{} {}",
+            "No plugins found in".yellow(),
+            plugins_dir.display()
+        );
+        println!(
+            "Copy bundled plugins: cp -r plugins/* {}/",
+            plugins_dir.display()
+        );
     }
 
     // Plugin timeout
@@ -299,17 +307,28 @@ fn interactive_init() -> Result<()> {
     // Save
     save(&config)?;
     let path = paths::config_file()?;
-    println!("\n{} {}\n", "Configuration saved to".green(), path.display());
+    println!(
+        "\n{} {}\n",
+        "Configuration saved to".green(),
+        path.display()
+    );
 
     println!("{}", "Summary:".bold().cyan());
     println!("  {} {:?}", "Roots:   ".bold(), config.workspace_roots);
-    println!("  {} {}", "Shell:   ".bold(), config.default_shell.as_deref().unwrap_or("auto"));
+    println!(
+        "  {} {}",
+        "Shell:   ".bold(),
+        config.default_shell.as_deref().unwrap_or("auto")
+    );
     println!("  {} {}", "Selector:".bold(), config.selector.backend);
     println!("  {} {:?}", "Plugins: ".bold(), config.plugins.enabled);
     println!("  {} {}s", "Timeout: ".bold(), config.plugin_timeout);
 
     println!("\n{}", "Next steps:".bold().cyan());
-    println!("  eval \"$(ez init-shell {})\"", config.default_shell.as_deref().unwrap_or("zsh"));
+    println!(
+        "  eval \"$(ez init-shell {})\"",
+        config.default_shell.as_deref().unwrap_or("zsh")
+    );
     println!("  ez");
 
     Ok(())
@@ -342,13 +361,7 @@ fn browse_for_directory(
         if let Ok(read_dir) = fs::read_dir(&current) {
             let mut subdirs: Vec<(String, std::path::PathBuf)> = read_dir
                 .flatten()
-                .filter(|e| {
-                    e.path().is_dir()
-                        && !e
-                            .file_name()
-                            .to_string_lossy()
-                            .starts_with('.')
-                })
+                .filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.'))
                 .map(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
                     (format!("{name}/"), e.path())
@@ -366,7 +379,8 @@ fn browse_for_directory(
             })
             .collect();
 
-        let prompt = current.file_name()
+        let prompt = current
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| current.to_string_lossy().to_string());
 
@@ -396,7 +410,7 @@ fn discover_plugins(plugins_dir: &std::path::Path) -> Vec<(String, String)> {
     let mut result = Vec::new();
     if let Ok(entries) = fs::read_dir(plugins_dir) {
         for entry in entries.flatten() {
-            if entry.file_type().map_or(false, |t| t.is_dir()) {
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
                 let manifest_path = entry.path().join("manifest.toml");
                 if let Ok(contents) = fs::read_to_string(&manifest_path) {
                     if let Ok(manifest) =

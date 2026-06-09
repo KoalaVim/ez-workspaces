@@ -18,6 +18,10 @@ graph TB
         Repo --> RepoStore[(~/.config/ez/repos/index.toml)]
         Session --> SessionStore[(~/.config/ez/repos/id/sessions.toml)]
         Session --> Tree[SessionTree]
+        Session --> Current[Current session resolver]
+        Current --> SessionStore
+        Current --> RepoStore
+        Current --> |reads @ez_session_path| TmuxServer[tmux server]
     end
 
     subgraph Plugin System

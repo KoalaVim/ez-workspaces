@@ -20,7 +20,10 @@ pub(super) fn run(
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     if index.repos.is_empty() {
-        println!("{}", "No registered repos. Use `ez add` or `ez clone`.".yellow());
+        println!(
+            "{}",
+            "No registered repos. Use `ez add` or `ez clone`.".yellow()
+        );
         return Ok(Outcome::Done);
     }
 
@@ -34,12 +37,7 @@ pub(super) fn run(
             let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
             let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
             SelectItem {
-                display: format_repo_display(
-                    &r.name,
-                    Some(&path_str),
-                    Some(&branch),
-                    &meta.labels,
-                ),
+                display: format_repo_display(&r.name, Some(&path_str), Some(&branch), &meta.labels),
                 value: r.path.to_string_lossy().to_string(),
             }
         })
@@ -73,10 +71,8 @@ pub(super) fn run(
                     let entry = &index.repos[idx];
                     let meta = repo::store::load_repo_meta(&entry.id).unwrap_or_default();
                     let current = meta.labels.join(",");
-                    let input = selector.input(
-                        "Labels (comma-sep; prefix - to remove)",
-                        Some(&current),
-                    )?;
+                    let input =
+                        selector.input("Labels (comma-sep; prefix - to remove)", Some(&current))?;
                     let (add, remove) = parse_label_input(&input);
                     let result = repo::set_repo_labels(&entry.id, &add, &remove)?;
                     eprintln!(

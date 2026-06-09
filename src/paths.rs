@@ -4,9 +4,8 @@ use crate::error::{EzError, Result};
 
 /// Returns the base config directory: ~/.config/ez/
 pub fn config_dir() -> Result<PathBuf> {
-    let base = dirs::config_dir().ok_or_else(|| {
-        EzError::Path("Could not determine config directory".into())
-    })?;
+    let base = dirs::config_dir()
+        .ok_or_else(|| EzError::Path("Could not determine config directory".into()))?;
     Ok(base.join("ez"))
 }
 
@@ -80,9 +79,7 @@ pub fn repo_id_from_path(path: &std::path::Path) -> String {
     // Take last 2 meaningful components for a readable slug
     let slug_parts: Vec<&str> = components.iter().rev().take(2).copied().collect();
     let slug: Vec<&str> = slug_parts.into_iter().rev().collect();
-    slug.join("-")
-        .to_lowercase()
-        .replace(' ', "-")
+    slug.join("-").to_lowercase().replace(' ', "-")
 }
 
 #[cfg(test)]

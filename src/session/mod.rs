@@ -1,3 +1,4 @@
+pub mod current;
 pub mod model;
 pub mod name_builder;
 pub mod store;
@@ -34,12 +35,17 @@ pub fn dispatch(
     on_create: Option<&str>,
 ) -> Result<()> {
     match command {
-        SessionCommand::New { name, parent, repo } => {
-            new_session(name.as_deref(), parent.as_deref(), repo.as_deref(), cd_file, post_cmd_file, on_create)
-        }
+        SessionCommand::New { name, parent, repo } => new_session(
+            name.as_deref(),
+            parent.as_deref(),
+            repo.as_deref(),
+            cd_file,
+            post_cmd_file,
+            on_create,
+        ),
         SessionCommand::List { repo, flat } => list_sessions(repo.as_deref(), flat),
         SessionCommand::Delete { name, repo, force } => {
-            delete_session(&name, repo.as_deref(), force)
+            delete_session(name.as_deref(), repo.as_deref(), force)
         }
         SessionCommand::Enter { name, repo } => {
             enter_session(&name, repo.as_deref(), cd_file, post_cmd_file, on_enter)
@@ -263,31 +269,57 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
     let tree = store::load_sessions(&repo_entry.id)?;
 
     if tree.sessions.is_empty() {
-        println!("{}", format!("No sessions for {}. Use `ez session new` to create one.", repo_entry.name).yellow());
+        println!(
+            "{}",
+            format!(
+                "No sessions for {}. Use `ez session new` to create one.",
+                repo_entry.name
+            )
+            .yellow()
+        );
         return Ok(());
     }
 
     if flat {
         for session in &tree.sessions {
-            let default_marker = if session.is_default { " *".yellow().to_string() } else { String::new() };
+            let default_marker = if session.is_default {
+                " *".yellow().to_string()
+            } else {
+                String::new()
+            };
             let path_info = session
                 .path
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
-            println!("{}{}{}", session.name.bold().yellow(), default_marker, path_info);
+            println!(
+                "{}{}{}",
+                session.name.bold().yellow(),
+                default_marker,
+                path_info
+            );
         }
     } else {
         let rendered = tree.render_tree();
         for (depth, session) in rendered {
             let indent = "  ".repeat(depth);
-            let default_marker = if session.is_default { " *".yellow().to_string() } else { String::new() };
+            let default_marker = if session.is_default {
+                " *".yellow().to_string()
+            } else {
+                String::new()
+            };
             let path_info = session
                 .path
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
-            println!("{}{}{}{}", indent, session.name.bold().yellow(), default_marker, path_info);
+            println!(
+                "{}{}{}{}",
+                indent,
+                session.name.bold().yellow(),
+                default_marker,
+                path_info
+            );
         }
     }
     Ok(())
@@ -319,21 +351,31 @@ pub fn cascade_dirty(repo_id: &str, session_id: &str) -> Result<Vec<String>> {
     Ok(dirty_worktrees(&to_reap))
 }
 
-fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()> {
-    let repo_entry = repo::resolve_repo(repo_arg)?;
+fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Result<()> {
+    let (repo_entry, session) = match name {
+        Some(name) => {
+            let repo_entry = repo::resolve_repo(repo_arg)?;
+            let tree = store::load_sessions(&repo_entry.id)?;
+            let session = tree
+                .find_by_name(name)
+                .ok_or_else(|| EzError::SessionNotFound(name.into()))?
+                .clone();
+            (repo_entry, session)
+        }
+        None => {
+            let target = current::resolve_current_session(repo_arg)?;
+            current::confirm_delete_current_session(&target)?;
+            (target.repo_entry, target.session)
+        }
+    };
     let mut tree = store::load_sessions(&repo_entry.id)?;
-
-    let session = tree
-        .find_by_name(name)
-        .ok_or_else(|| EzError::SessionNotFound(name.into()))?
-        .clone();
 
     // Check for children
     let children = tree.descendants(&session.id);
     if !children.is_empty() && !force {
         let child_names: Vec<String> = children.iter().map(|c| c.name.clone()).collect();
         return Err(EzError::SessionHasChildren {
-            name: name.into(),
+            name: session.name.clone(),
             children: child_names,
         });
     }
@@ -361,7 +403,7 @@ fn delete_session(name: &str, repo_arg: Option<&str>, force: bool) -> Result<()>
         tree.remove(&s.id)?;
     }
     store::save_sessions(&repo_entry.id, &tree)?;
-    println!("{} {}", "Deleted session:".green(), name.bold());
+    println!("{} {}", "Deleted session:".green(), session.name.bold());
 
     // Run plugin teardown (worktree removal, tmux kill, …) in a detached
     // worker that outlives any terminal teardown triggered by the hooks.
@@ -445,7 +487,12 @@ fn rename_session(name: &str, new_name: &str, repo_arg: Option<&str>) -> Result<
     session.name = new_name.to_string();
 
     store::save_sessions(&repo_entry.id, &tree)?;
-    println!("{} {} -> {}", "Renamed session:".green(), name.bold(), new_name.bold());
+    println!(
+        "{} {} -> {}",
+        "Renamed session:".green(),
+        name.bold(),
+        new_name.bold()
+    );
     Ok(())
 }
 
@@ -496,10 +543,7 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
     store::save_sessions(repo_id, &tree)?;
 
     // Return the post-hook session so callers can read the updated path.
-    let created = tree
-        .find_by_id(&session_id)
-        .cloned()
-        .unwrap_or(session);
+    let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
     Ok(created)
 }
 

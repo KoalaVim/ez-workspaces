@@ -24,7 +24,10 @@ fn main() {
             .init();
         // Plugins read EZ_DEBUG to decide whether to emit their own debug logs.
         std::env::set_var("EZ_DEBUG", "1");
-        log::debug!("ez debug session started: {:?}", std::env::args().collect::<Vec<_>>());
+        log::debug!(
+            "ez debug session started: {:?}",
+            std::env::args().collect::<Vec<_>>()
+        );
         Some(path)
     } else {
         env_logger::init();
@@ -36,16 +39,16 @@ fn main() {
     }
 
     let result = match cli.command {
-        None => browser::browse(
-            cli.cd_file.as_deref(),
-            cli.post_cmd_file.as_deref(),
-            cli.workspace.as_deref(),
-            cli.repo.as_deref(),
-            cli.select_by.as_deref(),
-            cli.all,
-            cli.on_enter.as_deref(),
-            cli.on_create.as_deref(),
-        ),
+        None => browser::browse(browser::BrowseOptions {
+            cd_file: cli.cd_file.as_deref(),
+            post_cmd_file: cli.post_cmd_file.as_deref(),
+            workspace: cli.workspace.as_deref(),
+            repo_flag: cli.repo.as_deref(),
+            select_by: cli.select_by.as_deref(),
+            all: cli.all,
+            on_enter: cli.on_enter.as_deref(),
+            on_create: cli.on_create.as_deref(),
+        }),
         Some(Command::Clone { url, path }) => repo::clone_repo(&url, path.as_deref()),
         Some(Command::Add { path }) => repo::add_repo(path.as_deref()),
         Some(Command::Session { command }) => session::dispatch(

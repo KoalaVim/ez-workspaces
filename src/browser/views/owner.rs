@@ -21,7 +21,10 @@ pub(super) fn run(
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     if index.repos.is_empty() {
-        println!("{}", "No registered repos. Use `ez add` or `ez clone`.".yellow());
+        println!(
+            "{}",
+            "No registered repos. Use `ez add` or `ez clone`.".yellow()
+        );
         return Ok(Outcome::Done);
     }
 
@@ -80,12 +83,7 @@ pub(super) fn run(
             let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
             let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
             SelectItem {
-                display: format_repo_display(
-                    &r.name,
-                    Some(&path_str),
-                    Some(&branch),
-                    &meta.labels,
-                ),
+                display: format_repo_display(&r.name, Some(&path_str), Some(&branch), &meta.labels),
                 value: r.path.to_string_lossy().to_string(),
             }
         })
@@ -104,10 +102,12 @@ pub(super) fn run(
 
     match sub_action {
         ActionResult::Cancel => Ok(Outcome::Switch(ViewMode::Owner)),
-        ActionResult::Action(key, _) => match match_view_switch(&config.keybinds, &plugin_views, &key) {
-            Some(next) => Ok(Outcome::Switch(next)),
-            None => Ok(Outcome::Done),
-        },
+        ActionResult::Action(key, _) => {
+            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+                Some(next) => Ok(Outcome::Switch(next)),
+                None => Ok(Outcome::Done),
+            }
+        }
         ActionResult::Select(idx) => {
             let entry = &entries[idx];
             browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)?;

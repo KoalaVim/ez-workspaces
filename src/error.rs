@@ -18,10 +18,7 @@ pub enum EzError {
     SessionAlreadyExists(String),
 
     #[error("Session '{name}' has children: {children:?}. Use --force to delete.")]
-    SessionHasChildren {
-        name: String,
-        children: Vec<String>,
-    },
+    SessionHasChildren { name: String, children: Vec<String> },
 
     #[error("Uncommitted changes in worktree(s): {dirty:?}. Commit/stash, or use --force to delete anyway.")]
     SessionWorktreeDirty { dirty: Vec<String> },

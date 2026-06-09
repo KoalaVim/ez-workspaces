@@ -43,6 +43,7 @@ docs/               Documentation
 - `model.rs`: `Session`, `SessionTree` structs
 - `tree.rs`: tree operations (roots, children, ancestors, descendants, render)
 - `store.rs`: filesystem persistence
+- `current.rs`: current-session detection from tmux `@ez_session_path` and worktree paths
 - `mod.rs`: new, delete, enter, exit, rename, ensure_default_session
 
 ### plugin/ - Plugin System

@@ -25,21 +25,15 @@ impl SessionTree {
         let mut result = Vec::new();
         let mut current_id = session_id.clone();
 
-        loop {
-            let session = match self.find_by_id(&current_id) {
-                Some(s) => s,
-                None => break,
+        while let Some(session) = self.find_by_id(&current_id) {
+            let Some(pid) = session.parent_id.clone() else {
+                break;
             };
-            match &session.parent_id {
-                Some(pid) => {
-                    if let Some(parent) = self.find_by_id(pid) {
-                        result.push(parent);
-                        current_id = pid.clone();
-                    } else {
-                        break;
-                    }
-                }
-                None => break,
+            if let Some(parent) = self.find_by_id(&pid) {
+                result.push(parent);
+                current_id = pid;
+            } else {
+                break;
             }
         }
         result

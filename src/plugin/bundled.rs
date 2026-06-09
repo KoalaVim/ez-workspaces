@@ -66,4 +66,3 @@ pub fn ensure_bundled_plugins(plugins_dir: &Path) -> Result<()> {
 
     Ok(())
 }
-

@@ -81,6 +81,7 @@ fn all_contexts() -> Vec<String> {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
+#[allow(clippy::enum_variant_names)]
 pub enum HookType {
     OnSessionCreate,
     OnSessionDelete,

@@ -123,7 +123,12 @@ pub fn execute(
         )
     })?;
 
-    log::debug!("plugin [{}]: response success={} error={:?}", manifest.name, response.success, response.error);
+    log::debug!(
+        "plugin [{}]: response success={} error={:?}",
+        manifest.name,
+        response.success,
+        response.error
+    );
 
     if !response.success {
         if let Some(err) = &response.error {
@@ -137,7 +142,7 @@ pub fn execute(
 /// Extract the first JSON object from a string that may contain non-JSON preamble.
 fn extract_json(s: &str) -> Option<&str> {
     let start = s.find('{')?;
-    let bytes = s[start..].as_bytes();
+    let bytes = &s.as_bytes()[start..];
     let mut depth = 0;
     for (i, &b) in bytes.iter().enumerate() {
         match b {
@@ -163,17 +168,25 @@ fn wait_with_timeout(
         match child.try_wait() {
             Ok(Some(_status)) => {
                 // Process exited, collect output
-                let stdout = child.stdout.take().map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                }).unwrap_or_default();
+                let stdout = child
+                    .stdout
+                    .take()
+                    .map(|mut s| {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut s, &mut buf).ok();
+                        buf
+                    })
+                    .unwrap_or_default();
 
-                let stderr = child.stderr.take().map(|mut s| {
-                    let mut buf = Vec::new();
-                    std::io::Read::read_to_end(&mut s, &mut buf).ok();
-                    buf
-                }).unwrap_or_default();
+                let stderr = child
+                    .stderr
+                    .take()
+                    .map(|mut s| {
+                        let mut buf = Vec::new();
+                        std::io::Read::read_to_end(&mut s, &mut buf).ok();
+                        buf
+                    })
+                    .unwrap_or_default();
 
                 return Ok(std::process::Output {
                     status: _status,

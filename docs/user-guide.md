@@ -100,8 +100,11 @@ ez session list
 # Enter a session (cd's to worktree by default; see on_enter below)
 ez session enter feature-login
 
-# Delete (cascades with --force)
+# Delete a named session (cascades with --force)
 ez session delete feature-login --force
+
+# Delete the current session (detects tmux @ez_session_path or current worktree, then prompts)
+ez session delete
 ```
 
 #### Interactive session naming

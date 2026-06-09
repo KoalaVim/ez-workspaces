@@ -166,7 +166,10 @@ mod tests {
             parsed.session_mutations.unwrap().path.unwrap(),
             PathBuf::from("/tmp/worktree")
         );
-        assert_eq!(parsed.post_shell_commands, vec!["tmux switch-client -t foo"]);
+        assert_eq!(
+            parsed.post_shell_commands,
+            vec!["tmux switch-client -t foo"]
+        );
     }
 
     #[test]

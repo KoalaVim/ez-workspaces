@@ -95,9 +95,7 @@ impl RepoIndex {
     }
 
     pub fn find_by_name_or_id(&self, query: &str) -> Option<&RepoEntry> {
-        self.repos
-            .iter()
-            .find(|r| r.id == query || r.name == query)
+        self.repos.iter().find(|r| r.id == query || r.name == query)
     }
 
     pub fn remove_by_id(&mut self, id: &str) -> Option<RepoEntry> {

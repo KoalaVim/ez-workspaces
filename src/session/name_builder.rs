@@ -65,7 +65,9 @@ pub fn prompt_session_name(
                 let items = build_items(choices, /*include_none=*/ !is_final);
                 selector.select_with_back(&prompt, &items, allow_back, context.as_deref())?
             }
-            StageKind::Text => selector.input_with_back(&prompt, None, allow_back, context.as_deref())?,
+            StageKind::Text => {
+                selector.input_with_back(&prompt, None, allow_back, context.as_deref())?
+            }
         };
 
         match outcome {
@@ -96,9 +98,7 @@ pub fn prompt_session_name(
                 }
             }
             StageOutcome::Back => {
-                if idx > 0 {
-                    idx -= 1;
-                }
+                idx = idx.saturating_sub(1);
             }
             StageOutcome::Cancel => return Ok(NamePromptResult::Cancelled),
         }
