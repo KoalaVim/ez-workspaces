@@ -73,7 +73,8 @@ resolve_default_start_point() {
         local t0; t0=$(t_ms)
         echo "fetching origin/main and origin/master..." >&2
         dbg "fetch: start"
-        git -C "$REPO_PATH" fetch origin main master >&2 || true
+        git -C "$REPO_PATH" fetch origin main >&2 2>/dev/null || true
+        git -C "$REPO_PATH" fetch origin master >&2 2>/dev/null || true
         date +%s > "$FETCH_STAMP" 2>/dev/null || true
         dbg "fetch: done ($(( $(t_ms) - t0 ))ms)"
     fi
