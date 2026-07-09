@@ -17,8 +17,16 @@ dbg() {
     printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
 }
 
-# Returns current time in milliseconds.
-t_ms() { date +%s%3N; }
+# Returns current time in milliseconds (portable: macOS lacks %N).
+t_ms() {
+    local out
+    out=$(date +%s%3N)
+    if [[ "$out" =~ ^[0-9]+$ ]]; then
+        echo "$out"
+    else
+        echo $(( $(date +%s) * 1000 ))
+    fi
+}
 
 # Read the full JSON request from stdin
 REQUEST=$(cat)
