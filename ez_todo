@@ -1,75 +1,28 @@
-V1:
-V - go into the worktree
-V - cdw wire to cd to worktree
-V - Set branch name to chore/fix/feat + session name
-V - Consider to prompt for ticket and then title, and then chore/fix/feat
-V To issue - Be able to execute new-session/tmux and etc via tree and other views
-V - Go over the binds
-V - Look over where the worktree lives
-V - Where worktree needs to start at?
-V - "Enter" to attach to tmux optionally instead of bind
-V - Show session name while building it
-V - Auto attach/cd after creating new session (optional?)
-V - Visiblity for git fetch when creating worktree + make it faster
-V - delete session doesn't work from the session worktree
-V - prompt for existing branch - should check to out/reset to main/reset to parent
-V - delete pre-flight check for dirtiniess
-
 Refinments for v1:
 - README
-V - delete current session easily
-- new session interactivly from cli?
-V - register repo easily? ez . or something like this
-- session name without pickers in interactive
-- can't cd if set on_confirm tmux
-- fetch branch when fetch main/master to see if the branch existing
-- go back to ez after detaching
-- tree chars for children sessions
-
-Bugs:
-- open from tree view doesn't work
-- ez session new makes the session not under main (also for ez session register)
-- Go back doesn't work after selecting repo (maybe in more places)
-- fetching main doesn't work
-- sometimes tmux kill doesn't finish
-
-
-Test:
-V - kill session should remove worktree + tmux session
-
 
 V2:
-- add dir as "repo"
-- sort "repo" by last recently used then a-z
-- new session without worktree
 - mcp-auth plugin
-- make session from pr link
-- make session from current unstaged changes
+- make session from pr link - fetch branch from pr and set it
 - trusted-workspace plugin
 - inject env vars (e.g KOALA_ENV)
-- rename session + branch + worktree + copy conversations?
-- pr status?
+- rename session + branch + worktree
+    - extra: copy cursor conversation
+- remove repos (non git as well)
+
+v3:
+- raycast adapter
+- pr status on session info (merged/not merged)
 - re-work tmux resurrect to be resurrect on demand
 
 ------------
 
 now lets do /opsx-propose with subagents on:
 
-Features and chores:
-- README refinement
-- Flag to make new session with the interactive builder
-- Selecting how to build the session name before start and have multiple choices, configurable, e.g: 
-    - build with full name (no parts)
-    - build from github pr link -> results in prXXXX, with a plugin to fetch the branch name and set the workspace on iot
-    - build from jira url (just extract ticket number and jira project name and continue with building with current configured builder)
-- add bind to cd when choosing session
-- fetch branch we are currently creating the session when fetching main/master to see if the branch exists remotely and also refresh it if its locally but stale
-- add the option to go back to ez after detaching from tmux session
-- add tree glyphs when in the session menu selection (after selecting a repo)
-
-Bugs:
-- open session from tree view doesn't work
-- `ez session new` makes the session not under main (same for ez session register), they should be under main
-- Go back in menu doesn't work after selecting repo (maybe in more places, needs to work everywhere)
-- most of the time killing the tmux session doesn't work
-
+- cursor mcp-auth plugin: /Users/ofirg/dotfiles/dotfiles/my-zsh-conf/aliases.zsh lines 173-191
+- when making session from pr link - use gh bin to see which branch its on reset --hard on this branch and then reset to merge-base of main (to make the directory show the pr changes as dirty)
+- rename session + branch + worktree
+    - extra: copy cursor conversation (see /Users/ofirg/dotfiles/scripts/cursor/copy-conv.sh)
+- ez remove <repo-path>/<dir-path (non git repo)>
+- raycast adapter
+- pr status on session info (merged/not merged) (in the metadata, use gh binary)
