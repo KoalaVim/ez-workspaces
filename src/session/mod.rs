@@ -1,4 +1,5 @@
 pub mod current;
+pub mod from_dirty;
 pub mod model;
 pub mod name_builder;
 pub mod store;
@@ -35,7 +36,13 @@ pub fn dispatch(
     on_create: Option<&str>,
 ) -> Result<()> {
     match command {
-        SessionCommand::New { name, parent, repo, interactive } => new_session(
+        SessionCommand::New {
+            name,
+            parent,
+            repo,
+            interactive,
+            bare,
+        } => new_session(
             name.as_deref(),
             parent.as_deref(),
             repo.as_deref(),
@@ -43,6 +50,7 @@ pub fn dispatch(
             post_cmd_file,
             on_create,
             interactive,
+            bare,
         ),
         SessionCommand::List { repo, flat } => list_sessions(repo.as_deref(), flat),
         SessionCommand::Register {
@@ -68,6 +76,14 @@ pub fn dispatch(
             new_name,
             repo,
         } => rename_session(&name, &new_name, repo.as_deref()),
+        SessionCommand::FromDirty { name, repo, parent } => from_dirty::session_from_dirty(
+            &name,
+            repo.as_deref(),
+            parent.as_deref(),
+            cd_file,
+            post_cmd_file,
+            on_create,
+        ),
         SessionCommand::Label { command } => dispatch_label(command),
         SessionCommand::ReapDelete { payload } => reap_delete(&payload),
     }
@@ -188,6 +204,7 @@ fn format_label_change(labels: &[String]) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn new_session(
     name: Option<&str>,
     parent: Option<&str>,
@@ -196,6 +213,7 @@ fn new_session(
     post_cmd_file: Option<&Path>,
     on_create: Option<&str>,
     interactive: bool,
+    bare: bool,
 ) -> Result<()> {
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
@@ -232,29 +250,52 @@ fn new_session(
         labels: Vec::new(),
         created_at: Utc::now(),
         is_default: false,
+        bare,
+        last_accessed: None,
     };
 
     if tree.find_by_name(&session_name).is_some() {
         return Err(EzError::SessionAlreadyExists(session_name));
     }
-    handle_branch_conflict(&repo_entry.path, &session_name)?;
+
+    let skip_hooks = bare || !repo_entry.is_git;
+    if !skip_hooks {
+        handle_branch_conflict(&repo_entry.path, &session_name)?;
+    }
     tree.add(session.clone())?;
 
-    // Run plugin hooks
-    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
-    plugin::run_hooks(
-        plugin::model::HookType::OnSessionCreate,
-        &repo_entry,
-        &repo_meta,
-        Some(&session),
-        &config,
-        &mut tree,
-    )?;
+    if bare {
+        log::debug!(
+            "bare session '{}': skipping OnSessionCreate hooks",
+            session_name
+        );
+    } else if repo_entry.is_git {
+        let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+        plugin::run_hooks(
+            plugin::model::HookType::OnSessionCreate,
+            &repo_entry,
+            &repo_meta,
+            Some(&session),
+            &config,
+            &mut tree,
+        )?;
+    } else {
+        log::debug!("new_session: non-git repo, setting path to repo root and skipping hooks");
+        if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session_id) {
+            s.path = Some(repo_entry.path.clone());
+        }
+    }
 
     store::save_sessions(&repo_entry.id, &tree)?;
 
     if crate::browser::on_create_is_noop(&config.on_create) {
-        println!("{} {}", "Created session:".green(), session_name.bold());
+        let suffix = if bare { " (bare)" } else { "" };
+        println!(
+            "{} {}{}",
+            "Created session:".green(),
+            session_name.bold(),
+            suffix.dimmed()
+        );
     } else {
         // Get post-hook session (path may have been set by a plugin such as git-worktree).
         let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
@@ -345,6 +386,8 @@ fn register_existing_worktree(
         labels: Vec::new(),
         created_at: Utc::now(),
         is_default: false,
+        bare: false,
+        last_accessed: None,
     };
 
     tree.add(session)?;
@@ -459,7 +502,7 @@ fn find_session_by_path<'a>(tree: &'a SessionTree, worktree_path: &Path) -> Opti
     })
 }
 
-fn git_output(path: &Path, args: &[&str]) -> Result<String> {
+pub(crate) fn git_output(path: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git").args(args).current_dir(path).output()?;
     if output.status.success() {
         let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -501,15 +544,21 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
             } else {
                 String::new()
             };
+            let bare_indicator = if session.bare {
+                " [bare]".dimmed().to_string()
+            } else {
+                String::new()
+            };
             let path_info = session
                 .path
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
             println!(
-                "{}{}{}",
+                "{}{}{}{}",
                 session.name.bold().yellow(),
                 default_marker,
+                bare_indicator,
                 path_info
             );
         }
@@ -657,9 +706,33 @@ fn enter_session(
         &mut tree,
     )?;
 
+    let now = Utc::now().to_rfc3339();
+    if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session.id) {
+        s.last_accessed = Some(now.clone());
+    }
     store::save_sessions(&repo_entry.id, &tree)?;
 
-    // Determine the target directory, then apply the on_enter action.
+    let mut repo_meta = repo_meta;
+    repo_meta.last_accessed = Some(now);
+    repo::store::save_repo_meta(&repo_entry.id, &repo_meta)?;
+    log::debug!(
+        "enter_session: updated last_accessed for session '{}' and repo '{}'",
+        session.name,
+        repo_entry.id
+    );
+
+    if session.bare && config.on_enter == "cd" {
+        println!(
+            "{}",
+            format!(
+                "Session '{}' has no worktree path (bare session)",
+                session.name
+            )
+            .yellow()
+        );
+        return Ok(());
+    }
+
     let target_dir = session
         .path
         .as_ref()
@@ -714,7 +787,12 @@ fn rename_session(name: &str, new_name: &str, repo_arg: Option<&str>) -> Result<
 /// Create a child session under a given parent (by ID). Used by the browser action menu.
 /// Create a new child session and return the post-hook `Session` (which may have a
 /// `path` set by plugins such as git-worktree).
-pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Result<Session> {
+pub fn create_child_session(
+    repo_id: &str,
+    parent_id: &str,
+    name: &str,
+    bare: bool,
+) -> Result<Session> {
     let repo_entry = repo::store::load_index()?
         .repos
         .iter()
@@ -739,25 +817,40 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
         labels: Vec::new(),
         created_at: Utc::now(),
         is_default: false,
+        bare,
+        last_accessed: None,
     };
 
-    handle_branch_conflict(&repo_entry.path, name)?;
+    let skip_hooks = bare || !repo_entry.is_git;
+    if !skip_hooks {
+        handle_branch_conflict(&repo_entry.path, name)?;
+    }
     tree.add(session.clone())?;
 
-    let config = crate::config::load()?;
-    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
-    plugin::run_hooks(
-        plugin::model::HookType::OnSessionCreate,
-        &repo_entry,
-        &repo_meta,
-        Some(&session),
-        &config,
-        &mut tree,
-    )?;
+    if bare {
+        log::debug!("bare session '{}': skipping OnSessionCreate hooks", name);
+    } else if repo_entry.is_git {
+        let config = crate::config::load()?;
+        let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+        plugin::run_hooks(
+            plugin::model::HookType::OnSessionCreate,
+            &repo_entry,
+            &repo_meta,
+            Some(&session),
+            &config,
+            &mut tree,
+        )?;
+    } else {
+        log::debug!(
+            "create_child_session: non-git repo, setting path to repo root and skipping hooks"
+        );
+        if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session_id) {
+            s.path = Some(repo_entry.path.clone());
+        }
+    }
 
     store::save_sessions(repo_id, &tree)?;
 
-    // Return the post-hook session so callers can read the updated path.
     let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
     Ok(created)
 }
@@ -767,7 +860,7 @@ pub fn create_child_session(repo_id: &str, parent_id: &str, name: &str) -> Resul
 ///
 /// Must be called BEFORE `tree.add` so that a cancelled or failed prompt leaves no
 /// orphan session record behind.
-fn handle_branch_conflict(repo_path: &Path, name: &str) -> Result<()> {
+pub(crate) fn handle_branch_conflict(repo_path: &Path, name: &str) -> Result<()> {
     if !crate::browser::branch_exists(repo_path, name) {
         return Ok(());
     }
@@ -839,8 +932,12 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
     }
     store::save_sessions(repo_id, &tree)?;
 
-    // Run plugin teardown in a detached worker.
-    spawn_detached_reap(repo_id, &to_reap)?;
+    let non_bare: Vec<Session> = to_reap.into_iter().filter(|s| !s.bare).collect();
+    if !non_bare.is_empty() {
+        spawn_detached_reap(repo_id, &non_bare)?;
+    } else {
+        log::debug!("delete_session_by_id: all sessions are bare, skipping reap");
+    }
 
     Ok(())
 }
@@ -976,7 +1073,11 @@ fn reap_delete(payload_path: &Path) -> Result<()> {
             &config,
             &mut tree,
         );
-        log::debug!("reap_delete: hook result for '{}': {:?}", session.name, result);
+        log::debug!(
+            "reap_delete: hook result for '{}': {:?}",
+            session.name,
+            result
+        );
     }
 
     Ok(())
@@ -997,6 +1098,8 @@ pub fn ensure_default_session(repo_id: &str, repo_path: &Path) -> Result<Session
             labels: Vec::new(),
             created_at: Utc::now(),
             is_default: true,
+            bare: false,
+            last_accessed: None,
         };
         tree.add(session)?;
         store::save_sessions(repo_id, &tree)?;

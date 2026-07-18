@@ -79,6 +79,10 @@ pub struct EzConfig {
     /// Overridden per-invocation by `--on-create <ACTION>`.
     #[serde(default = "default_on_create")]
     pub on_create: String,
+
+    /// Default sort mode for the interactive browser (`"alpha"` or `"lru"`).
+    #[serde(default = "default_sort")]
+    pub default_sort: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -177,6 +181,18 @@ pub struct KeybindsConfig {
     /// Cd into session worktree (default: "alt-c")
     #[serde(default = "default_bind_cd_session")]
     pub cd_session: String,
+
+    /// Create new bare session (default: "alt-N" i.e. Alt-Shift-N)
+    #[serde(default = "default_bind_new_bare")]
+    pub new_bare_session: String,
+
+    /// Toggle sort mode between Alpha and LRU (default: "ctrl-s")
+    #[serde(default = "default_bind_sort_toggle")]
+    pub sort_toggle: String,
+
+    /// Create session from dirty changes (default: "alt-s")
+    #[serde(default = "default_bind_from_dirty")]
+    pub session_from_dirty: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -207,6 +223,7 @@ impl Default for EzConfig {
             session_name_stages: default_session_name_stages(),
             on_enter: default_on_enter(),
             on_create: default_on_create(),
+            default_sort: default_sort(),
         }
     }
 }
@@ -242,6 +259,9 @@ impl Default for KeybindsConfig {
             view_label: default_bind_view_label(),
             edit_labels: default_bind_edit_labels(),
             cd_session: default_bind_cd_session(),
+            new_bare_session: default_bind_new_bare(),
+            sort_toggle: default_bind_sort_toggle(),
+            session_from_dirty: default_bind_from_dirty(),
         }
     }
 }
@@ -294,6 +314,18 @@ fn default_bind_cd_session() -> String {
     "ctrl-d".into()
 }
 
+fn default_bind_sort_toggle() -> String {
+    "ctrl-s".into()
+}
+
+fn default_bind_new_bare() -> String {
+    "alt-N".into()
+}
+
+fn default_bind_from_dirty() -> String {
+    "alt-s".into()
+}
+
 fn default_plugin_timeout() -> u64 {
     30
 }
@@ -308,6 +340,10 @@ fn default_on_enter() -> String {
 
 fn default_on_create() -> String {
     "none".into()
+}
+
+fn default_sort() -> String {
+    "lru".into()
 }
 
 fn default_session_name_stages() -> Vec<SessionNameStage> {

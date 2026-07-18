@@ -143,6 +143,9 @@ pub enum SessionCommand {
         /// Force interactive name builder even when a name is provided
         #[arg(long, short)]
         interactive: bool,
+        /// Create a bare session (no worktree, skips git-worktree plugin)
+        #[arg(long)]
+        bare: bool,
     },
 
     /// List sessions for a repository
@@ -205,6 +208,18 @@ pub enum SessionCommand {
         /// Repository name or path (default: current repo)
         #[arg(long, short)]
         repo: Option<String>,
+    },
+
+    /// Create a session from current dirty changes
+    FromDirty {
+        /// Session name
+        name: String,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+        /// Parent session name (default: current session)
+        #[arg(long, short)]
+        parent: Option<String>,
     },
 
     /// Manage labels on a session

@@ -38,7 +38,34 @@ impl CurrentSessionSource {
 pub(crate) fn resolve_current_session(repo_arg: Option<&str>) -> Result<CurrentSessionTarget> {
     let repos = candidate_repos(repo_arg)?;
 
-    if let Some(path) = tmux_session_path() {
+    // Try tmux @ez_session_name first (set by the tmux plugin) — most precise.
+    if let (Some(tmux_repo_id), Some(tmux_session_name)) = (
+        tmux_user_option("@ez_repo_id"),
+        tmux_user_option("@ez_session_name"),
+    ) {
+        log::debug!(
+            "resolving current session from tmux @ez_session_name: repo={} session={}",
+            tmux_repo_id,
+            tmux_session_name
+        );
+        if let Some((repo_entry, session)) =
+            find_session_by_name(&repos, &tmux_repo_id, &tmux_session_name)?
+        {
+            let path = session
+                .path
+                .clone()
+                .unwrap_or_else(|| repo_entry.path.clone());
+            return Ok(CurrentSessionTarget {
+                repo_entry,
+                session,
+                source: CurrentSessionSource::Tmux(path),
+            });
+        }
+        log::debug!("tmux @ez_session_name did not match any registered session");
+    }
+
+    // Fall back to @ez_session_path matching.
+    if let Some(path) = tmux_user_option("@ez_session_path").map(std::path::PathBuf::from) {
         log::debug!(
             "resolving current session from tmux @ez_session_path: {}",
             path.display()
@@ -111,34 +138,47 @@ fn candidate_repos(repo_arg: Option<&str>) -> Result<Vec<RepoEntry>> {
     }
 }
 
-fn tmux_session_path() -> Option<PathBuf> {
+fn tmux_user_option(option: &str) -> Option<String> {
     std::env::var_os("TMUX")?;
 
     let output = match Command::new("tmux")
-        .args(["show-options", "-v", "-q", "@ez_session_path"])
+        .args(["show-options", "-v", "-q", option])
         .output()
     {
         Ok(output) => output,
         Err(err) => {
-            log::debug!("failed to run tmux while detecting current session: {err}");
+            log::debug!("failed to run tmux while reading {option}: {err}");
             return None;
         }
     };
 
     if !output.status.success() {
-        log::debug!(
-            "tmux @ez_session_path lookup failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
         return None;
     }
 
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
+    let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if value.is_empty() {
         None
     } else {
-        Some(PathBuf::from(path))
+        Some(value)
     }
+}
+
+fn find_session_by_name(
+    repos: &[RepoEntry],
+    repo_id: &str,
+    session_name: &str,
+) -> Result<Option<(RepoEntry, Session)>> {
+    for repo_entry in repos {
+        if repo_entry.id != repo_id {
+            continue;
+        }
+        let tree = store::load_sessions(&repo_entry.id)?;
+        if let Some(session) = tree.find_by_name(session_name) {
+            return Ok(Some((repo_entry.clone(), session.clone())));
+        }
+    }
+    Ok(None)
 }
 
 fn find_session_by_path(repos: &[RepoEntry], path: &Path) -> Result<Option<(RepoEntry, Session)>> {

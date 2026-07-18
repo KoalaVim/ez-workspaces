@@ -20,7 +20,7 @@ enum NodeKind {
     Repo(PathBuf),
     Session {
         repo_entry: repo::model::RepoEntry,
-        session: session::model::Session,
+        session: Box<session::model::Session>,
         target_dir: PathBuf,
     },
 }
@@ -112,8 +112,7 @@ pub(super) fn run(
                             } else {
                                 "├── "
                             };
-                            let session_prefix =
-                                session::tree::format_session_tree_line(node);
+                            let session_prefix = session::tree::format_session_tree_line(node);
                             let marker = if node.session.is_default {
                                 " ★".yellow().to_string()
                             } else {
@@ -139,7 +138,7 @@ pub(super) fn run(
                                 ),
                                 NodeKind::Session {
                                     repo_entry: repo_entry.clone(),
-                                    session: node.session.clone(),
+                                    session: Box::new(node.session.clone()),
                                     target_dir,
                                 },
                                 repo_path.clone(),

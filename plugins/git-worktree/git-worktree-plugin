@@ -38,6 +38,8 @@ SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // empty')
 SESSION_IS_DEFAULT=$(echo "$REQUEST" | jq -r '.session.is_default // false')
 PARENT_IS_DEFAULT=$(echo "$REQUEST" | jq -r '.session.parent_is_default // false')
 PARENT_NAME=$(echo "$REQUEST" | jq -r '.session.parent_name // empty')
+START_POINT_OVERRIDE=$(echo "$REQUEST" | jq -r '.session.start_point // empty')
+IS_GIT=$(echo "$REQUEST" | jq -r '.repo.is_git // true')
 
 # Fetch TTL in seconds: only refetch origin if the last fetch was older than this.
 # Set to 0 to always fetch. Configurable via [plugin_settings.git-worktree] fetch_ttl.
@@ -61,6 +63,13 @@ should_fetch() {
 }
 
 dbg "hook=$HOOK repo=$REPO_PATH session=$SESSION_NAME is_default=$SESSION_IS_DEFAULT parent=$PARENT_NAME parent_is_default=$PARENT_IS_DEFAULT"
+
+# Don't operate on non-git repos
+if [ "$IS_GIT" = "false" ]; then
+    dbg "skipping: non-git repo"
+    echo '{"success": true}'
+    exit 0
+fi
 
 # Don't create worktrees for the default "main" session
 if [ "$SESSION_IS_DEFAULT" = "true" ]; then
@@ -158,7 +167,12 @@ case "$HOOK" in
                 exit 0
             fi
         else
-            START_POINT=$(resolve_start_point)
+            if [ -n "$START_POINT_OVERRIDE" ]; then
+                START_POINT="$START_POINT_OVERRIDE"
+                dbg "start point: override=$START_POINT"
+            else
+                START_POINT=$(resolve_start_point)
+            fi
             if git -C "$REPO_PATH" rev-parse --verify "origin/${BRANCH_NAME}" >/dev/null 2>&1; then
                 dbg "worktree add: tracking remote branch origin/${BRANCH_NAME}"
                 if ! git_err=$(git -C "$REPO_PATH" worktree add --track -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/${BRANCH_NAME}" 2>&1 >/dev/null); then

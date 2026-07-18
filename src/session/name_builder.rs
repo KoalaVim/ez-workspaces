@@ -35,12 +35,11 @@ fn select_mode(
         .iter()
         .map(|m| {
             let (display, value) = match m {
-                NameBuilderMode::FullName => {
-                    ("Full name (type the whole name)", "full_name")
-                }
-                NameBuilderMode::BuildFromParts => {
-                    ("Build from parts (prefix → ticket → name)", "build_from_parts")
-                }
+                NameBuilderMode::FullName => ("Full name (type the whole name)", "full_name"),
+                NameBuilderMode::BuildFromParts => (
+                    "Build from parts (prefix → ticket → name)",
+                    "build_from_parts",
+                ),
                 NameBuilderMode::GitHubPr => ("From GitHub PR (paste PR URL)", "github_pr"),
                 NameBuilderMode::JiraUrl => ("From Jira URL (paste Jira link)", "jira_url"),
             };
@@ -215,6 +214,7 @@ fn prompt_github_pr(
 /// `JiraUrl` mode: paste a Jira URL, extract the ticket key, then
 /// optionally append a descriptive suffix.
 fn prompt_jira_url(selector: &dyn InteractiveSelector) -> Result<NamePromptResult> {
+    let re = regex::Regex::new(r"/browse/([A-Z][A-Z0-9]+-\d+)").unwrap();
     loop {
         match selector.input_with_back("Jira URL", None, false, None)? {
             StageOutcome::Picked(url) => {
@@ -222,7 +222,6 @@ fn prompt_jira_url(selector: &dyn InteractiveSelector) -> Result<NamePromptResul
                 if url.is_empty() {
                     return Ok(NamePromptResult::Cancelled);
                 }
-                let re = regex::Regex::new(r"/browse/([A-Z][A-Z0-9]+-\d+)").unwrap();
                 if let Some(caps) = re.captures(url) {
                     let ticket = caps[1].to_string();
                     let context = Some(format!("{ticket}-"));

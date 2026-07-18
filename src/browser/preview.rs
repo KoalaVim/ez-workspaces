@@ -22,7 +22,13 @@ pub fn preview(path: &Path, show_session_actions: bool) -> Result<()> {
     if path.join(".git").exists() {
         preview_repo(path, show_session_actions)?;
     } else {
-        preview_directory(path);
+        // Check if this is a registered non-git repo
+        let index = repo::store::load_index()?;
+        if index.find_by_path(path).is_some() {
+            preview_non_git_repo(path, show_session_actions)?;
+        } else {
+            preview_directory(path);
+        }
     }
 
     Ok(())
@@ -52,8 +58,9 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
         } else {
             let rendered = tree.render_tree();
             for node in &rendered {
-                let prefix =
-                    session::tree::format_session_tree_line(node).dimmed().to_string();
+                let prefix = session::tree::format_session_tree_line(node)
+                    .dimmed()
+                    .to_string();
                 let indent = "  "; // base indent for preview section
                 let marker = if node.session.is_default {
                     " ★".yellow().to_string()
@@ -154,6 +161,118 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
         }
     } else {
         println!("  {}", "no commits".dimmed());
+    }
+
+    Ok(())
+}
+
+fn preview_non_git_repo(path: &Path, show_actions: bool) -> Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    println!(
+        "{} {} {}",
+        "■".blue(),
+        name.bold().blue(),
+        "(non-git)".dimmed()
+    );
+    println!("{}", path.display().to_string().dimmed());
+    println!();
+
+    // ── Sessions ──
+    preview_section("Sessions");
+    let index = repo::store::load_index()?;
+    if let Some(entry) = index.find_by_path(path) {
+        let tree = session::store::load_sessions(&entry.id)?;
+        if tree.sessions.is_empty() {
+            println!(
+                "  {} {}",
+                "none".dimmed(),
+                "(will auto-create 'main')".dimmed()
+            );
+        } else {
+            let rendered = tree.render_tree();
+            for node in &rendered {
+                let prefix = session::tree::format_session_tree_line(node)
+                    .dimmed()
+                    .to_string();
+                let indent = "  ";
+                let marker = if node.session.is_default {
+                    " ★".yellow().to_string()
+                } else {
+                    String::new()
+                };
+                let labels = if node.session.labels.is_empty() {
+                    String::new()
+                } else {
+                    format!(" [{}]", node.session.labels.join(","))
+                        .magenta()
+                        .to_string()
+                };
+                println!(
+                    "{}{}{}{}{}",
+                    indent,
+                    prefix,
+                    node.session.name.bold().yellow(),
+                    marker,
+                    labels
+                );
+            }
+        }
+
+        let meta = repo::store::load_repo_meta(&entry.id).unwrap_or_default();
+        if !meta.labels.is_empty() {
+            println!();
+            preview_section("Repo Labels");
+            println!("  {}", meta.labels.join(", ").magenta());
+        }
+    }
+
+    if show_actions {
+        println!();
+        preview_keybind_help();
+    }
+
+    println!();
+
+    // ── Directory Contents ──
+    preview_section("Contents");
+    if let Ok(entries) = fs::read_dir(path) {
+        let mut items: Vec<String> = Vec::new();
+        let mut file_count: usize = 0;
+
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let entry_name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if entry_name.starts_with('.') {
+                continue;
+            }
+
+            if p.is_dir() {
+                items.push(format!("  {} {}/", "▸".blue(), entry_name.bold().blue()));
+            } else {
+                file_count += 1;
+            }
+        }
+
+        items.sort();
+        for item in &items {
+            println!("{item}");
+        }
+
+        if file_count > 0 {
+            println!("  {} {file_count} file(s)", "…".dimmed());
+        }
+
+        if items.is_empty() && file_count == 0 {
+            println!("  {}", "(empty)".dimmed());
+        }
     }
 
     Ok(())

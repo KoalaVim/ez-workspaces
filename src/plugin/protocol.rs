@@ -67,6 +67,7 @@ pub struct RepoInfo {
     pub path: PathBuf,
     pub remote_url: Option<String>,
     pub default_branch: Option<String>,
+    pub is_git: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -80,6 +81,9 @@ pub struct SessionInfo {
     pub env: HashMap<String, String>,
     pub plugin_state: HashMap<String, toml::Value>,
     pub is_default: bool,
+    /// Override start point for worktree creation (used by session-from-dirty)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_point: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

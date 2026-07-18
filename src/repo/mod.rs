@@ -38,7 +38,7 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
     }
 
     let canonical = std::fs::canonicalize(&target)?;
-    register_repo(&canonical)?;
+    register_repo(&canonical, true)?;
 
     // Detect remote URL and default branch
     let meta = detect_repo_meta(&canonical);
@@ -49,7 +49,7 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
-/// Register an existing repo (default: current directory).
+/// Register an existing repo or directory (default: current directory).
 pub fn add_repo(path: Option<&Path>) -> Result<()> {
     let target = if let Some(p) = path {
         std::fs::canonicalize(p)?
@@ -57,25 +57,40 @@ pub fn add_repo(path: Option<&Path>) -> Result<()> {
         std::env::current_dir()?
     };
 
-    if !target.join(".git").exists() && !target.join(".git").is_file() {
-        // Check if it's a worktree (has .git file instead of dir)
-        return Err(EzError::Git(format!(
-            "{} is not a git repository",
+    let is_git = target.join(".git").exists() || target.join(".git").is_file();
+
+    if !is_git && !target.is_dir() {
+        return Err(EzError::Path(format!(
+            "{} is not a directory",
             target.display()
         )));
     }
 
-    register_repo(&target)?;
+    register_repo(&target, is_git)?;
 
-    let meta = detect_repo_meta(&target);
     let repo_id = paths::repo_id_from_path(&target);
+    let meta = if is_git {
+        detect_repo_meta(&target)
+    } else {
+        log::debug!("add_repo: non-git directory, using empty metadata");
+        RepoMeta::default()
+    };
     store::save_repo_meta(&repo_id, &meta)?;
 
-    println!("Registered: {}", target.display());
+    if is_git {
+        println!("{} {}", "Registered:".green(), target.display());
+    } else {
+        println!(
+            "{} {} {}",
+            "Registered:".green(),
+            target.display(),
+            "(non-git)".dimmed()
+        );
+    }
     Ok(())
 }
 
-fn register_repo(path: &Path) -> Result<()> {
+fn register_repo(path: &Path, is_git: bool) -> Result<()> {
     let mut index = store::load_index()?;
 
     if index.find_by_path(path).is_some() {
@@ -94,6 +109,7 @@ fn register_repo(path: &Path) -> Result<()> {
         path: path.to_path_buf(),
         name,
         registered_at: Utc::now(),
+        is_git,
     };
 
     index.repos.push(entry);
@@ -133,6 +149,7 @@ fn detect_repo_meta(path: &Path) -> RepoMeta {
         default_branch,
         labels: Vec::new(),
         plugin_state: Default::default(),
+        last_accessed: None,
     }
 }
 

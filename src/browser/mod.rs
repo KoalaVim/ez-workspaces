@@ -17,6 +17,35 @@ use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
 
 pub use preview::preview;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SortMode {
+    Alpha,
+    Lru,
+}
+
+impl SortMode {
+    pub fn toggle(self) -> Self {
+        match self {
+            SortMode::Alpha => SortMode::Lru,
+            SortMode::Lru => SortMode::Alpha,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SortMode::Alpha => "A-Z",
+            SortMode::Lru => "LRU",
+        }
+    }
+
+    pub fn from_config(s: &str) -> Self {
+        match s.to_ascii_lowercase().as_str() {
+            "lru" => SortMode::Lru,
+            _ => SortMode::Alpha,
+        }
+    }
+}
+
 pub struct BrowseOptions<'a> {
     pub cd_file: Option<&'a Path>,
     pub post_cmd_file: Option<&'a Path>,
@@ -223,13 +252,27 @@ pub(crate) fn session_action_loop(
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
 ) -> Result<bool> {
+    // Update repo last_accessed timestamp on browse-into
+    if let Ok(mut meta) = repo::store::load_repo_meta(&repo_entry.id) {
+        meta.last_accessed = Some(chrono::Utc::now().to_rfc3339());
+        let _ = repo::store::save_repo_meta(&repo_entry.id, &meta);
+        log::debug!(
+            "session_action_loop: updated last_accessed for repo '{}'",
+            repo_entry.id
+        );
+    }
+
     let keybinds = &config.keybinds;
     let plugin_views = plugin::collect_plugin_views("session", config).unwrap_or_default();
     let plugin_binds = plugin::collect_plugin_binds("session", config).unwrap_or_default();
+    let mut sort_mode = SortMode::from_config(&config.default_sort);
 
     loop {
         let tree = session::ensure_default_session(&repo_entry.id, &repo_entry.path)?;
-        let rendered = tree.render_tree();
+        let rendered = match sort_mode {
+            SortMode::Lru => tree.render_tree_lru(),
+            SortMode::Alpha => tree.render_tree(),
+        };
 
         let session_items: Vec<SelectItem> = rendered
             .iter()
@@ -246,6 +289,11 @@ pub(crate) fn session_action_loop(
                     .as_ref()
                     .map(|p| format!(" → {}", p.display()).dimmed().to_string())
                     .unwrap_or_default();
+                let bare_indicator = if node.session.bare {
+                    " [bare]".dimmed().to_string()
+                } else {
+                    String::new()
+                };
                 let labels = if node.session.labels.is_empty() {
                     String::new()
                 } else {
@@ -253,13 +301,25 @@ pub(crate) fn session_action_loop(
                         .magenta()
                         .to_string()
                 };
+                let last_used = node
+                    .session
+                    .last_accessed
+                    .as_ref()
+                    .map(|ts| {
+                        format!(" ({})", format_last_accessed(ts))
+                            .dimmed()
+                            .to_string()
+                    })
+                    .unwrap_or_default();
                 SelectItem {
                     display: format!(
-                        "{}{}{}{}{}",
+                        "{}{}{}{}{}{}{}",
                         prefix,
                         node.session.name.bold().yellow(),
                         marker,
+                        bare_indicator,
                         labels,
+                        last_used,
                         path_info
                     ),
                     value: node.session.id.clone(),
@@ -278,8 +338,12 @@ pub(crate) fn session_action_loop(
         });
 
         let mut header = format!(
-            "{}: new  {}: rename  {}: delete  {}: labels  {}: cd",
+            "sort: {} ({})  {}: new  {}: bare  {}: from dirty  {}: rename  {}: delete  {}: labels  {}: cd",
+            sort_mode.label(),
+            keybinds.sort_toggle,
             keybinds.new_session,
+            keybinds.new_bare_session,
+            keybinds.session_from_dirty,
             keybinds.rename_session,
             keybinds.delete_session,
             keybinds.edit_labels,
@@ -294,10 +358,13 @@ pub(crate) fn session_action_loop(
 
         let mut expect_keys: Vec<&str> = vec![
             keybinds.new_session.as_str(),
+            keybinds.new_bare_session.as_str(),
+            keybinds.session_from_dirty.as_str(),
             keybinds.delete_session.as_str(),
             keybinds.rename_session.as_str(),
             keybinds.edit_labels.as_str(),
             keybinds.cd_session.as_str(),
+            keybinds.sort_toggle.as_str(),
         ];
         for pv in &plugin_views {
             expect_keys.push(pv.key.as_str());
@@ -326,6 +393,7 @@ pub(crate) fn session_action_loop(
         match action {
             ActionResult::Select(idx) => {
                 let selected = rendered[idx].session;
+                update_last_accessed(&repo_entry.id, &selected.id);
                 let target_dir = selected
                     .path
                     .as_ref()
@@ -352,6 +420,7 @@ pub(crate) fn session_action_loop(
                                     &repo_entry.id,
                                     &selected.id,
                                     &name,
+                                    false,
                                 )?;
                                 if on_create_is_noop(&config.on_create) {
                                     eprintln!(
@@ -376,6 +445,84 @@ pub(crate) fn session_action_loop(
                                         config,
                                     )?;
                                     return Ok(true);
+                                }
+                            }
+                            session::name_builder::NamePromptResult::Cancelled => {}
+                        }
+                    }
+                    key if key == keybinds.new_bare_session => {
+                        match session::name_builder::prompt_session_name(selector, config)? {
+                            session::name_builder::NamePromptResult::Done(name) => {
+                                let created = session::create_child_session(
+                                    &repo_entry.id,
+                                    &selected.id,
+                                    &name,
+                                    true,
+                                )?;
+                                if on_create_is_noop(&config.on_create) {
+                                    eprintln!(
+                                        "{} {} {} → {}",
+                                        "Created bare:".green(),
+                                        name.bold(),
+                                        "[bare]".dimmed(),
+                                        selected.name.dimmed()
+                                    );
+                                } else {
+                                    let target_dir = created
+                                        .path
+                                        .as_ref()
+                                        .cloned()
+                                        .unwrap_or_else(|| repo_entry.path.clone());
+                                    accept_session(
+                                        &config.on_create,
+                                        repo_entry,
+                                        &created,
+                                        &target_dir,
+                                        cd_file,
+                                        post_cmd_file,
+                                        config,
+                                    )?;
+                                    return Ok(true);
+                                }
+                            }
+                            session::name_builder::NamePromptResult::Cancelled => {}
+                        }
+                    }
+                    key if key == keybinds.session_from_dirty => {
+                        match session::name_builder::prompt_session_name(selector, config)? {
+                            session::name_builder::NamePromptResult::Done(name) => {
+                                match session::from_dirty::session_from_dirty_inner(
+                                    &name, None, None,
+                                ) {
+                                    Ok(created) => {
+                                        if on_create_is_noop(&config.on_create) {
+                                            eprintln!(
+                                                "{} {} → {}",
+                                                "Created from dirty:".green(),
+                                                name.bold(),
+                                                selected.name.dimmed()
+                                            );
+                                        } else {
+                                            let target_dir = created
+                                                .path
+                                                .as_ref()
+                                                .cloned()
+                                                .unwrap_or_else(|| repo_entry.path.clone());
+                                            accept_session(
+                                                &config.on_create,
+                                                repo_entry,
+                                                &created,
+                                                &target_dir,
+                                                cd_file,
+                                                post_cmd_file,
+                                                config,
+                                            )?;
+                                            return Ok(true);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("{} {}", "From dirty failed:".red(), e);
+                                    }
                                 }
                             }
                             session::name_builder::NamePromptResult::Cancelled => {}
@@ -433,9 +580,18 @@ pub(crate) fn session_action_loop(
                         );
                     }
                     key if key == keybinds.cd_session => {
-                        let target_dir = selected.path.as_ref().cloned().unwrap_or_else(|| repo_entry.path.clone());
+                        let target_dir = selected
+                            .path
+                            .as_ref()
+                            .cloned()
+                            .unwrap_or_else(|| repo_entry.path.clone());
                         write_cd_target(cd_file, &target_dir)?;
                         return Ok(true);
+                    }
+                    key if key == keybinds.sort_toggle => {
+                        sort_mode = sort_mode.toggle();
+                        log::debug!("session_action_loop: sort toggled to {:?}", sort_mode);
+                        continue;
                     }
                     _ => {
                         // Check plugin binds first (actions on selected session)
@@ -576,6 +732,38 @@ pub(crate) fn drill_into_directory(
 
         history.push(current.clone());
         current = entries[idx].1.clone();
+    }
+}
+
+/// Update `last_accessed` timestamp on a session and its repo after browser selection.
+fn update_last_accessed(repo_id: &str, session_id: &str) {
+    let now = chrono::Utc::now().to_rfc3339();
+    if let Ok(mut tree) = session::store::load_sessions(repo_id) {
+        if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session_id) {
+            s.last_accessed = Some(now.clone());
+        }
+        let _ = session::store::save_sessions(repo_id, &tree);
+    }
+    if let Ok(mut meta) = repo::store::load_repo_meta(repo_id) {
+        meta.last_accessed = Some(now);
+        let _ = repo::store::save_repo_meta(repo_id, &meta);
+    }
+}
+
+/// Format an ISO 8601 timestamp for display (e.g. "2h ago", "3d ago").
+fn format_last_accessed(ts: &str) -> String {
+    let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) else {
+        return ts.to_string();
+    };
+    let elapsed = chrono::Utc::now().signed_duration_since(dt);
+    if elapsed.num_minutes() < 1 {
+        format!("{}s ago", elapsed.num_seconds().max(0))
+    } else if elapsed.num_hours() < 1 {
+        format!("{}m ago", elapsed.num_minutes())
+    } else if elapsed.num_hours() < 24 {
+        format!("{}h ago", elapsed.num_hours())
+    } else {
+        format!("{}d ago", elapsed.num_days())
     }
 }
 

@@ -21,6 +21,13 @@ pub struct RepoEntry {
     pub name: String,
     /// When the repo was registered
     pub registered_at: DateTime<Utc>,
+    /// Whether this repo is a git repository
+    #[serde(default = "default_true")]
+    pub is_git: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Per-repo metadata stored alongside sessions.
@@ -38,6 +45,9 @@ pub struct RepoMeta {
     /// Plugin-specific per-repo state
     #[serde(default)]
     pub plugin_state: std::collections::HashMap<String, toml::Value>,
+    /// Last time the repo was explicitly browsed into (ISO 8601)
+    #[serde(default)]
+    pub last_accessed: Option<String>,
 }
 
 /// Parse the "owner" portion of a git remote URL.

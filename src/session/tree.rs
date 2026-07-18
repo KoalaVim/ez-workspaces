@@ -98,6 +98,49 @@ impl SessionTree {
         result
     }
 
+    /// Render the tree with root sessions sorted by most-recently-accessed first.
+    /// Children within each root subtree preserve their original order.
+    /// Sessions with no `last_accessed` sort to the end.
+    pub fn render_tree_lru(&self) -> Vec<TreeNode<'_>> {
+        let mut result = Vec::new();
+        let mut roots = self.roots();
+        roots.sort_by(|a, b| {
+            let a_ts = self.subtree_max_accessed(&a.id);
+            let b_ts = self.subtree_max_accessed(&b.id);
+            match (&b_ts, &a_ts) {
+                (Some(b_v), Some(a_v)) => b_v.cmp(a_v),
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+        let num_roots = roots.len();
+        for (i, root) in roots.iter().enumerate() {
+            let is_last = i == num_roots - 1;
+            self.render_subtree(root, 0, is_last, &[], &mut result);
+        }
+        result
+    }
+
+    /// Find the most recent `last_accessed` timestamp across a session and all
+    /// its descendants. Returns `None` if none have been accessed.
+    fn subtree_max_accessed(&self, session_id: &SessionId) -> Option<String> {
+        let mut max: Option<String> = None;
+        if let Some(session) = self.find_by_id(session_id) {
+            if let Some(ref ts) = session.last_accessed {
+                max = Some(ts.clone());
+            }
+        }
+        for desc in self.descendants(session_id) {
+            if let Some(ref ts) = desc.last_accessed {
+                if max.as_ref().is_none_or(|m| ts > m) {
+                    max = Some(ts.clone());
+                }
+            }
+        }
+        max
+    }
+
     fn render_subtree<'a>(
         &'a self,
         session: &'a Session,
@@ -186,6 +229,8 @@ mod tests {
             labels: Vec::new(),
             created_at: Utc::now(),
             is_default: false,
+            bare: false,
+            last_accessed: None,
         }
     }
 
@@ -328,12 +373,15 @@ mod tests {
         let rendered = tree.render_tree();
         assert_eq!(rendered.len(), 5);
 
-        let lines: Vec<String> = rendered.iter().map(|n| format_session_tree_line(n)).collect();
-        assert_eq!(lines[0], "");                 // root (depth 0)
-        assert_eq!(lines[1], "├── ");             // a (not last sibling)
-        assert_eq!(lines[2], "│   └── ");         // b (a has continuation, b is last child)
-        assert_eq!(lines[3], "│       └── ");     // c (a continues, b doesn't, c is last)
-        assert_eq!(lines[4], "└── ");             // d (last sibling of root)
+        let lines: Vec<String> = rendered
+            .iter()
+            .map(|n| format_session_tree_line(n))
+            .collect();
+        assert_eq!(lines[0], ""); // root (depth 0)
+        assert_eq!(lines[1], "├── "); // a (not last sibling)
+        assert_eq!(lines[2], "│   └── "); // b (a has continuation, b is last child)
+        assert_eq!(lines[3], "│       └── "); // c (a continues, b doesn't, c is last)
+        assert_eq!(lines[4], "└── "); // d (last sibling of root)
     }
 
     #[test]
@@ -374,10 +422,13 @@ mod tests {
         let rendered = tree.render_tree();
         assert_eq!(rendered.len(), 4);
 
-        let lines: Vec<String> = rendered.iter().map(|n| format_session_tree_line(n)).collect();
-        assert_eq!(lines[0], "");         // root
-        assert_eq!(lines[1], "├── ");     // a
-        assert_eq!(lines[2], "└── ");     // b
+        let lines: Vec<String> = rendered
+            .iter()
+            .map(|n| format_session_tree_line(n))
+            .collect();
+        assert_eq!(lines[0], ""); // root
+        assert_eq!(lines[1], "├── "); // a
+        assert_eq!(lines[2], "└── "); // b
         assert_eq!(lines[3], "    └── "); // c (b is last sibling, no continuation)
     }
 }

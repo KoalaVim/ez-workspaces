@@ -16,8 +16,7 @@ use crate::repo::model::{RepoEntry, RepoMeta};
 use crate::session::model::{Session, SessionTree};
 use model::{HookType, PluginManifest};
 use protocol::{
-    HookRequest, HookResponse, NameResolveContext, PluginConfig, RepoInfo, SessionInfo,
-    ViewContext,
+    HookRequest, HookResponse, NameResolveContext, PluginConfig, RepoInfo, SessionInfo, ViewContext,
 };
 
 /// Dispatch plugin subcommands.
@@ -252,6 +251,7 @@ fn build_request(
         path: repo_entry.path.clone(),
         remote_url: repo_meta.remote_url.clone(),
         default_branch: repo_meta.default_branch.clone(),
+        is_git: repo_entry.is_git,
     };
 
     let session_info = session.map(|s| {
@@ -266,6 +266,7 @@ fn build_request(
             env: s.env.clone(),
             plugin_state: s.plugin_state.clone(),
             is_default: s.is_default,
+            start_point: s.env.get("ez_start_point").cloned(),
         }
     });
 
@@ -416,6 +417,7 @@ pub fn run_view_hook(
             path: std::path::PathBuf::new(),
             remote_url: None,
             default_branch: None,
+            is_git: true,
         },
         session: None,
         config: PluginConfig {
@@ -461,6 +463,7 @@ pub fn run_view_select_hook(
             path: std::path::PathBuf::new(),
             remote_url: None,
             default_branch: None,
+            is_git: true,
         },
         session: None,
         config: PluginConfig {
@@ -531,6 +534,7 @@ pub fn run_name_resolve_hook(
                 path: std::path::PathBuf::new(),
                 remote_url: None,
                 default_branch: None,
+                is_git: true,
             },
             session: None,
             config: PluginConfig {
@@ -545,10 +549,7 @@ pub fn run_name_resolve_hook(
             }),
         };
 
-        log::debug!(
-            "run_name_resolve_hook: invoking plugin [{}]",
-            plugin_name
-        );
+        log::debug!("run_name_resolve_hook: invoking plugin [{}]", plugin_name);
 
         match runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout) {
             Ok(response) => {
@@ -684,5 +685,6 @@ fn core_keybind_keys(config: &EzConfig) -> Vec<&str> {
         kb.delete_session.as_str(),
         kb.rename_session.as_str(),
         kb.edit_labels.as_str(),
+        kb.session_from_dirty.as_str(),
     ]
 }

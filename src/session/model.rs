@@ -32,6 +32,12 @@ pub struct Session {
     /// Whether this is the auto-created default session
     #[serde(default)]
     pub is_default: bool,
+    /// Whether this is a bare session (no worktree)
+    #[serde(default)]
+    pub bare: bool,
+    /// Last time the session was explicitly entered (ISO 8601)
+    #[serde(default)]
+    pub last_accessed: Option<String>,
 }
 
 /// The full session collection for one repo.
