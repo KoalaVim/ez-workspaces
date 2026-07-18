@@ -126,6 +126,11 @@ sequenceDiagram
     Note over EZ: Execute shell_commands
     Note over EZ: Write post_shell_commands to file
     Note over EZ: Write cd_target to cd-file
+
+    Note over EZ,P: OnNameResolve hook (e.g. GitHub PR → branch name)
+    EZ->>P: JSON request with name_resolve_context (raw_url, candidate_name)
+    P-->>EZ: JSON response with resolved_name
+    Note over EZ: Use resolved_name as session name (fallback to candidate_name)
 ```
 
 ## Plugin View Flow

@@ -24,3 +24,15 @@ name = "auto_attach"
 type = "bool"
 default = false
 description = "Automatically attach/switch to tmux session when entering a session"
+
+[[config_schema]]
+name = "return_on_detach"
+type = "bool"
+default = true
+description = "Re-enter ez browser after detaching from a tmux session"
+
+[[config_schema]]
+name = "reap_delay_ms"
+type = "int"
+default = 200
+description = "Milliseconds to wait before running delete hooks in the reap worker"

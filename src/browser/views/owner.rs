@@ -110,8 +110,11 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => {
             let entry = &entries[idx];
-            browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)?;
-            Ok(Outcome::Done)
+            if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)? {
+                Ok(Outcome::Done)
+            } else {
+                Ok(Outcome::Switch(ViewMode::Owner))
+            }
         }
     }
 }

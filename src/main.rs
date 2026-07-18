@@ -135,13 +135,19 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
             r#"ez() {
     local tmp=$(mktemp)
     local post_cmd=$(mktemp)
-    command ez "$@" --cd-file="$tmp" --post-cmd-file="$post_cmd"
-    local ret=$?
+    while true; do
+        command ez "$@" --cd-file="$tmp" --post-cmd-file="$post_cmd"
+        local ret=$?
+        if [ -s "$post_cmd" ]; then
+            source "$post_cmd"
+            : > "$post_cmd"
+            : > "$tmp"
+            continue
+        fi
+        break
+    done
     if [ -s "$tmp" ]; then
         cd "$(cat "$tmp")"
-    fi
-    if [ -s "$post_cmd" ]; then
-        source "$post_cmd"
     fi
     rm -f "$tmp" "$post_cmd"
     return $ret
@@ -151,13 +157,19 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
             r#"function ez
     set tmp (mktemp)
     set post_cmd (mktemp)
-    command ez $argv --cd-file="$tmp" --post-cmd-file="$post_cmd"
-    set ret $status
+    while true
+        command ez $argv --cd-file="$tmp" --post-cmd-file="$post_cmd"
+        set ret $status
+        if test -s "$post_cmd"
+            source "$post_cmd"
+            echo -n > "$post_cmd"
+            echo -n > "$tmp"
+            continue
+        end
+        break
+    end
     if test -s "$tmp"
         cd (cat "$tmp")
-    end
-    if test -s "$post_cmd"
-        source "$post_cmd"
     end
     rm -f "$tmp" "$post_cmd"
     return $ret

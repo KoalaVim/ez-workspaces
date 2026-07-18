@@ -20,17 +20,22 @@ cargo install --locked --path .
 # Add shell integration (add to your .zshrc/.bashrc)
 eval "$(ez init-shell zsh)"
 
+# Enable plugins
+ez plugin enable git-worktree
+ez plugin enable tmux
+
 # Register a repo
 ez add ~/my-project
 
-# Create sessions
+# Create sessions (new sessions are children of main by default)
 ez session new feature-auth
 ez session new sub-task --parent feature-auth
 
-# List sessions (tree view)
+# List sessions (tree view with box-drawing connectors)
 ez session list
-# feature-auth
-#   sub-task
+# main *
+# ├── feature-auth
+# │   └── sub-task
 
 # Enter a session
 ez session enter feature-auth
@@ -74,7 +79,7 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez --repo <path>` | Jump straight to a repo's session picker |
 | `ez clone <url> [path]` | Clone + register repo |
 | `ez add [path]` | Register existing repo |
-| `ez session new [name]` | Create session (`--parent` for nesting); without `name` you'll be prompted through configured stages (`prefix`, `ticket`, free-text). If the name matches an existing git branch you'll be asked to **reuse** it or **recreate** from the latest base. |
+| `ez session new [name]` | Create session (`--parent` for nesting, `--interactive` / `-i` to force the name builder even with a name). Without `name` you're prompted via name builder modes (full name, build from parts, GitHub PR, Jira URL). If the name matches an existing git branch you'll be asked to **reuse** it or **recreate** from the latest base. |
 | `ez session list` | List sessions as tree (`--flat` for flat) |
 | `ez session register [path]` | Register an existing git worktree as a session; defaults to current directory and branch name |
 | `ez session enter <name>` | Enter a session |
@@ -124,6 +129,7 @@ Inside the session picker (and the flat Repo view):
 | `Alt-r` | Rename session |
 | `Alt-d` | Delete session |
 | `Alt-l` | Edit labels on the selected item (comma-separated, prefix `-` to remove) |
+| `Alt-c` | Cd into session worktree |
 
 All keybinds are configurable under `[keybinds]` in `~/.config/ez/config.toml`:
 
@@ -138,6 +144,27 @@ view_repo = "ctrl-e"
 view_owner = "ctrl-o"
 view_label = "ctrl-g"
 edit_labels = "alt-l"
+cd_session = "alt-c"
+```
+
+## Name Builder Modes
+
+When creating a session without providing a name (`ez session new` or `Alt-n` in the browser), a mode picker appears first. Use `--interactive` / `-i` to force the picker even when a name is provided.
+
+Available modes (configurable via `name_builder_modes` in config):
+
+| Mode | What it does | Example result |
+|------|-------------|----------------|
+| **Full name** | Type the entire session name directly | `my-feature-branch` |
+| **Build from parts** | Step through prefix → ticket → name stages | `feat-PROJ-123-add-login` |
+| **From GitHub PR** | Paste a PR URL, extracts `pr<number>`, optionally resolves the branch via the `OnNameResolve` plugin hook | `pr42` or `fix-typo` (resolved) |
+| **From Jira URL** | Paste a Jira URL, extracts `PROJ-123`, then prompts for an optional suffix | `PROJ-123-refactor-api` |
+
+When only one mode is configured, the picker is skipped and that mode is used directly.
+
+```toml
+# Customize available modes (default: all four)
+name_builder_modes = ["full_name", "build_from_parts", "github_pr", "jira_url"]
 ```
 
 ## Labels
@@ -220,6 +247,15 @@ ez plugin enable tmux
 ```
 
 Plugins can register custom views (shown as extra keybinds in the browser), declare configuration options, and run commands in the user's shell after ez exits. See [Plugin Guide](docs/plugin-guide.md).
+
+### Return-to-ez after tmux detach
+
+When `return_on_detach` is enabled in the tmux plugin settings (default: `true`), detaching from a tmux session automatically re-enters the ez browser. This creates a seamless loop: browse → attach → detach → browse again.
+
+```toml
+[plugin_settings.tmux]
+return_on_detach = true   # default
+```
 
 ## Docs
 

@@ -156,8 +156,11 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => match &tagged[idx] {
             LabeledItem::Repo(r) => {
-                browse_repo(&r.path, selector, cd_file, post_cmd_file, config)?;
-                Ok(Outcome::Done)
+                if browse_repo(&r.path, selector, cd_file, post_cmd_file, config)? {
+                    Ok(Outcome::Done)
+                } else {
+                    Ok(Outcome::Switch(ViewMode::Label))
+                }
             }
             LabeledItem::Session(b) => {
                 let target = b

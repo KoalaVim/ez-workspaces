@@ -10,7 +10,7 @@ use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
 use super::super::{browse_repo, format_repo_display, get_branch, parse_label_input};
-use super::{match_view_switch, view_header, view_switch_keys, Outcome};
+use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
     selector: &dyn InteractiveSelector,
@@ -90,8 +90,10 @@ pub(super) fn run(
             }
             ActionResult::Select(idx) => {
                 let entry = &index.repos[idx];
-                browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)?;
-                return Ok(Outcome::Done);
+                if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)? {
+                    return Ok(Outcome::Done);
+                }
+                return Ok(Outcome::Switch(ViewMode::Repo));
             }
         }
     }

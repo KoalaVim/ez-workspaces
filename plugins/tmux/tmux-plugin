@@ -109,7 +109,11 @@ case "$HOOK" in
 
     on_session_delete)
         if command -v tmux &>/dev/null; then
-            tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null || true
+            if ! tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null; then
+                dbg "kill-session failed for '${TMUX_SESSION}', retrying in 500ms"
+                sleep 0.5
+                tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null || true
+            fi
         fi
         echo '{"success": true}'
         ;;

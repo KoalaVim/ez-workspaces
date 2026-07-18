@@ -97,6 +97,9 @@ pub(super) fn run(
         None => return Ok(Outcome::Switch(ViewMode::Workspace)),
     };
 
-    browse_repo(&repo_path, selector, cd_file, post_cmd_file, config)?;
-    Ok(Outcome::Done)
+    if browse_repo(&repo_path, selector, cd_file, post_cmd_file, config)? {
+        Ok(Outcome::Done)
+    } else {
+        Ok(Outcome::Switch(ViewMode::Workspace))
+    }
 }

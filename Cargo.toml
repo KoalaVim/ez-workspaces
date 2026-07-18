@@ -21,6 +21,7 @@ uuid = { version = "1", features = ["v4"] }
 dirs = "6"
 which = "7"
 colored = "3"
+regex = "1"
 log = "0.4"
 env_logger = "0.11"
 libc = "0.2"

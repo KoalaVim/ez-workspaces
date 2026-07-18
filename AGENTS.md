@@ -31,7 +31,7 @@ docs/               Documentation
 ## Key Modules
 
 ### config/ - Configuration
-- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs
+- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `name_builder_modes` field on `EzConfig`
 - `mod.rs`: load/save/edit config
 
 ### repo/ - Repository Management
@@ -41,14 +41,15 @@ docs/               Documentation
 
 ### session/ - Session Management
 - `model.rs`: `Session`, `SessionTree` structs
-- `tree.rs`: tree operations (roots, children, ancestors, descendants, render)
+- `tree.rs`: tree operations (roots, children, ancestors, descendants, render); `TreeNode` struct and `format_session_tree_line` for box-drawing glyph rendering
+- `name_builder.rs`: interactive name builder with mode selection (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`)
 - `store.rs`: filesystem persistence
 - `current.rs`: current-session detection from tmux `@ez_session_path` and worktree paths
 - `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session
 
 ### plugin/ - Plugin System
-- `model.rs`: `PluginManifest`, `HookType` enum (13 hook types including `OnBind`, `OnView`, `OnViewSelect`), `PluginBind`, `PluginView`, `ConfigField`
-- `protocol.rs`: `HookRequest` (with `BindContext`, `ViewContext`), `HookResponse` (with `post_shell_commands`, `cd_target`, `view_items`), `PluginConfig` (with `user_config`), `ViewItem`
+- `model.rs`: `PluginManifest`, `HookType` enum (14 hook types including `OnBind`, `OnView`, `OnViewSelect`, `OnNameResolve`), `PluginBind`, `PluginView`, `ConfigField`
+- `protocol.rs`: `HookRequest` (with `BindContext`, `ViewContext`, `NameResolveContext`), `HookResponse` (with `post_shell_commands`, `cd_target`, `view_items`, `resolved_name`), `PluginConfig` (with `user_config`), `ViewItem`
 - `runner.rs`: process execution with timeout
 - `bundled.rs`: embedded plugins, auto-extracted and auto-updated on version change
 - `mod.rs`: hook dispatch, enable/disable, `collect_plugin_views()`, `run_view_hook()`, `run_view_select_hook()`

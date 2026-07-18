@@ -12,6 +12,7 @@ use crate::error::Result;
 use crate::plugin;
 use crate::repo;
 use crate::session;
+use crate::session::tree::format_session_tree_line;
 use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
 
 pub use preview::preview;
@@ -55,7 +56,8 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         } else {
             std::env::current_dir()?.join(repo_path)
         };
-        return browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config);
+        browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config)?;
+        return Ok(());
     }
 
     // Auto-detect: if cwd is inside a registered repo (or one of its worktrees),
@@ -64,7 +66,8 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         if let Some(repo_root) = detect_repo_root() {
             let index = repo::store::load_index()?;
             if let Some(entry) = index.find_by_path(&repo_root) {
-                return session_action_loop(entry, &selector, cd_file, post_cmd_file, &config);
+                session_action_loop(entry, &selector, cd_file, post_cmd_file, &config)?;
+                return Ok(());
             }
         }
     }
@@ -79,13 +82,15 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
 }
 
 /// Register repo if needed and enter session action loop.
+/// Returns `true` when a session was accepted (caller should exit the browser),
+/// `false` when the user cancelled (caller should go back).
 pub(crate) fn browse_repo(
     repo_path: &Path,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
-) -> Result<()> {
+) -> Result<bool> {
     let index = repo::store::load_index()?;
     let repo_entry = if let Some(entry) = index.find_by_path(repo_path) {
         entry.clone()
@@ -210,13 +215,14 @@ pub(crate) fn accept_session(
 }
 
 /// Session selection loop with action keybinds.
+/// Returns `true` when a session was accepted, `false` when cancelled.
 pub(crate) fn session_action_loop(
     repo_entry: &repo::model::RepoEntry,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
-) -> Result<()> {
+) -> Result<bool> {
     let keybinds = &config.keybinds;
     let plugin_views = plugin::collect_plugin_views("session", config).unwrap_or_default();
     let plugin_binds = plugin::collect_plugin_binds("session", config).unwrap_or_default();
@@ -227,33 +233,36 @@ pub(crate) fn session_action_loop(
 
         let session_items: Vec<SelectItem> = rendered
             .iter()
-            .map(|(depth, s)| {
-                let indent = "  ".repeat(*depth);
-                let marker = if s.is_default {
+            .map(|node| {
+                let prefix = format_session_tree_line(node).dimmed().to_string();
+                let marker = if node.session.is_default {
                     " ★".yellow().to_string()
                 } else {
                     String::new()
                 };
-                let path_info = s
+                let path_info = node
+                    .session
                     .path
                     .as_ref()
                     .map(|p| format!(" → {}", p.display()).dimmed().to_string())
                     .unwrap_or_default();
-                let labels = if s.labels.is_empty() {
+                let labels = if node.session.labels.is_empty() {
                     String::new()
                 } else {
-                    format!(" [{}]", s.labels.join(",")).magenta().to_string()
+                    format!(" [{}]", node.session.labels.join(","))
+                        .magenta()
+                        .to_string()
                 };
                 SelectItem {
                     display: format!(
                         "{}{}{}{}{}",
-                        indent,
-                        s.name.bold().yellow(),
+                        prefix,
+                        node.session.name.bold().yellow(),
                         marker,
                         labels,
                         path_info
                     ),
-                    value: s.id.clone(),
+                    value: node.session.id.clone(),
                 }
             })
             .collect();
@@ -269,11 +278,12 @@ pub(crate) fn session_action_loop(
         });
 
         let mut header = format!(
-            "{}: new  {}: rename  {}: delete  {}: labels",
+            "{}: new  {}: rename  {}: delete  {}: labels  {}: cd",
             keybinds.new_session,
             keybinds.rename_session,
             keybinds.delete_session,
             keybinds.edit_labels,
+            keybinds.cd_session,
         );
         for pv in &plugin_views {
             header.push_str(&format!("  {}:{}", pv.key, pv.label));
@@ -287,6 +297,7 @@ pub(crate) fn session_action_loop(
             keybinds.delete_session.as_str(),
             keybinds.rename_session.as_str(),
             keybinds.edit_labels.as_str(),
+            keybinds.cd_session.as_str(),
         ];
         for pv in &plugin_views {
             expect_keys.push(pv.key.as_str());
@@ -314,13 +325,13 @@ pub(crate) fn session_action_loop(
 
         match action {
             ActionResult::Select(idx) => {
-                let selected = rendered[idx].1;
+                let selected = rendered[idx].session;
                 let target_dir = selected
                     .path
                     .as_ref()
                     .cloned()
                     .unwrap_or_else(|| repo_entry.path.clone());
-                return accept_session(
+                accept_session(
                     &config.on_enter,
                     repo_entry,
                     selected,
@@ -328,10 +339,11 @@ pub(crate) fn session_action_loop(
                     cd_file,
                     post_cmd_file,
                     config,
-                );
+                )?;
+                return Ok(true);
             }
             ActionResult::Action(key, idx) => {
-                let selected = rendered[idx].1;
+                let selected = rendered[idx].session;
                 match key.as_str() {
                     key if key == keybinds.new_session => {
                         match session::name_builder::prompt_session_name(selector, config)? {
@@ -354,7 +366,7 @@ pub(crate) fn session_action_loop(
                                         .as_ref()
                                         .cloned()
                                         .unwrap_or_else(|| repo_entry.path.clone());
-                                    return accept_session(
+                                    accept_session(
                                         &config.on_create,
                                         repo_entry,
                                         &created,
@@ -362,7 +374,8 @@ pub(crate) fn session_action_loop(
                                         cd_file,
                                         post_cmd_file,
                                         config,
-                                    );
+                                    )?;
+                                    return Ok(true);
                                 }
                             }
                             session::name_builder::NamePromptResult::Cancelled => {}
@@ -419,6 +432,11 @@ pub(crate) fn session_action_loop(
                             }
                         );
                     }
+                    key if key == keybinds.cd_session => {
+                        let target_dir = selected.path.as_ref().cloned().unwrap_or_else(|| repo_entry.path.clone());
+                        write_cd_target(cd_file, &target_dir)?;
+                        return Ok(true);
+                    }
                     _ => {
                         // Check plugin binds first (actions on selected session)
                         let mut handled = false;
@@ -439,7 +457,7 @@ pub(crate) fn session_action_loop(
                                 if response.cd_target.is_some()
                                     || !response.post_shell_commands.is_empty()
                                 {
-                                    return Ok(());
+                                    return Ok(true);
                                 }
                                 handled = true;
                                 break;
@@ -462,14 +480,14 @@ pub(crate) fn session_action_loop(
                                     cd_file,
                                     post_cmd_file,
                                 )?;
-                                return Ok(());
+                                return Ok(true);
                             }
                         }
                     }
                 }
                 // Loop back to show updated session list
             }
-            ActionResult::Cancel => return Ok(()),
+            ActionResult::Cancel => return Ok(false),
         }
     }
 }

@@ -35,13 +35,14 @@ pub fn dispatch(
     on_create: Option<&str>,
 ) -> Result<()> {
     match command {
-        SessionCommand::New { name, parent, repo } => new_session(
+        SessionCommand::New { name, parent, repo, interactive } => new_session(
             name.as_deref(),
             parent.as_deref(),
             repo.as_deref(),
             cd_file,
             post_cmd_file,
             on_create,
+            interactive,
         ),
         SessionCommand::List { repo, flat } => list_sessions(repo.as_deref(), flat),
         SessionCommand::Register {
@@ -194,6 +195,7 @@ fn new_session(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     on_create: Option<&str>,
+    interactive: bool,
 ) -> Result<()> {
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
@@ -206,8 +208,8 @@ fn new_session(
     }
 
     let session_name = match name {
-        Some(s) => s.to_string(),
-        None => name_builder::prompt_session_name_default(&config)?,
+        Some(s) if !interactive => s.to_string(),
+        _ => name_builder::prompt_session_name_default(&config)?,
     };
 
     let parent_id = if let Some(parent_name) = parent {
@@ -216,7 +218,7 @@ fn new_session(
             .ok_or_else(|| EzError::SessionNotFound(parent_name.into()))?;
         Some(parent_session.id.clone())
     } else {
-        None
+        tree.find_default().map(|s| s.id.clone())
     };
 
     let session_id = Uuid::new_v4().to_string();
@@ -321,7 +323,7 @@ fn register_existing_worktree(
             .ok_or_else(|| EzError::SessionNotFound(parent_name.into()))?;
         Some(parent_session.id.clone())
     } else {
-        None
+        tree.find_default().map(|s| s.id.clone())
     };
 
     let mut plugin_state = HashMap::new();
@@ -513,22 +515,23 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
         }
     } else {
         let rendered = tree.render_tree();
-        for (depth, session) in rendered {
-            let indent = "  ".repeat(depth);
-            let default_marker = if session.is_default {
+        for node in &rendered {
+            let prefix = tree::format_session_tree_line(node).dimmed().to_string();
+            let default_marker = if node.session.is_default {
                 " *".yellow().to_string()
             } else {
                 String::new()
             };
-            let path_info = session
+            let path_info = node
+                .session
                 .path
                 .as_ref()
                 .map(|p| format!(" ({})", p.display()).dimmed().to_string())
                 .unwrap_or_default();
             println!(
                 "{}{}{}{}",
-                indent,
-                session.name.bold().yellow(),
+                prefix,
+                node.session.name.bold().yellow(),
                 default_marker,
                 path_info
             );
@@ -891,7 +894,8 @@ fn spawn_detached_reap(repo_id: &str, sessions: &[Session]) -> Result<()> {
         .arg(&tmp_path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::null())
+        .env("TMUX", "");
 
     #[cfg(unix)]
     {
@@ -935,6 +939,22 @@ fn reap_delete(payload_path: &Path) -> Result<()> {
     let config = crate::config::load()?;
     let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
 
+    log::debug!(
+        "reap_delete: processing {} sessions for repo {}",
+        payload.sessions.len(),
+        payload.repo_id
+    );
+
+    let reap_delay_ms: u64 = config
+        .plugin_settings
+        .get("tmux")
+        .and_then(|m| m.get("reap_delay_ms"))
+        .and_then(|v| v.as_integer())
+        .map(|v| v as u64)
+        .unwrap_or(200);
+
+    std::thread::sleep(std::time::Duration::from_millis(reap_delay_ms));
+
     // Build a throwaway SessionTree from the snapshot so plugin::run_hooks
     // can resolve parent information.  This tree is never saved to disk.
     let mut tree = SessionTree {
@@ -942,9 +962,13 @@ fn reap_delete(payload_path: &Path) -> Result<()> {
     };
 
     for session in &payload.sessions {
+        log::debug!(
+            "reap_delete: running OnSessionDelete for session '{}'",
+            session.name
+        );
         // Swallow hook errors — the record is already removed; this is
         // best-effort external cleanup.
-        let _ = plugin::run_hooks(
+        let result = plugin::run_hooks(
             plugin::model::HookType::OnSessionDelete,
             &repo_entry,
             &repo_meta,
@@ -952,6 +976,7 @@ fn reap_delete(payload_path: &Path) -> Result<()> {
             &config,
             &mut tree,
         );
+        log::debug!("reap_delete: hook result for '{}': {:?}", session.name, result);
     }
 
     Ok(())

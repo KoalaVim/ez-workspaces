@@ -51,27 +51,33 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
             );
         } else {
             let rendered = tree.render_tree();
-            for (depth, s) in rendered {
-                let indent = "  ".repeat(depth + 1);
-                let marker = if s.is_default {
+            for node in &rendered {
+                let prefix =
+                    session::tree::format_session_tree_line(node).dimmed().to_string();
+                let indent = "  "; // base indent for preview section
+                let marker = if node.session.is_default {
                     " ★".yellow().to_string()
                 } else {
                     String::new()
                 };
-                let path_info = s
+                let path_info = node
+                    .session
                     .path
                     .as_ref()
                     .map(|p| format!(" → {}", p.display()).dimmed().to_string())
                     .unwrap_or_default();
-                let labels = if s.labels.is_empty() {
+                let labels = if node.session.labels.is_empty() {
                     String::new()
                 } else {
-                    format!(" [{}]", s.labels.join(",")).magenta().to_string()
+                    format!(" [{}]", node.session.labels.join(","))
+                        .magenta()
+                        .to_string()
                 };
                 println!(
-                    "{}{}{}{}{}",
+                    "{}{}{}{}{}{}",
                     indent,
-                    s.name.bold().yellow(),
+                    prefix,
+                    node.session.name.bold().yellow(),
                     marker,
                     labels,
                     path_info
@@ -258,6 +264,10 @@ fn preview_keybind_help() {
     println!(
         "  {}  Edit labels",
         fmt_key(&keybinds.edit_labels).bold().magenta()
+    );
+    println!(
+        "  {}  Cd into session worktree",
+        fmt_key(&keybinds.cd_session).bold().yellow()
     );
     for pb in plugin::collect_plugin_binds("session", &config).unwrap_or_default() {
         let desc = pb.description.as_deref().unwrap_or(&pb.label);

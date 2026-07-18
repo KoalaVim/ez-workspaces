@@ -87,17 +87,23 @@ ez plugin enable tmux
 
 ```bash
 # Create a session (with git-worktree plugin, this creates a worktree)
+# New sessions are created as children of the default (main) session unless --parent is specified
 ez session new feature-login
 
-# Create a child session
+# Create a child session under a specific parent
 ez session new api-tests --parent feature-login
 
-# List sessions
+# Force the interactive name builder even when passing a name
+ez session new my-name --interactive
+
+# List sessions (tree view with box-drawing connectors)
 ez session list
-# feature-login
-#   api-tests
+# main *
+# ├── feature-login
+# │   └── api-tests
 
 # Register an existing worktree as a session (defaults to current directory and branch name)
+# Also defaults under main unless --parent is specified
 ez session register /path/to/worktree
 
 # Enter a session (cd's to worktree by default; see on_enter below)
@@ -115,7 +121,28 @@ If `ez session new <name>` finds that the branch is already checked out in anoth
 #### Interactive session naming
 
 When you create a new session *without* passing a name (`ez session new` with no
-arg, or `Alt-n` in the browser), ez walks you through a short staged prompt and
+arg, or `Alt-n` in the browser), ez first presents a **mode picker** (unless
+only one mode is configured):
+
+| Mode | Description |
+|------|-------------|
+| **Full name** | Type the entire session name directly |
+| **Build from parts** | Step through configured stages (prefix → ticket → name) |
+| **From GitHub PR** | Paste a GitHub PR URL — extracts `pr<number>` and optionally resolves the branch name via the `OnNameResolve` plugin hook |
+| **From Jira URL** | Paste a Jira URL — extracts `PROJ-123` then prompts for an optional suffix |
+
+Use `--interactive` / `-i` to force the mode picker even when a name is provided
+on the CLI: `ez session new my-name --interactive`.
+
+Configure which modes are available:
+
+```toml
+name_builder_modes = ["full_name", "build_from_parts", "github_pr", "jira_url"]
+```
+
+##### Build from parts mode
+
+In "Build from parts" mode, ez walks you through a short staged prompt and
 joins the parts with `-`:
 
 Stages come in two kinds:
@@ -223,6 +250,7 @@ Inside the session picker:
 - **Alt-r** — Rename session
 - **Alt-d** — Delete session
 - **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
+- **Alt-c** — Cd into session worktree (bypasses on_enter action like tmux)
 
 You can also launch a specific view directly: `ez --select-by repo`, `ez --select-by label`, etc. To change the default view, set `default_select_by = "repo"` in your config (or run `ez config set default_select_by repo`).
 
@@ -292,17 +320,26 @@ Labels on the currently selected item can also be edited interactively in the br
 
 ## Session Hierarchy
 
-Sessions form a tree. Use `--parent` to nest sessions:
+Sessions form a tree. New sessions are created as children of the default (main) session unless `--parent` is specified. Use `--parent` to nest under a different session:
 
 ```
 main *                    # auto-created default
-feature-auth              # root-level session
-  backend-api             # child of feature-auth  
-  frontend-ui             # child of feature-auth
-bugfix-crash              # another root-level session
+├── feature-auth          # child of main (default)
+│   ├── backend-api       # child of feature-auth
+│   └── frontend-ui       # child of feature-auth
+└── bugfix-crash          # child of main (default)
 ```
 
-The default "main" session is auto-created when you first access a repo. It points to the repo's working directory.
+The default "main" session is auto-created when you first access a repo. It points to the repo's working directory. Box-drawing connectors (tree glyphs) show parent-child relationships in `ez session list` and in the session picker.
+
+### Return-to-ez after tmux detach
+
+When the tmux plugin's `return_on_detach` setting is enabled (default: `true`), detaching from a tmux session (`Ctrl-b d` or `tmux detach`) automatically re-enters the ez browser. This creates a seamless workflow loop: browse → attach → work → detach → browse again.
+
+```toml
+[plugin_settings.tmux]
+return_on_detach = true   # re-enter ez after tmux detach (default)
+```
 
 ## Non-git Sessions
 

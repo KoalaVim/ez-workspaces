@@ -10,8 +10,9 @@
 //! joined name must be non-empty.
 
 use crate::browser::selector::{InteractiveSelector, SelectItem, StageOutcome};
-use crate::config::model::{EzConfig, StageKind};
+use crate::config::model::{EzConfig, NameBuilderMode, StageKind};
 use crate::error::{EzError, Result};
+use colored::Colorize;
 
 const NONE_VALUE: &str = "__none__";
 const NONE_DISPLAY: &str = "(none)";
@@ -24,25 +25,94 @@ pub enum NamePromptResult {
     Cancelled,
 }
 
-/// Run the configured stages plus the final descriptive-name prompt and
-/// return the joined session name. The default ("main") session bypasses
-/// this entirely — callers handle that separately.
+/// Present the configured name builder modes and let the user pick one.
+/// Returns `None` if the user cancelled.
+fn select_mode(
+    selector: &dyn InteractiveSelector,
+    modes: &[NameBuilderMode],
+) -> Result<Option<NameBuilderMode>> {
+    let items: Vec<SelectItem> = modes
+        .iter()
+        .map(|m| {
+            let (display, value) = match m {
+                NameBuilderMode::FullName => {
+                    ("Full name (type the whole name)", "full_name")
+                }
+                NameBuilderMode::BuildFromParts => {
+                    ("Build from parts (prefix → ticket → name)", "build_from_parts")
+                }
+                NameBuilderMode::GitHubPr => ("From GitHub PR (paste PR URL)", "github_pr"),
+                NameBuilderMode::JiraUrl => ("From Jira URL (paste Jira link)", "jira_url"),
+            };
+            SelectItem {
+                display: display.to_string(),
+                value: value.to_string(),
+            }
+        })
+        .collect();
+
+    let picked = selector.select_one(&items, "naming mode", None)?;
+    let Some(idx) = picked else {
+        return Ok(None);
+    };
+
+    Ok(Some(modes[idx].clone()))
+}
+
+/// Run the configured mode selection, then dispatch to the appropriate name
+/// builder. The default ("main") session bypasses this entirely — callers
+/// handle that separately.
 pub fn prompt_session_name(
     selector: &dyn InteractiveSelector,
     config: &EzConfig,
 ) -> Result<NamePromptResult> {
+    let modes = &config.name_builder_modes;
+
+    let mode = if modes.len() == 1 {
+        modes[0].clone()
+    } else if modes.is_empty() {
+        return Ok(NamePromptResult::Cancelled);
+    } else {
+        match select_mode(selector, modes)? {
+            Some(m) => m,
+            None => return Ok(NamePromptResult::Cancelled),
+        }
+    };
+
+    match mode {
+        NameBuilderMode::FullName => prompt_full_name(selector),
+        NameBuilderMode::BuildFromParts => prompt_staged(selector, config),
+        NameBuilderMode::GitHubPr => prompt_github_pr(selector, config),
+        NameBuilderMode::JiraUrl => prompt_jira_url(selector),
+    }
+}
+
+/// `FullName` mode: single free-text prompt, reject empty input.
+fn prompt_full_name(selector: &dyn InteractiveSelector) -> Result<NamePromptResult> {
+    match selector.input_with_back("session name", None, false, None)? {
+        StageOutcome::Picked(name) if !name.trim().is_empty() => {
+            Ok(NamePromptResult::Done(name.trim().to_string()))
+        }
+        StageOutcome::Picked(_) => {
+            eprintln!("Session name cannot be empty.");
+            prompt_full_name(selector)
+        }
+        StageOutcome::Cancel | StageOutcome::Back => Ok(NamePromptResult::Cancelled),
+    }
+}
+
+/// `BuildFromParts` mode: the existing multi-stage builder.
+fn prompt_staged(
+    selector: &dyn InteractiveSelector,
+    config: &EzConfig,
+) -> Result<NamePromptResult> {
     let stages = &config.session_name_stages;
-    // Parts collected per stage; entries may be `None` when the user picked
-    // "(none)" or skipped. Length matches `stages.len() + 1` (the +1 is the
-    // final descriptive part).
     let mut parts: Vec<Option<String>> = vec![None; stages.len() + 1];
     let mut idx: usize = 0;
 
     loop {
         let is_final = idx == stages.len();
         let (prompt, kind, choices): (String, StageKind, &[String]) = if is_final {
-            // Implicit final descriptive-name stage: always free text, no
-            // (none) (the joined name must be non-empty), but back works.
             ("name".into(), StageKind::Text, &[])
         } else {
             let s = &stages[idx];
@@ -50,9 +120,6 @@ pub fn prompt_session_name(
         };
         let allow_back = idx > 0;
 
-        // Show the name accumulated from prior stages as a header hint so
-        // the user can track what they're building. We show a trailing "-"
-        // to make it clear the next part will be appended.
         let so_far = join_parts(&parts[..idx]);
         let context = if so_far.is_empty() {
             None
@@ -62,7 +129,7 @@ pub fn prompt_session_name(
 
         let outcome = match kind {
             StageKind::Choice => {
-                let items = build_items(choices, /*include_none=*/ !is_final);
+                let items = build_items(choices, !is_final);
                 selector.select_with_back(&prompt, &items, allow_back, context.as_deref())?
             }
             StageKind::Text => {
@@ -105,10 +172,98 @@ pub fn prompt_session_name(
     }
 }
 
+/// `GitHubPr` mode: paste a GitHub PR URL, extract PR number, optionally
+/// resolve branch name via OnNameResolve plugin hook.
+fn prompt_github_pr(
+    selector: &dyn InteractiveSelector,
+    config: &EzConfig,
+) -> Result<NamePromptResult> {
+    let re = regex::Regex::new(r"github\.com/[^/]+/[^/]+/pull/(\d+)").unwrap();
+
+    loop {
+        match selector.input_with_back("GitHub PR URL", None, false, None)? {
+            StageOutcome::Picked(url) => {
+                let url = url.trim();
+                if let Some(caps) = re.captures(url) {
+                    let pr_number = &caps[1];
+                    let candidate = format!("pr{pr_number}");
+
+                    eprint!("{}", "Resolving PR branch...".dimmed());
+                    let resolved = crate::plugin::run_name_resolve_hook(url, &candidate, config);
+                    eprintln!("\r{}", " ".repeat(30));
+
+                    let name = match resolved {
+                        Some(resolved_name) => resolved_name,
+                        None => candidate,
+                    };
+
+                    return Ok(NamePromptResult::Done(name));
+                } else {
+                    eprintln!(
+                        "{}",
+                        "Could not extract PR number. Expected: https://github.com/<owner>/<repo>/pull/<number>"
+                            .yellow()
+                    );
+                    continue;
+                }
+            }
+            StageOutcome::Cancel | StageOutcome::Back => return Ok(NamePromptResult::Cancelled),
+        }
+    }
+}
+
+/// `JiraUrl` mode: paste a Jira URL, extract the ticket key, then
+/// optionally append a descriptive suffix.
+fn prompt_jira_url(selector: &dyn InteractiveSelector) -> Result<NamePromptResult> {
+    loop {
+        match selector.input_with_back("Jira URL", None, false, None)? {
+            StageOutcome::Picked(url) => {
+                let url = url.trim();
+                if url.is_empty() {
+                    return Ok(NamePromptResult::Cancelled);
+                }
+                let re = regex::Regex::new(r"/browse/([A-Z][A-Z0-9]+-\d+)").unwrap();
+                if let Some(caps) = re.captures(url) {
+                    let ticket = caps[1].to_string();
+                    let context = Some(format!("{ticket}-"));
+                    match prompt_final_suffix(selector, context.as_deref())? {
+                        Some(suffix) if !suffix.is_empty() => {
+                            return Ok(NamePromptResult::Done(format!("{ticket}-{suffix}")));
+                        }
+                        _ => {
+                            return Ok(NamePromptResult::Done(ticket));
+                        }
+                    }
+                } else {
+                    eprintln!(
+                        "Could not extract Jira ticket from URL. Expected format: .../browse/PROJ-123"
+                    );
+                    continue;
+                }
+            }
+            StageOutcome::Cancel | StageOutcome::Back => return Ok(NamePromptResult::Cancelled),
+        }
+    }
+}
+
+/// Prompt for a final descriptive suffix. Used by the Jira mode (and
+/// potentially others) after the structured part of the name is known.
+/// `context` is shown as a header hint (e.g. `"PROJ-123-"`).
+///
+/// Returns `Some(trimmed_text)` on success, `None` on cancel/back/empty.
+pub fn prompt_final_suffix(
+    selector: &dyn InteractiveSelector,
+    context: Option<&str>,
+) -> Result<Option<String>> {
+    match selector.input_with_back("name", None, false, context)? {
+        StageOutcome::Picked(text) if !text.trim().is_empty() => Ok(Some(text.trim().to_string())),
+        StageOutcome::Picked(_) => Ok(None),
+        StageOutcome::Cancel | StageOutcome::Back => Ok(None),
+    }
+}
+
 enum PickResolution {
-    /// Use this string for the part.
     Use(String),
-    /// Skip this part (treated as `(none)`).
     None,
 }
 

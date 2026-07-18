@@ -15,7 +15,10 @@ use crate::paths;
 use crate::repo::model::{RepoEntry, RepoMeta};
 use crate::session::model::{Session, SessionTree};
 use model::{HookType, PluginManifest};
-use protocol::{HookRequest, HookResponse, PluginConfig, RepoInfo, SessionInfo, ViewContext};
+use protocol::{
+    HookRequest, HookResponse, NameResolveContext, PluginConfig, RepoInfo, SessionInfo,
+    ViewContext,
+};
 
 /// Dispatch plugin subcommands.
 pub fn dispatch(command: PluginCommand) -> Result<()> {
@@ -294,6 +297,7 @@ fn build_request(
         config: plugin_config,
         bind_context: None,
         view_context: None,
+        name_resolve_context: None,
     }
 }
 
@@ -424,6 +428,7 @@ pub fn run_view_hook(
             selected_value: None,
             selected_display: None,
         }),
+        name_resolve_context: None,
     };
 
     runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout)
@@ -468,9 +473,107 @@ pub fn run_view_select_hook(
             selected_value: Some(selected_value.to_string()),
             selected_display: Some(selected_display.to_string()),
         }),
+        name_resolve_context: None,
     };
 
     runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout)
+}
+
+/// Execute OnNameResolve hook across enabled plugins.
+/// Returns the first `resolved_name` from a plugin that provides one.
+/// On timeout or failure, logs the error and returns `None`.
+#[allow(dead_code)] // Will be called by prompt_github_pr (task 8.6)
+pub fn run_name_resolve_hook(
+    raw_url: &str,
+    candidate_name: &str,
+    config: &EzConfig,
+) -> Option<String> {
+    let plugins_dir = match resolve_plugins_dir(config) {
+        Ok(d) => d,
+        Err(e) => {
+            log::debug!("run_name_resolve_hook: failed to resolve plugins dir: {e}");
+            return None;
+        }
+    };
+    if let Err(e) = bundled::ensure_bundled_plugins(&plugins_dir) {
+        log::debug!("run_name_resolve_hook: failed to ensure bundled plugins: {e}");
+        return None;
+    }
+
+    for plugin_name in &config.plugins.enabled {
+        let manifest_path = plugins_dir.join(plugin_name).join("manifest.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let manifest_contents = match fs::read_to_string(&manifest_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let manifest: PluginManifest = match toml::from_str(&manifest_contents) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !manifest.hooks.contains(&HookType::OnNameResolve) {
+            continue;
+        }
+
+        let plugin_dir = plugins_dir.join(plugin_name);
+        let user_config = config
+            .plugin_settings
+            .get(plugin_name.as_str())
+            .cloned()
+            .unwrap_or_default();
+
+        let request = HookRequest {
+            hook: HookType::OnNameResolve,
+            repo: RepoInfo {
+                id: String::new(),
+                path: std::path::PathBuf::new(),
+                remote_url: None,
+                default_branch: None,
+            },
+            session: None,
+            config: PluginConfig {
+                plugin_state: HashMap::new(),
+                user_config,
+            },
+            bind_context: None,
+            view_context: None,
+            name_resolve_context: Some(NameResolveContext {
+                raw_url: raw_url.to_string(),
+                candidate_name: candidate_name.to_string(),
+            }),
+        };
+
+        log::debug!(
+            "run_name_resolve_hook: invoking plugin [{}]",
+            plugin_name
+        );
+
+        match runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout) {
+            Ok(response) => {
+                if let Some(name) = response.resolved_name {
+                    if !name.trim().is_empty() {
+                        log::debug!(
+                            "run_name_resolve_hook: plugin [{}] resolved name: {}",
+                            plugin_name,
+                            name
+                        );
+                        return Some(name.trim().to_string());
+                    }
+                }
+            }
+            Err(e) => {
+                log::debug!(
+                    "run_name_resolve_hook: plugin [{}] failed: {}",
+                    plugin_name,
+                    e
+                );
+            }
+        }
+    }
+
+    None
 }
 
 /// Info about a plugin action bind collected from manifests.

@@ -83,6 +83,10 @@ resolve_default_start_point() {
         dbg "fetch: start"
         git -C "$REPO_PATH" fetch origin main >&2 2>/dev/null || true
         git -C "$REPO_PATH" fetch origin master >&2 2>/dev/null || true
+        if [ -n "$SESSION_NAME" ]; then
+            dbg "fetch: also fetching origin/${SESSION_NAME}"
+            git -C "$REPO_PATH" fetch origin "$SESSION_NAME" >&2 2>/dev/null || true
+        fi
         date +%s > "$FETCH_STAMP" 2>/dev/null || true
         dbg "fetch: done ($(( $(t_ms) - t0 ))ms)"
     fi
@@ -155,10 +159,18 @@ case "$HOOK" in
             fi
         else
             START_POINT=$(resolve_start_point)
-            dbg "worktree add: creating new branch from $START_POINT"
-            if ! git_err=$(git -C "$REPO_PATH" worktree add --no-track -b "$BRANCH_NAME" "$WORKTREE_PATH" "$START_POINT" 2>&1 >/dev/null); then
-                json_error "Failed to create worktree at '$WORKTREE_PATH' from '$START_POINT': $git_err"
-                exit 0
+            if git -C "$REPO_PATH" rev-parse --verify "origin/${BRANCH_NAME}" >/dev/null 2>&1; then
+                dbg "worktree add: tracking remote branch origin/${BRANCH_NAME}"
+                if ! git_err=$(git -C "$REPO_PATH" worktree add --track -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/${BRANCH_NAME}" 2>&1 >/dev/null); then
+                    json_error "Failed to create worktree at '$WORKTREE_PATH' tracking 'origin/${BRANCH_NAME}': $git_err"
+                    exit 0
+                fi
+            else
+                dbg "worktree add: creating new branch from $START_POINT"
+                if ! git_err=$(git -C "$REPO_PATH" worktree add --no-track -b "$BRANCH_NAME" "$WORKTREE_PATH" "$START_POINT" 2>&1 >/dev/null); then
+                    json_error "Failed to create worktree at '$WORKTREE_PATH' from '$START_POINT': $git_err"
+                    exit 0
+                fi
             fi
         fi
         dbg "worktree add: done ($(( $(t_ms) - t1 ))ms)"

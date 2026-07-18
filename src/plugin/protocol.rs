@@ -19,6 +19,9 @@ pub struct HookRequest {
     /// Present for OnView / OnViewSelect hooks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_context: Option<ViewContext>,
+    /// Present for OnNameResolve hooks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_resolve_context: Option<NameResolveContext>,
 }
 
 /// Context passed to a plugin when one of its registered binds is pressed.
@@ -47,6 +50,15 @@ pub struct ViewContext {
     /// For OnViewSelect: the selected item's display
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selected_display: Option<String>,
+}
+
+/// Context passed to a plugin for name resolution hooks (e.g. GitHub PR → branch name).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NameResolveContext {
+    /// The raw URL provided by the user (e.g. a GitHub PR URL).
+    pub raw_url: String,
+    /// The candidate name derived from the URL (e.g. "pr123").
+    pub candidate_name: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -110,6 +122,9 @@ pub struct HookResponse {
     /// Preview command for plugin view's fzf (returned from OnView hook).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_preview_cmd: Option<String>,
+    /// Resolved name from OnNameResolve hook (e.g. branch name from PR).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_name: Option<String>,
 }
 
 /// An item provided by a plugin for its view.
@@ -158,6 +173,7 @@ mod tests {
             view_items: None,
             view_prompt: None,
             view_preview_cmd: None,
+            resolved_name: None,
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: HookResponse = serde_json::from_str(&json).unwrap();

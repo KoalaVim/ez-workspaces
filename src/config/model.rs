@@ -49,6 +49,12 @@ pub struct EzConfig {
     #[serde(default)]
     pub plugin_settings: HashMap<String, HashMap<String, toml::Value>>,
 
+    /// Which name builder modes to offer when creating a new session
+    /// interactively. When more than one mode is configured, the user picks
+    /// which one to use; when only one is configured, it's used directly.
+    #[serde(default = "default_name_builder_modes")]
+    pub name_builder_modes: Vec<NameBuilderMode>,
+
     /// Stages used to build new session names interactively. Each stage
     /// becomes a separate prompt (with choices, "(none)", custom text, and a
     /// back keybind). After all configured stages, an additional final
@@ -87,6 +93,15 @@ pub struct SessionNameStage {
     /// May be empty — the user can still pick `(custom)` or `(none)`.
     #[serde(default)]
     pub choices: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NameBuilderMode {
+    FullName,
+    BuildFromParts,
+    GitHubPr,
+    JiraUrl,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -158,6 +173,10 @@ pub struct KeybindsConfig {
     /// Edit labels on the selected item (default: "alt-l")
     #[serde(default = "default_bind_edit_labels")]
     pub edit_labels: String,
+
+    /// Cd into session worktree (default: "alt-c")
+    #[serde(default = "default_bind_cd_session")]
+    pub cd_session: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -184,6 +203,7 @@ impl Default for EzConfig {
             plugin_timeout: default_plugin_timeout(),
             default_select_by: default_select_by(),
             plugin_settings: HashMap::new(),
+            name_builder_modes: default_name_builder_modes(),
             session_name_stages: default_session_name_stages(),
             on_enter: default_on_enter(),
             on_create: default_on_create(),
@@ -221,6 +241,7 @@ impl Default for KeybindsConfig {
             view_owner: default_bind_view_owner(),
             view_label: default_bind_view_label(),
             edit_labels: default_bind_edit_labels(),
+            cd_session: default_bind_cd_session(),
         }
     }
 }
@@ -269,6 +290,10 @@ fn default_bind_edit_labels() -> String {
     "alt-l".into()
 }
 
+fn default_bind_cd_session() -> String {
+    "ctrl-d".into()
+}
+
 fn default_plugin_timeout() -> u64 {
     30
 }
@@ -302,5 +327,14 @@ fn default_session_name_stages() -> Vec<SessionNameStage> {
             kind: StageKind::Text,
             choices: Vec::new(),
         },
+    ]
+}
+
+fn default_name_builder_modes() -> Vec<NameBuilderMode> {
+    vec![
+        NameBuilderMode::FullName,
+        NameBuilderMode::BuildFromParts,
+        NameBuilderMode::GitHubPr,
+        NameBuilderMode::JiraUrl,
     ]
 }

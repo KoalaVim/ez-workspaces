@@ -96,6 +96,7 @@ pub enum HookType {
     OnBind,
     OnView,
     OnViewSelect,
+    OnNameResolve,
 }
 
 impl std::fmt::Display for HookType {

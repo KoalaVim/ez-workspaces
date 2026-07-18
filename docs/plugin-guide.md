@@ -59,6 +59,7 @@ description = "Run automatically on session enter"
 | `on_plugin_deinit` | Plugin disabled | No |
 | `on_view` | User switches to plugin view | No |
 | `on_view_select` | User selects item in plugin view | No |
+| `on_name_resolve` | Name builder requests name resolution from a URL | No |
 
 ## JSON Protocol
 
@@ -96,6 +97,7 @@ description = "Run automatically on session enter"
 - `config.user_config` carries user-facing settings from `[plugin_settings.<name>]` in config.toml
 - `view_context` is present for `on_view` and `on_view_select` hooks (contains `view_name`, `selected_value`, `selected_display`)
 - `bind_context` is present for `on_bind` hooks (contains `name`, `key`, `view`, `selected_value`, `selected_display`)
+- `name_resolve_context` is present for `on_name_resolve` hooks (contains `raw_url`, `candidate_name`)
 
 ### Response (stdout)
 
@@ -129,6 +131,7 @@ description = "Run automatically on session enter"
 - `post_shell_commands` are executed in the user's shell *after* ez exits — use for commands that need the terminal (e.g., `tmux switch-client`)
 - `cd_target` overrides the directory the shell wrapper will `cd` into
 - `view_items`, `view_prompt`, `view_preview_cmd` are returned by `on_view` hooks to provide items for plugin views
+- `resolved_name` is returned by `on_name_resolve` hooks to provide the resolved name (e.g. a branch name derived from a PR URL)
 - `error` is a string message if `success` is false
 - Plugins have a 30-second timeout by default (configurable via `plugin_timeout` in config)
 
@@ -150,6 +153,60 @@ Plugins can register custom views that appear as keybinds alongside the built-in
 ### Conflict resolution
 
 If a plugin view key conflicts with a core keybind (e.g., `ctrl-t` is already used by Tree view), the core keybind wins and the plugin view is skipped. A warning is logged in debug mode. Choose a non-conflicting key or let users remap core keybinds in `[keybinds]`.
+
+## Name Resolution (`OnNameResolve`)
+
+The `on_name_resolve` hook fires during the interactive name builder when a mode needs to resolve a URL into a session name. Currently used by the **GitHub PR** mode: after the user pastes a PR URL, ez extracts `pr<number>` as a candidate name, then calls enabled plugins with `on_name_resolve` to optionally resolve a better name (e.g. the PR's branch name).
+
+### Flow
+
+1. User pastes a URL in the name builder (e.g. `https://github.com/user/repo/pull/42`)
+2. ez parses the URL and derives a `candidate_name` (e.g. `pr42`)
+3. ez calls all enabled plugins that handle `on_name_resolve`
+4. The plugin receives `name_resolve_context` with `raw_url` and `candidate_name`
+5. If the plugin returns `resolved_name`, ez uses it as the session name
+6. If the plugin fails or times out, ez falls back to `candidate_name`
+
+### Request context
+
+```json
+{
+  "hook": "on_name_resolve",
+  "name_resolve_context": {
+    "raw_url": "https://github.com/user/repo/pull/42",
+    "candidate_name": "pr42"
+  }
+}
+```
+
+### Response
+
+```json
+{
+  "success": true,
+  "resolved_name": "fix-typo-in-readme"
+}
+```
+
+### Example: resolve GitHub PR branch name (bash)
+
+```bash
+case "$HOOK" in
+    on_name_resolve)
+        RAW_URL=$(echo "$REQUEST" | jq -r '.name_resolve_context.raw_url // empty')
+        if echo "$RAW_URL" | grep -q 'github\.com'; then
+            BRANCH=$(gh pr view "$RAW_URL" --json headRefName -q '.headRefName' 2>/dev/null)
+            if [ -n "$BRANCH" ]; then
+                echo "{\"success\": true, \"resolved_name\": \"$BRANCH\"}"
+            else
+                echo '{"success": true}'
+            fi
+        else
+            echo '{"success": true}'
+        fi
+        ;;
+esac
+```
 
 ## Plugin Configuration
 

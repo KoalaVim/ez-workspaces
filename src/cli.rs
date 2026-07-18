@@ -140,6 +140,9 @@ pub enum SessionCommand {
         /// Repository name or path (default: current repo)
         #[arg(long, short)]
         repo: Option<String>,
+        /// Force interactive name builder even when a name is provided
+        #[arg(long, short)]
+        interactive: bool,
     },
 
     /// List sessions for a repository

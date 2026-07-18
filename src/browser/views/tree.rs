@@ -11,18 +11,28 @@ use crate::repo;
 use crate::session;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{get_branch, write_cd_target};
+use super::super::{accept_session, browse_repo, get_branch};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
+
+/// Distinguishes tree nodes so selection can dispatch to the right action.
+enum NodeKind {
+    Root,
+    Repo(PathBuf),
+    Session {
+        repo_entry: repo::model::RepoEntry,
+        session: session::model::Session,
+        target_dir: PathBuf,
+    },
+}
 
 pub(super) fn run(
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
-    _post_cmd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
-    // nodes: (display, Option<target-dir>, preview-path)
-    let mut nodes: Vec<(String, Option<PathBuf>, PathBuf)> = Vec::new();
+    let mut nodes: Vec<(String, NodeKind, PathBuf)> = Vec::new();
     let num_roots = config.workspace_roots.len();
 
     for (root_i, root) in config.workspace_roots.iter().enumerate() {
@@ -37,7 +47,7 @@ pub(super) fn run(
 
         nodes.push((
             format!("{}{}", root_connector.dimmed(), root.bold().blue()),
-            None,
+            NodeKind::Root,
             root_path.clone(),
         ));
 
@@ -86,7 +96,7 @@ pub(super) fn run(
                     repo_name.bold().green(),
                     format!("[{branch}]").cyan(),
                 ),
-                Some(repo_path.clone()),
+                NodeKind::Repo(repo_path.clone()),
                 repo_path.clone(),
             ));
 
@@ -95,21 +105,23 @@ pub(super) fn run(
                     if !tree.sessions.is_empty() {
                         let rendered = tree.render_tree();
                         let num_sessions = rendered.len();
-                        for (sess_i, (depth, s)) in rendered.iter().enumerate() {
+                        for (sess_i, node) in rendered.iter().enumerate() {
                             let is_last_session = sess_i == num_sessions - 1;
                             let sess_connector = if is_last_session {
                                 "└── "
                             } else {
                                 "├── "
                             };
-                            let session_indent = "    ".repeat(*depth);
-                            let marker = if s.is_default {
+                            let session_prefix =
+                                session::tree::format_session_tree_line(node);
+                            let marker = if node.session.is_default {
                                 " ★".yellow().to_string()
                             } else {
                                 String::new()
                             };
 
-                            let target = s
+                            let target_dir = node
+                                .session
                                 .path
                                 .as_ref()
                                 .cloned()
@@ -121,11 +133,15 @@ pub(super) fn run(
                                     root_cont.dimmed(),
                                     repo_cont.dimmed(),
                                     sess_connector.dimmed(),
-                                    session_indent,
-                                    s.name.bold().yellow(),
+                                    session_prefix.dimmed(),
+                                    node.session.name.bold().yellow(),
                                     marker,
                                 ),
-                                Some(target),
+                                NodeKind::Session {
+                                    repo_entry: repo_entry.clone(),
+                                    session: node.session.clone(),
+                                    target_dir,
+                                },
                                 repo_path.clone(),
                             ));
                         }
@@ -144,14 +160,20 @@ pub(super) fn run(
 
     let items: Vec<SelectItem> = nodes
         .iter()
-        .map(|(display, _target, preview_path)| SelectItem {
+        .enumerate()
+        .map(|(i, (display, _, preview_path))| SelectItem {
             display: display.clone(),
-            value: preview_path.to_string_lossy().to_string(),
+            value: format!("{}:{}", i, preview_path.to_string_lossy()),
         })
         .collect();
 
     let ez_bin = std::env::current_exe().ok();
-    let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
+    let preview_cmd = ez_bin.map(|bin| {
+        format!(
+            "{} preview \"$(printf '%s' {{}} | cut -d: -f2-)\"",
+            bin.display()
+        )
+    });
     let header = view_header("tree", &config.keybinds, &plugin_views);
 
     let action = selector.select_with_actions(
@@ -171,11 +193,30 @@ pub(super) fn run(
             }
         }
         ActionResult::Select(idx) => match &nodes[idx].1 {
-            Some(target) => {
-                write_cd_target(cd_file, target)?;
+            NodeKind::Root => Ok(Outcome::Switch(ViewMode::Tree)),
+            NodeKind::Repo(path) => {
+                if browse_repo(path, selector, cd_file, post_cmd_file, config)? {
+                    Ok(Outcome::Done)
+                } else {
+                    Ok(Outcome::Switch(ViewMode::Tree))
+                }
+            }
+            NodeKind::Session {
+                repo_entry,
+                session,
+                target_dir,
+            } => {
+                accept_session(
+                    &config.on_enter,
+                    repo_entry,
+                    session,
+                    target_dir,
+                    cd_file,
+                    post_cmd_file,
+                    config,
+                )?;
                 Ok(Outcome::Done)
             }
-            None => Ok(Outcome::Switch(ViewMode::Tree)),
         },
     }
 }
