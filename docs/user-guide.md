@@ -67,12 +67,14 @@ ez config set default_shell zsh
 # Register current directory
 ez add
 
-# Register a specific path
+# Register a specific path (git repo or plain directory)
 ez add ~/workspace/personal/my-project
 
 # Clone and register
 ez clone git@github.com:user/repo.git
 ```
+
+`ez add` works on non-git directories too — sessions become directory bookmarks without worktree management.
 
 ### 3. Enable plugins
 
@@ -112,7 +114,7 @@ ez session enter feature-login
 # Delete a named session (cascades with --force)
 ez session delete feature-login --force
 
-# Delete the current session (detects tmux @ez_session_path or current worktree, then prompts)
+# Delete the current session (detects tmux @ez_session_name or current worktree, then prompts)
 ez session delete
 ```
 
@@ -212,6 +214,26 @@ Recreate? [y/N]:
 In a non-interactive context (e.g. piped stdin), the prompt receives EOF and defaults
 to **reuse**, so existing scripts keep working without modification.
 
+### Bare sessions
+
+Create a session without a worktree:
+
+```bash
+ez session new placeholder --bare
+```
+
+Or press **Alt-Shift-N** in the browser. Bare sessions are useful as bookmarks or placeholders — they appear in the tree with a `[bare]` indicator. The git-worktree plugin skips worktree creation for bare sessions.
+
+### Session from dirty changes
+
+Move uncommitted changes from the current session to a new one:
+
+```bash
+ez session from-dirty new-feature
+```
+
+Or press **Alt-s** in the browser. This stashes your uncommitted changes, creates a new session on the same commit, and applies the stash in the new session's worktree.
+
 ### 5. Browse interactively
 
 Run bare `ez` to get an fzf-powered browser:
@@ -247,12 +269,21 @@ This reads `@ez_session_path` from the current tmux session and `cd`s your shell
 Inside the session picker:
 
 - **Alt-n** — New child session
+- **Alt-Shift-N** — New bare session (no worktree)
+- **Alt-s** — Session from dirty (move uncommitted changes to new session)
 - **Alt-r** — Rename session
 - **Alt-d** — Delete session
 - **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
-- **Alt-c** — Cd into session worktree (bypasses on_enter action like tmux)
+- **Ctrl-d** — Cd into session worktree (bypasses on_enter action like tmux)
+- **Ctrl-s** — Toggle sort (alphabetical / LRU)
 
 You can also launch a specific view directly: `ez --select-by repo`, `ez --select-by label`, etc. To change the default view, set `default_select_by = "repo"` in your config (or run `ez config set default_select_by repo`).
+
+Repos and sessions are sorted by last-accessed time (LRU) by default. Press **Ctrl-s** to toggle between LRU and alphabetical sort. To change the default:
+
+```toml
+default_sort = "lru"    # lru | alpha
+```
 
 ### Configuring what Enter does (`on_enter`)
 
@@ -334,12 +365,7 @@ The default "main" session is auto-created when you first access a repo. It poin
 
 ### Return-to-ez after tmux detach
 
-When the tmux plugin's `return_on_detach` setting is enabled (default: `true`), detaching from a tmux session (`Ctrl-b d` or `tmux detach`) automatically re-enters the ez browser. This creates a seamless workflow loop: browse → attach → work → detach → browse again.
-
-```toml
-[plugin_settings.tmux]
-return_on_detach = true   # re-enter ez after tmux detach (default)
-```
+When `on_enter` is set to `tmux`, the shell wrapper automatically re-enters the ez browser after detaching from a tmux session (`Ctrl-b d` or `tmux detach`). This creates a seamless workflow loop: browse → attach → work → detach → browse again. No additional config needed.
 
 ## Non-git Sessions
 

@@ -22,6 +22,7 @@ src/
   config/           Global config (TOML)
   repo/             Repo CRUD + git clone
   session/          Session lifecycle + tree hierarchy
+    from_dirty.rs   Session creation from dirty changes (stash workflow)
   plugin/           Plugin execution engine
   browser/          Interactive fzf browser
 plugins/            Bundled plugin scripts
@@ -31,20 +32,21 @@ docs/               Documentation
 ## Key Modules
 
 ### config/ - Configuration
-- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `name_builder_modes` field on `EzConfig`
+- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty` keybind fields
 - `mod.rs`: load/save/edit config
 
 ### repo/ - Repository Management
-- `model.rs`: `RepoIndex`, `RepoEntry`, `RepoMeta`
+- `model.rs`: `RepoIndex`, `RepoEntry` (with `is_git` field), `RepoMeta` (with `last_accessed` field)
 - `store.rs`: filesystem persistence
 - `mod.rs`: clone, add, remove, list, resolve operations
 
 ### session/ - Session Management
-- `model.rs`: `Session`, `SessionTree` structs
+- `model.rs`: `Session` (with `bare` and `last_accessed` fields), `SessionTree` structs
 - `tree.rs`: tree operations (roots, children, ancestors, descendants, render); `TreeNode` struct and `format_session_tree_line` for box-drawing glyph rendering
 - `name_builder.rs`: interactive name builder with mode selection (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`)
 - `store.rs`: filesystem persistence
-- `current.rs`: current-session detection from tmux `@ez_session_path` and worktree paths
+- `from_dirty.rs`: session creation from dirty changes (stash workflow)
+- `current.rs`: current-session detection from tmux `@ez_session_name` + `@ez_repo_id` (preferred) with fallback to `@ez_session_path` and worktree paths
 - `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session
 
 ### plugin/ - Plugin System
@@ -69,13 +71,14 @@ docs/               Documentation
 ## Build & Test
 
 ```bash
-make build      # debug build
-make test       # run tests
-make release    # optimized build
-make install    # cargo install --locked --path .
-make lint       # clippy
-make fmt        # format code
-make check      # fmt check + clippy + tests
+make build         # debug build
+make test          # run tests
+make release       # optimized build
+make install       # cargo install --locked --path .
+make install-debug # install debug build (unoptimized, faster compile)
+make lint          # clippy
+make fmt           # format code
+make check         # fmt check + clippy + tests
 ```
 
 ## Plugin Development

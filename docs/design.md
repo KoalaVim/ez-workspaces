@@ -21,7 +21,7 @@ graph TB
         Session --> Current[Current session resolver]
         Current --> SessionStore
         Current --> RepoStore
-        Current --> |reads @ez_session_path| TmuxServer[tmux server]
+        Current --> |reads @ez_session_name, @ez_session_path| TmuxServer[tmux server]
     end
 
     subgraph Plugin System

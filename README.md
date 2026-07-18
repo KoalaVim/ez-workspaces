@@ -1,6 +1,6 @@
 # ez-workspaces
 
-A fast, plugin-extensible workspace and session manager for git repos. Browse, create, and switch between worktree-based sessions with a single command.
+A fast, plugin-extensible workspace and session manager for git repos and directories. Browse, create, and switch between worktree-based sessions with a single command.
 
 ## Installation
 
@@ -53,6 +53,8 @@ ez
 
 Sessions are tree-based — a session can have child sessions, enabling branching workflows.
 
+Non-git directories can also be tracked as repos — sessions become directory bookmarks without worktree management.
+
 ### Where worktrees live
 
 The git-worktree plugin creates worktrees as siblings of the repo in a `.ez` directory:
@@ -80,6 +82,8 @@ Each worktree gets its own branch (`ez/<session-name>`) branched from HEAD at cr
 | `ez clone <url> [path]` | Clone + register repo |
 | `ez add [path]` | Register existing repo |
 | `ez session new [name]` | Create session (`--parent` for nesting, `--interactive` / `-i` to force the name builder even with a name). Without `name` you're prompted via name builder modes (full name, build from parts, GitHub PR, Jira URL). If the name matches an existing git branch you'll be asked to **reuse** it or **recreate** from the latest base. |
+| `ez session new [name] --bare` | Create session without a worktree (useful as bookmark/placeholder) |
+| `ez session from-dirty <name>` | Move uncommitted changes to a new session (stash + create + apply) |
 | `ez session list` | List sessions as tree (`--flat` for flat) |
 | `ez session register [path]` | Register an existing git worktree as a session; defaults to current directory and branch name |
 | `ez session enter <name>` | Enter a session |
@@ -126,16 +130,21 @@ Inside the session picker (and the flat Repo view):
 | Keybind (default) | Action |
 |---|---|
 | `Alt-n` | New child session |
+| `Alt-Shift-N` | New bare session (no worktree) |
+| `Alt-s` | Session from dirty (move uncommitted changes to new session) |
 | `Alt-r` | Rename session |
 | `Alt-d` | Delete session |
 | `Alt-l` | Edit labels on the selected item (comma-separated, prefix `-` to remove) |
-| `Alt-c` | Cd into session worktree |
+| `Ctrl-d` | Cd into session worktree |
+| `Ctrl-s` | Toggle sort (alphabetical / LRU) |
 
 All keybinds are configurable under `[keybinds]` in `~/.config/ez/config.toml`:
 
 ```toml
 [keybinds]
 new_session = "alt-n"
+new_bare_session = "alt-N"
+session_from_dirty = "alt-s"
 delete_session = "alt-d"
 rename_session = "alt-r"
 view_tree = "ctrl-t"
@@ -144,7 +153,8 @@ view_repo = "ctrl-e"
 view_owner = "ctrl-o"
 view_label = "ctrl-g"
 edit_labels = "alt-l"
-cd_session = "alt-c"
+cd_session = "ctrl-d"
+sort_toggle = "ctrl-s"
 ```
 
 ## Name Builder Modes
@@ -208,6 +218,7 @@ workspace_roots = ["~/workspace/personal", "~/workspace/work"]
 default_shell = "zsh"
 plugin_timeout = 30
 default_select_by = "workspace"  # tree | workspace | repo | owner | label
+default_sort = "lru"          # lru | alpha
 on_enter = "cd"               # cd | tmux (or any session plugin-bind label/name)
 on_create = "none"            # none | cd | tmux (or any session plugin-bind label/name)
 
@@ -250,12 +261,7 @@ Plugins can register custom views (shown as extra keybinds in the browser), decl
 
 ### Return-to-ez after tmux detach
 
-When `return_on_detach` is enabled in the tmux plugin settings (default: `true`), detaching from a tmux session automatically re-enters the ez browser. This creates a seamless loop: browse → attach → detach → browse again.
-
-```toml
-[plugin_settings.tmux]
-return_on_detach = true   # default
-```
+When `on_enter` is set to `tmux`, the shell wrapper automatically re-enters the ez browser after detaching from a tmux session. This creates a seamless loop: browse → attach → detach → browse again. No additional config needed.
 
 ## Docs
 
