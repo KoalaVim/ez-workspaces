@@ -133,6 +133,9 @@ pub enum Command {
         /// Show session action keybinds in preview
         #[arg(long, hide = true)]
         session_actions: bool,
+        /// Session ID for session-specific preview
+        #[arg(long, hide = true)]
+        session_id: Option<String>,
     },
 }
 

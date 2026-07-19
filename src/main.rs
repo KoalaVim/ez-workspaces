@@ -73,12 +73,13 @@ fn main() {
         Some(Command::Preview {
             path,
             session_actions,
+            session_id,
         }) => {
             // fzf pipes preview output — force colors on (unless --no-color)
             if !cli.no_color {
                 colored::control::set_override(true);
             }
-            browser::preview(&path, session_actions)
+            browser::preview(&path, session_actions, session_id.as_deref())
         }
     };
 

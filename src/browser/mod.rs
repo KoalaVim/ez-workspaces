@@ -333,7 +333,7 @@ pub(crate) fn session_action_loop(
         let repo_path_str = repo_entry.path.to_string_lossy();
         let preview_cmd = ez_bin.map(|bin| {
             format!(
-                "{} preview --session-actions {}",
+                "{} preview --session-actions --session-id {{}} {}",
                 bin.display(),
                 repo_path_str
             )
@@ -766,7 +766,7 @@ fn update_last_accessed(repo_entry: &repo::model::RepoEntry, session_id: &str) {
 }
 
 /// Format an ISO 8601 timestamp for display (e.g. "2h ago", "3d ago").
-fn format_last_accessed(ts: &str) -> String {
+pub(crate) fn format_last_accessed(ts: &str) -> String {
     let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) else {
         return ts.to_string();
     };

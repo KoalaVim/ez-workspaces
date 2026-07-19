@@ -9,23 +9,28 @@ use crate::plugin;
 use crate::repo;
 use crate::session;
 
-use super::{format_pr_indicator, get_branch, git_cmd};
+use super::{format_last_accessed, format_pr_indicator, get_branch, git_cmd};
 
 /// Preview handler for fzf (hidden `ez preview <path>` command).
-pub fn preview(path: &Path, show_session_actions: bool) -> Result<()> {
+pub fn preview(path: &Path, show_session_actions: bool, session_id: Option<&str>) -> Result<()> {
     if !path.exists() {
         println!("{}", "Path does not exist".red().bold());
         println!("{}", path.display());
         return Ok(());
     }
 
+    if show_session_actions {
+        if let Some(sid) = session_id {
+            return preview_session(path, sid);
+        }
+    }
+
     if path.join(".git").exists() {
-        preview_repo(path, show_session_actions)?;
+        preview_repo(path)?;
     } else {
-        // Check if this is a registered non-git repo
         let index = repo::store::load_index()?;
         if index.find_by_path(path).is_some() {
-            preview_non_git_repo(path, show_session_actions)?;
+            preview_non_git_repo(path)?;
         } else {
             preview_directory(path);
         }
@@ -34,7 +39,119 @@ pub fn preview(path: &Path, show_session_actions: bool) -> Result<()> {
     Ok(())
 }
 
-fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
+fn preview_session(repo_path: &Path, session_id: &str) -> Result<()> {
+    let index = repo::store::load_index()?;
+    let entry = match index.find_by_path(repo_path) {
+        Some(e) => e,
+        None => {
+            println!("{}", "Repo not registered".red());
+            return Ok(());
+        }
+    };
+    let tree = session::store::load_sessions(&entry.id)?;
+    let session = match tree.sessions.iter().find(|s| s.id == session_id) {
+        Some(s) => s,
+        None => {
+            println!("{}", "Session not found".red());
+            return Ok(());
+        }
+    };
+
+    println!("{} {}", "■".green(), session.name.bold().green());
+    println!();
+
+    // ── Metadata ──
+    preview_section("Metadata");
+    println!("  {} {}", "repo:".bold(), entry.name.cyan());
+    if let Some(ref p) = session.path {
+        println!("  {} {}", "path:".bold(), p.display().to_string().dimmed());
+    } else if session.bare {
+        println!("  {} {}", "path:".bold(), "(bare session)".dimmed());
+    }
+    if let Some(ref ts) = session.last_accessed {
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts) {
+            let local = dt.with_timezone(&chrono::Local);
+            let formatted = local.format("%d/%m/%Y %H:%M").to_string();
+            println!(
+                "  {} {} ({})",
+                "last used:".bold(),
+                formatted,
+                format_last_accessed(ts).dimmed()
+            );
+        }
+    }
+    if !session.labels.is_empty() {
+        println!(
+            "  {} {}",
+            "labels:".bold(),
+            session.labels.join(", ").magenta()
+        );
+    }
+
+    // ── Git Info (for sessions with worktree) ──
+    if let Some(ref worktree_path) = session.path {
+        if worktree_path.exists() && entry.is_git {
+            println!();
+            preview_section("Git Info");
+            let branch = get_branch(worktree_path).unwrap_or_else(|| "detached".into());
+            println!("  {} {}", "branch:".bold(), branch.cyan());
+
+            let dirty_count = git_cmd(worktree_path, &["status", "--porcelain"])
+                .map(|s| s.lines().count())
+                .unwrap_or(0);
+            if dirty_count > 0 {
+                println!(
+                    "  {} {}",
+                    "status:".bold(),
+                    format!("{dirty_count} modified file(s)").yellow()
+                );
+            } else {
+                println!("  {} {}", "status:".bold(), "clean".green());
+            }
+
+            if session.env.contains_key("ez_pr_number") {
+                let num = session.env.get("ez_pr_number").unwrap();
+                let status = session
+                    .env
+                    .get("ez_pr_status")
+                    .map(|s| s.as_str())
+                    .unwrap_or("?");
+                let status_colored = match status {
+                    "open" => status.green().to_string(),
+                    "merged" => status.magenta().to_string(),
+                    "closed" => status.red().to_string(),
+                    _ => status.to_string(),
+                };
+                println!("  {} #{} {}", "pr:".bold(), num.cyan(), status_colored);
+                if let Some(url) = session.env.get("ez_pr_url") {
+                    println!("  {}", url.dimmed());
+                }
+            }
+
+            println!();
+            preview_section("Recent Commits");
+            if let Some(log) = git_cmd(
+                worktree_path,
+                &["log", "--oneline", "--decorate", "--no-color", "-8"],
+            ) {
+                for line in log.lines() {
+                    if let Some((hash, msg)) = line.split_once(' ') {
+                        println!("  {} {}", hash.yellow(), msg);
+                    } else {
+                        println!("  {line}");
+                    }
+                }
+            }
+        }
+    }
+
+    println!();
+    preview_keybind_help();
+
+    Ok(())
+}
+
+fn preview_repo(path: &Path) -> Result<()> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -44,7 +161,7 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
     println!("{}", path.display().to_string().dimmed());
     println!();
 
-    // ── Sessions (first) ──
+    // ── Sessions ──
     preview_section("Sessions");
     let index = repo::store::load_index()?;
     if let Some(entry) = index.find_by_path(path) {
@@ -61,7 +178,7 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
                 let prefix = session::tree::format_session_tree_line(node)
                     .dimmed()
                     .to_string();
-                let indent = "  "; // base indent for preview section
+                let indent = "  ";
                 let marker = if node.session.is_default {
                     " ★".yellow().to_string()
                 } else {
@@ -97,7 +214,6 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
             }
         }
 
-        // Per-repo labels
         let meta = repo::store::load_repo_meta(&entry.id).unwrap_or_default();
         if !meta.labels.is_empty() {
             println!();
@@ -106,11 +222,6 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
         }
     } else {
         println!("  {}", "(unregistered — select to register)".dimmed());
-    }
-
-    if show_actions {
-        println!();
-        preview_keybind_help();
     }
 
     println!();
@@ -171,7 +282,7 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
     Ok(())
 }
 
-fn preview_non_git_repo(path: &Path, show_actions: bool) -> Result<()> {
+fn preview_non_git_repo(path: &Path) -> Result<()> {
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -186,7 +297,6 @@ fn preview_non_git_repo(path: &Path, show_actions: bool) -> Result<()> {
     println!("{}", path.display().to_string().dimmed());
     println!();
 
-    // ── Sessions ──
     preview_section("Sessions");
     let index = repo::store::load_index()?;
     if let Some(entry) = index.find_by_path(path) {
@@ -238,11 +348,6 @@ fn preview_non_git_repo(path: &Path, show_actions: bool) -> Result<()> {
             preview_section("Repo Labels");
             println!("  {}", meta.labels.join(", ").magenta());
         }
-    }
-
-    if show_actions {
-        println!();
-        preview_keybind_help();
     }
 
     println!();
