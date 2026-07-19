@@ -1,6 +1,8 @@
-# ez-workspaces
+<p align="center">
+<img width="256" height="256" src="https://github.com/user-attachments/assets/b77cae31-5043-480d-9142-a3214803191d" />
+</p>
 
-<img width="1254" height="1254" alt="ChatGPT Image Jul 19, 2026, 04_44_15 PM" src="https://github.com/user-attachments/assets/b77cae31-5043-480d-9142-a3214803191d" />
+# ez-workspaces
 
 A fast, plugin-extensible workspace and session manager for git repos. Browse, create, and switch between worktree-based sessions with a single command.
 
