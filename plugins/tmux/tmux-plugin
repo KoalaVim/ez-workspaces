@@ -138,6 +138,34 @@ case "$HOOK" in
         fi
         ;;
 
+    on_session_rename)
+        OLD_NAME=$(echo "$REQUEST" | jq -r '.rename_context.old_name // empty')
+        NEW_NAME=$(echo "$REQUEST" | jq -r '.rename_context.new_name // empty')
+
+        if [ -z "$OLD_NAME" ] || [ -z "$NEW_NAME" ]; then
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        OLD_TMUX="${REPO_NAME}/${OLD_NAME}"
+        OLD_TMUX=$(echo "$OLD_TMUX" | tr '.:' '__')
+        NEW_TMUX="${REPO_NAME}/${NEW_NAME}"
+        NEW_TMUX=$(echo "$NEW_TMUX" | tr '.:' '__')
+
+        dbg "on_session_rename: OLD_TMUX='${OLD_TMUX}' NEW_TMUX='${NEW_TMUX}'"
+
+        if command -v tmux &>/dev/null; then
+            if tmux has-session -t "${OLD_TMUX}" 2>/dev/null; then
+                dbg_tmux rename-session -t "${OLD_TMUX}" "${NEW_TMUX}" >/dev/null || true
+                mark_ez_managed "$NEW_TMUX"
+            else
+                dbg "tmux session '${OLD_TMUX}' not found, skipping rename"
+            fi
+        fi
+
+        echo '{"success": true}'
+        ;;
+
     on_session_exit)
         echo '{"success": true}'
         ;;

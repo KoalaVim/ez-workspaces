@@ -156,18 +156,48 @@ fn detect_repo_meta(path: &Path) -> RepoMeta {
 /// Dispatch repo subcommands.
 pub fn dispatch(command: RepoCommand) -> Result<()> {
     match command {
-        RepoCommand::List { label } => list_repos(label.as_deref()),
+        RepoCommand::List { label, json } => list_repos(label.as_deref(), json),
         RepoCommand::Remove { name, purge } => remove_repo(&name, purge),
         RepoCommand::Label { command } => dispatch_label(command),
     }
 }
 
-fn list_repos(label_filter: Option<&str>) -> Result<()> {
+fn list_repos(label_filter: Option<&str>, json: bool) -> Result<()> {
     let index = store::load_index()?;
     if index.repos.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            println!(
+                "{}",
+                "No repositories registered. Use `ez add` or `ez clone` to get started.".yellow()
+            );
+        }
+        return Ok(());
+    }
+
+    if json {
+        let mut items = Vec::new();
+        for repo in &index.repos {
+            let meta = store::load_repo_meta(&repo.id).unwrap_or_default();
+            if let Some(want) = label_filter {
+                if !meta.labels.iter().any(|l| l == want) {
+                    continue;
+                }
+            }
+            items.push(serde_json::json!({
+                "id": repo.id,
+                "name": repo.name,
+                "path": repo.path.display().to_string(),
+                "is_git": repo.is_git,
+                "default_branch": meta.default_branch,
+                "remote_url": meta.remote_url,
+                "labels": meta.labels,
+            }));
+        }
         println!(
             "{}",
-            "No repositories registered. Use `ez add` or `ez clone` to get started.".yellow()
+            serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".into())
         );
         return Ok(());
     }
@@ -300,12 +330,40 @@ fn format_label_change(labels: &[String]) -> String {
     }
 }
 
+fn looks_like_path(arg: &str) -> bool {
+    arg.contains('/') || arg.starts_with('.') || arg.starts_with('~')
+}
+
 fn remove_repo(name: &str, purge: bool) -> Result<()> {
     let mut index = store::load_index()?;
-    let entry = index
-        .find_by_name_or_id(name)
-        .ok_or_else(|| EzError::RepoNotFound(name.into()))?
-        .clone();
+
+    let entry = if looks_like_path(name) {
+        let resolved = if name == "." {
+            std::env::current_dir()?
+        } else if let Some(stripped) = name.strip_prefix('~') {
+            dirs::home_dir()
+                .ok_or_else(|| EzError::Path("cannot resolve home directory".into()))?
+                .join(stripped.strip_prefix('/').unwrap_or(stripped))
+        } else {
+            std::path::PathBuf::from(name)
+        };
+        let canonical = std::fs::canonicalize(&resolved)
+            .map_err(|_| EzError::Path(format!("cannot resolve path: {}", resolved.display())))?;
+        log::debug!(
+            "remove_repo: resolved path argument to {}",
+            canonical.display()
+        );
+        index
+            .find_by_path(&canonical)
+            .or_else(|| index.find_by_name_or_id(name))
+            .ok_or_else(|| EzError::RepoNotFound(name.into()))?
+            .clone()
+    } else {
+        index
+            .find_by_name_or_id(name)
+            .ok_or_else(|| EzError::RepoNotFound(name.into()))?
+            .clone()
+    };
 
     index.remove_by_id(&entry.id);
     store::save_index(&index)?;

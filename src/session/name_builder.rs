@@ -9,6 +9,8 @@
 //! Parts are joined with "-"; `(none)` parts contribute nothing. The final
 //! joined name must be non-empty.
 
+use std::collections::HashMap;
+
 use crate::browser::selector::{InteractiveSelector, SelectItem, StageOutcome};
 use crate::config::model::{EzConfig, NameBuilderMode, StageKind};
 use crate::error::{EzError, Result};
@@ -17,10 +19,39 @@ use colored::Colorize;
 const NONE_VALUE: &str = "__none__";
 const NONE_DISPLAY: &str = "(none)";
 
+/// PR metadata resolved from a GitHub PR URL via `gh`.
+#[derive(Clone, Debug)]
+pub struct PrMetadata {
+    pub pr_number: u64,
+    pub pr_url: String,
+    pub head_ref: String,
+    pub base_ref: String,
+}
+
+impl PrMetadata {
+    pub fn to_session_env(&self) -> HashMap<String, String> {
+        let mut env = HashMap::new();
+        env.insert("ez_pr_number".into(), self.pr_number.to_string());
+        env.insert("ez_pr_url".into(), self.pr_url.clone());
+        env.insert("ez_pr_status".into(), "open".into());
+        env.insert("ez_start_point".into(), format!("origin/{}", self.head_ref));
+        env
+    }
+}
+
+/// Aggregated result from the name builder, including optional PR metadata.
+pub struct NameResult {
+    pub name: String,
+    pub pr_metadata: Option<PrMetadata>,
+}
+
 /// Result of running the staged prompt.
 pub enum NamePromptResult {
     /// User completed all stages with a non-empty name.
-    Done(String),
+    Done {
+        name: String,
+        pr_metadata: Option<PrMetadata>,
+    },
     /// User cancelled (Esc/Ctrl-C) — caller should abort the operation.
     Cancelled,
 }
@@ -81,7 +112,7 @@ pub fn prompt_session_name(
     match mode {
         NameBuilderMode::FullName => prompt_full_name(selector),
         NameBuilderMode::BuildFromParts => prompt_staged(selector, config),
-        NameBuilderMode::GitHubPr => prompt_github_pr(selector, config),
+        NameBuilderMode::GitHubPr => prompt_github_pr(selector),
         NameBuilderMode::JiraUrl => prompt_jira_url(selector),
     }
 }
@@ -89,9 +120,10 @@ pub fn prompt_session_name(
 /// `FullName` mode: single free-text prompt, reject empty input.
 fn prompt_full_name(selector: &dyn InteractiveSelector) -> Result<NamePromptResult> {
     match selector.input_with_back("session name", None, false, None)? {
-        StageOutcome::Picked(name) if !name.trim().is_empty() => {
-            Ok(NamePromptResult::Done(name.trim().to_string()))
-        }
+        StageOutcome::Picked(name) if !name.trim().is_empty() => Ok(NamePromptResult::Done {
+            name: name.trim().to_string(),
+            pr_metadata: None,
+        }),
         StageOutcome::Picked(_) => {
             eprintln!("Session name cannot be empty.");
             prompt_full_name(selector)
@@ -149,7 +181,10 @@ fn prompt_staged(
                                 parts[idx] = None;
                                 continue;
                             }
-                            return Ok(NamePromptResult::Done(joined));
+                            return Ok(NamePromptResult::Done {
+                                name: joined,
+                                pr_metadata: None,
+                            });
                         }
                         idx += 1;
                     }
@@ -171,12 +206,9 @@ fn prompt_staged(
     }
 }
 
-/// `GitHubPr` mode: paste a GitHub PR URL, extract PR number, optionally
-/// resolve branch name via OnNameResolve plugin hook.
-fn prompt_github_pr(
-    selector: &dyn InteractiveSelector,
-    config: &EzConfig,
-) -> Result<NamePromptResult> {
+/// `GitHubPr` mode: paste a GitHub PR URL, resolve branch name via `gh` CLI.
+/// Falls back to `pr<number>` if `gh` is unavailable or fails.
+fn prompt_github_pr(selector: &dyn InteractiveSelector) -> Result<NamePromptResult> {
     let re = regex::Regex::new(r"github\.com/[^/]+/[^/]+/pull/(\d+)").unwrap();
 
     loop {
@@ -184,19 +216,9 @@ fn prompt_github_pr(
             StageOutcome::Picked(url) => {
                 let url = url.trim();
                 if let Some(caps) = re.captures(url) {
-                    let pr_number = &caps[1];
-                    let candidate = format!("pr{pr_number}");
-
-                    eprint!("{}", "Resolving PR branch...".dimmed());
-                    let resolved = crate::plugin::run_name_resolve_hook(url, &candidate, config);
-                    eprintln!("\r{}", " ".repeat(30));
-
-                    let name = match resolved {
-                        Some(resolved_name) => resolved_name,
-                        None => candidate,
-                    };
-
-                    return Ok(NamePromptResult::Done(name));
+                    let pr_number: u64 = caps[1].parse().unwrap_or(0);
+                    let (name, pr_metadata) = resolve_pr_via_gh(url, pr_number);
+                    return Ok(NamePromptResult::Done { name, pr_metadata });
                 } else {
                     eprintln!(
                         "{}",
@@ -207,6 +229,90 @@ fn prompt_github_pr(
                 }
             }
             StageOutcome::Cancel | StageOutcome::Back => return Ok(NamePromptResult::Cancelled),
+        }
+    }
+}
+
+/// Attempt to resolve PR branch name and metadata via the `gh` CLI.
+/// Returns `(session_name, Option<PrMetadata>)`. Falls back to `pr<number>`
+/// if `gh` is unavailable or the command fails.
+fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) {
+    let fallback_name = format!("pr{pr_number}");
+
+    if which::which("gh").is_err() {
+        eprintln!(
+            "{}",
+            "gh CLI not found; using pr<number> as session name".yellow()
+        );
+        return (fallback_name, None);
+    }
+
+    eprint!("{}", "Resolving PR branch...".dimmed());
+
+    let output = std::process::Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            url,
+            "--json",
+            "headRefName,baseRefName,number",
+        ])
+        .output();
+
+    eprint!("\r{}\r", " ".repeat(30));
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let json: serde_json::Value = match serde_json::from_slice(&o.stdout) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("{}", format!("Failed to parse gh output: {e}").yellow());
+                    return (fallback_name, None);
+                }
+            };
+
+            let head_ref = json
+                .get("headRefName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let base_ref = json
+                .get("baseRefName")
+                .and_then(|v| v.as_str())
+                .unwrap_or("main")
+                .to_string();
+            let number = json
+                .get("number")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(pr_number);
+
+            if head_ref.is_empty() {
+                eprintln!(
+                    "{}",
+                    "Could not extract branch name from gh output".yellow()
+                );
+                return (fallback_name, None);
+            }
+
+            log::debug!("resolve_pr_via_gh: PR #{number} head={head_ref} base={base_ref}");
+
+            let metadata = PrMetadata {
+                pr_number: number,
+                pr_url: url.to_string(),
+                head_ref: head_ref.clone(),
+                base_ref,
+            };
+
+            (head_ref, Some(metadata))
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+            eprintln!("{}", format!("gh pr view failed: {stderr}").yellow());
+            (fallback_name, None)
+        }
+        Err(e) => {
+            eprintln!("{}", format!("Failed to run gh: {e}").yellow());
+            (fallback_name, None)
         }
     }
 }
@@ -227,10 +333,16 @@ fn prompt_jira_url(selector: &dyn InteractiveSelector) -> Result<NamePromptResul
                     let context = Some(format!("{ticket}-"));
                     match prompt_final_suffix(selector, context.as_deref())? {
                         Some(suffix) if !suffix.is_empty() => {
-                            return Ok(NamePromptResult::Done(format!("{ticket}-{suffix}")));
+                            return Ok(NamePromptResult::Done {
+                                name: format!("{ticket}-{suffix}"),
+                                pr_metadata: None,
+                            });
                         }
                         _ => {
-                            return Ok(NamePromptResult::Done(ticket));
+                            return Ok(NamePromptResult::Done {
+                                name: ticket,
+                                pr_metadata: None,
+                            });
                         }
                     }
                 } else {
@@ -306,11 +418,11 @@ fn join_parts(parts: &[Option<String>]) -> String {
 
 /// Convenience: build a default fzf selector and run the prompt. Returns
 /// `Err(EzError::Cancelled)` on cancel so callers can propagate quietly.
-pub fn prompt_session_name_default(config: &EzConfig) -> Result<String> {
+pub fn prompt_session_name_default(config: &EzConfig) -> Result<NameResult> {
     use crate::browser::selector::FzfSelector;
     let selector = FzfSelector::new(&config.fzf)?;
     match prompt_session_name(&selector, config)? {
-        NamePromptResult::Done(name) => Ok(name),
+        NamePromptResult::Done { name, pr_metadata } => Ok(NameResult { name, pr_metadata }),
         NamePromptResult::Cancelled => Err(EzError::Cancelled),
     }
 }

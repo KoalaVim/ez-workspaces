@@ -9,7 +9,7 @@ use crate::plugin;
 use crate::repo;
 use crate::session;
 
-use super::{get_branch, git_cmd};
+use super::{format_pr_indicator, get_branch, git_cmd};
 
 /// Preview handler for fzf (hidden `ez preview <path>` command).
 pub fn preview(path: &Path, show_session_actions: bool) -> Result<()> {
@@ -80,15 +80,20 @@ fn preview_repo(path: &Path, show_actions: bool) -> Result<()> {
                         .magenta()
                         .to_string()
                 };
+                let pr_indicator = format_pr_indicator(&node.session.env);
                 println!(
-                    "{}{}{}{}{}{}",
+                    "{}{}{}{}{}{}{}",
                     indent,
                     prefix,
                     node.session.name.bold().yellow(),
                     marker,
+                    pr_indicator,
                     labels,
                     path_info
                 );
+                if let Some(url) = node.session.env.get("ez_pr_url") {
+                    println!("{}  {}", indent, url.dimmed());
+                }
             }
         }
 
@@ -211,14 +216,19 @@ fn preview_non_git_repo(path: &Path, show_actions: bool) -> Result<()> {
                         .magenta()
                         .to_string()
                 };
+                let pr_indicator = format_pr_indicator(&node.session.env);
                 println!(
-                    "{}{}{}{}{}",
+                    "{}{}{}{}{}{}",
                     indent,
                     prefix,
                     node.session.name.bold().yellow(),
                     marker,
+                    pr_indicator,
                     labels
                 );
+                if let Some(url) = node.session.env.get("ez_pr_url") {
+                    println!("{}  {}", indent, url.dimmed());
+                }
             }
         }
 

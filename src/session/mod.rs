@@ -1,4 +1,5 @@
 pub mod current;
+pub mod cursor;
 pub mod from_dirty;
 pub mod model;
 pub mod name_builder;
@@ -52,7 +53,7 @@ pub fn dispatch(
             interactive,
             bare,
         ),
-        SessionCommand::List { repo, flat } => list_sessions(repo.as_deref(), flat),
+        SessionCommand::List { repo, flat, json } => list_sessions(repo.as_deref(), flat, json),
         SessionCommand::Register {
             path,
             name,
@@ -225,10 +226,20 @@ fn new_session(
         config.on_create = v.into();
     }
 
-    let session_name = match name {
-        Some(s) if !interactive => s.to_string(),
+    let name_result = match name {
+        Some(s) if !interactive => name_builder::NameResult {
+            name: s.to_string(),
+            pr_metadata: None,
+        },
         _ => name_builder::prompt_session_name_default(&config)?,
     };
+    let session_name = name_result.name;
+    let pr_metadata = name_result.pr_metadata;
+
+    let session_env = pr_metadata
+        .as_ref()
+        .map(|pr| pr.to_session_env())
+        .unwrap_or_default();
 
     let parent_id = if let Some(parent_name) = parent {
         let parent_session = tree
@@ -245,7 +256,7 @@ fn new_session(
         name: session_name.clone(),
         parent_id,
         path: None,
-        env: HashMap::new(),
+        env: session_env,
         plugin_state: HashMap::new(),
         labels: Vec::new(),
         created_at: Utc::now(),
@@ -288,6 +299,14 @@ fn new_session(
 
     store::save_sessions(&repo_entry.id, &tree)?;
 
+    let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
+
+    if let Some(pr) = &pr_metadata {
+        if let Some(path) = &created.path {
+            crate::browser::pr_merge_base_reset(path, &pr.base_ref);
+        }
+    }
+
     if crate::browser::on_create_is_noop(&config.on_create) {
         let suffix = if bare { " (bare)" } else { "" };
         println!(
@@ -297,8 +316,6 @@ fn new_session(
             suffix.dimmed()
         );
     } else {
-        // Get post-hook session (path may have been set by a plugin such as git-worktree).
-        let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
         let target_dir = created
             .path
             .as_ref()
@@ -521,18 +538,47 @@ pub(crate) fn git_output(path: &Path, args: &[&str]) -> Result<String> {
     )))
 }
 
-fn list_sessions(repo_arg: Option<&str>, flat: bool) -> Result<()> {
+fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool) -> Result<()> {
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let tree = store::load_sessions(&repo_entry.id)?;
 
     if tree.sessions.is_empty() {
+        if json {
+            println!("[]");
+        } else {
+            println!(
+                "{}",
+                format!(
+                    "No sessions for {}. Use `ez session new` to create one.",
+                    repo_entry.name
+                )
+                .yellow()
+            );
+        }
+        return Ok(());
+    }
+
+    if json {
+        let items: Vec<serde_json::Value> = tree
+            .sessions
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "id": s.id,
+                    "name": s.name,
+                    "parent_id": s.parent_id,
+                    "path": s.path.as_ref().map(|p| p.display().to_string()),
+                    "bare": s.bare,
+                    "labels": s.labels,
+                    "last_accessed": s.last_accessed,
+                    "env": s.env,
+                    "is_default": s.is_default,
+                })
+            })
+            .collect();
         println!(
             "{}",
-            format!(
-                "No sessions for {}. Use `ez session new` to create one.",
-                repo_entry.name
-            )
-            .yellow()
+            serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".into())
         );
         return Ok(());
     }
@@ -676,6 +722,72 @@ fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Re
     Ok(())
 }
 
+/// Refresh the PR status for a session if it has PR metadata and the status
+/// is stale (older than 5 minutes). Updates the session env in-place.
+fn refresh_pr_status(tree: &mut SessionTree, session_id: &str) {
+    let (pr_number, pr_url, needs_refresh) = {
+        let session = match tree.sessions.iter().find(|s| s.id == session_id) {
+            Some(s) => s,
+            None => return,
+        };
+        let pr_number = match session.env.get("ez_pr_number") {
+            Some(n) => n.clone(),
+            None => return,
+        };
+        let pr_url = session.env.get("ez_pr_url").cloned();
+
+        let needs_refresh = match session.env.get("ez_pr_status_updated") {
+            Some(updated) => match chrono::DateTime::parse_from_rfc3339(updated) {
+                Ok(dt) => Utc::now().signed_duration_since(dt).num_seconds() >= 300,
+                Err(_) => true,
+            },
+            None => true,
+        };
+        (pr_number, pr_url, needs_refresh)
+    };
+
+    if !needs_refresh {
+        log::debug!("refresh_pr_status: status for PR #{pr_number} is fresh, skipping");
+        return;
+    }
+
+    if which::which("gh").is_err() {
+        log::debug!("refresh_pr_status: gh not found, skipping");
+        return;
+    }
+
+    log::debug!("refresh_pr_status: refreshing status for PR #{pr_number}");
+
+    let arg = pr_url.as_deref().unwrap_or(&pr_number);
+    let output = Command::new("gh")
+        .args(["pr", "view", arg, "--json", "state"])
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&o.stdout) {
+                if let Some(state) = json.get("state").and_then(|v| v.as_str()) {
+                    let status = state.to_lowercase();
+                    log::debug!("refresh_pr_status: PR #{pr_number} status={status}");
+                    if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session_id) {
+                        s.env.insert("ez_pr_status".into(), status);
+                        s.env
+                            .insert("ez_pr_status_updated".into(), Utc::now().to_rfc3339());
+                    }
+                }
+            }
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            log::debug!("refresh_pr_status: gh pr view failed: {stderr}");
+        }
+        Err(e) => {
+            log::debug!("refresh_pr_status: failed to run gh: {e}");
+        }
+    }
+}
+
 fn enter_session(
     name: &str,
     repo_arg: Option<&str>,
@@ -705,6 +817,8 @@ fn enter_session(
         &config,
         &mut tree,
     )?;
+
+    refresh_pr_status(&mut tree, &session.id);
 
     let now = Utc::now().to_rfc3339();
     if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session.id) {
@@ -761,7 +875,6 @@ fn rename_session(name: &str, new_name: &str, repo_arg: Option<&str>) -> Result<
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let mut tree = store::load_sessions(&repo_entry.id)?;
 
-    // Check new name doesn't conflict
     if tree.find_by_name(new_name).is_some() {
         return Err(EzError::SessionAlreadyExists(new_name.into()));
     }
@@ -772,16 +885,213 @@ fn rename_session(name: &str, new_name: &str, repo_arg: Option<&str>) -> Result<
         .find(|s| s.name == name)
         .ok_or_else(|| EzError::SessionNotFound(name.into()))?;
 
-    session.name = new_name.to_string();
+    let old_name = session.name.clone();
+    let rename_result =
+        perform_session_rename(session, new_name, &repo_entry.path, repo_entry.is_git);
 
     store::save_sessions(&repo_entry.id, &tree)?;
+
+    let config = crate::config::load()?;
+    if config.copy_cursor_conversations {
+        if let (Some(old_path), Some(new_path)) = (&rename_result.old_path, &rename_result.new_path)
+        {
+            cursor::copy_cursor_conversations(old_path, new_path);
+        }
+    }
+
+    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+    run_rename_hooks(
+        &repo_entry,
+        &repo_meta,
+        &tree,
+        &old_name,
+        new_name,
+        &rename_result,
+        &config,
+    );
+
     println!(
         "{} {} -> {}",
         "Renamed session:".green(),
-        name.bold(),
+        old_name.bold(),
         new_name.bold()
     );
     Ok(())
+}
+
+/// Result of the physical rename operations (branch + worktree move).
+struct RenameResult {
+    old_path: Option<PathBuf>,
+    new_path: Option<PathBuf>,
+}
+
+/// Shared helper: rename the git branch and move the worktree directory.
+/// Updates `session.name` and `session.path` in place.
+fn perform_session_rename(
+    session: &mut Session,
+    new_name: &str,
+    repo_path: &Path,
+    is_git: bool,
+) -> RenameResult {
+    let old_name = session.name.clone();
+    let old_path = session.path.clone();
+    session.name = new_name.to_string();
+
+    if session.bare || !is_git {
+        log::debug!(
+            "perform_session_rename: skipping branch/worktree ops (bare={}, is_git={})",
+            session.bare,
+            is_git
+        );
+        return RenameResult {
+            old_path: old_path.clone(),
+            new_path: old_path,
+        };
+    }
+
+    let worktree_path = match &session.path {
+        Some(p) => p.clone(),
+        None => {
+            log::debug!("perform_session_rename: no session path, skipping git ops");
+            return RenameResult {
+                old_path: None,
+                new_path: None,
+            };
+        }
+    };
+
+    // Rename the git branch
+    let branch_result = Command::new("git")
+        .args(["branch", "-m", &old_name, new_name])
+        .current_dir(&worktree_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+
+    match &branch_result {
+        Ok(output) if output.status.success() => {
+            log::debug!(
+                "perform_session_rename: renamed branch '{}' -> '{}'",
+                old_name,
+                new_name
+            );
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::debug!(
+                "perform_session_rename: git branch -m failed: {}",
+                stderr.trim()
+            );
+            eprintln!(
+                "{}",
+                format!("Warning: could not rename branch: {}", stderr.trim()).yellow()
+            );
+        }
+        Err(e) => {
+            log::debug!("perform_session_rename: git branch -m error: {}", e);
+            eprintln!(
+                "{}",
+                format!("Warning: could not rename branch: {}", e).yellow()
+            );
+        }
+    }
+
+    // Move the worktree directory
+    let new_worktree_path = worktree_path
+        .parent()
+        .map(|parent| parent.join(new_name))
+        .unwrap_or_else(|| PathBuf::from(new_name));
+
+    let move_result = Command::new("git")
+        .args([
+            "worktree",
+            "move",
+            &worktree_path.display().to_string(),
+            &new_worktree_path.display().to_string(),
+        ])
+        .current_dir(repo_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output();
+
+    match &move_result {
+        Ok(output) if output.status.success() => {
+            log::debug!(
+                "perform_session_rename: moved worktree '{}' -> '{}'",
+                worktree_path.display(),
+                new_worktree_path.display()
+            );
+            session.path = Some(new_worktree_path.clone());
+            RenameResult {
+                old_path: Some(worktree_path),
+                new_path: Some(new_worktree_path),
+            }
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::debug!(
+                "perform_session_rename: git worktree move failed: {}",
+                stderr.trim()
+            );
+            eprintln!(
+                "{}",
+                format!("Warning: could not move worktree: {}", stderr.trim()).yellow()
+            );
+            RenameResult {
+                old_path: Some(worktree_path),
+                new_path: session.path.clone(),
+            }
+        }
+        Err(e) => {
+            log::debug!("perform_session_rename: git worktree move error: {}", e);
+            eprintln!(
+                "{}",
+                format!("Warning: could not move worktree: {}", e).yellow()
+            );
+            RenameResult {
+                old_path: Some(worktree_path),
+                new_path: session.path.clone(),
+            }
+        }
+    }
+}
+
+/// Fire OnSessionRename hooks (best-effort, errors are logged but not propagated).
+fn run_rename_hooks(
+    repo_entry: &crate::repo::model::RepoEntry,
+    repo_meta: &crate::repo::model::RepoMeta,
+    tree: &model::SessionTree,
+    old_name: &str,
+    new_name: &str,
+    rename_result: &RenameResult,
+    config: &crate::config::model::EzConfig,
+) {
+    let session = tree.find_by_name(new_name);
+    let rename_context = plugin::protocol::RenameContext {
+        old_name: old_name.to_string(),
+        new_name: new_name.to_string(),
+        old_path: rename_result
+            .old_path
+            .as_ref()
+            .map(|p| p.display().to_string()),
+        new_path: rename_result
+            .new_path
+            .as_ref()
+            .map(|p| p.display().to_string()),
+    };
+
+    let mut tree_clone = tree.clone();
+    if let Err(e) = plugin::run_hooks_with_rename(
+        plugin::model::HookType::OnSessionRename,
+        repo_entry,
+        repo_meta,
+        session,
+        config,
+        &mut tree_clone,
+        Some(rename_context),
+    ) {
+        log::debug!("run_rename_hooks: hook error (swallowed): {}", e);
+    }
 }
 
 /// Create a child session under a given parent (by ID). Used by the browser action menu.
@@ -792,6 +1102,7 @@ pub fn create_child_session(
     parent_id: &str,
     name: &str,
     bare: bool,
+    env: HashMap<String, String>,
 ) -> Result<Session> {
     let repo_entry = repo::store::load_index()?
         .repos
@@ -812,7 +1123,7 @@ pub fn create_child_session(
         name: name.to_string(),
         parent_id: Some(parent_id.to_string()),
         path: None,
-        env: HashMap::new(),
+        env,
         plugin_state: HashMap::new(),
         labels: Vec::new(),
         created_at: Utc::now(),
@@ -944,6 +1255,12 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
 
 /// Rename a session by ID. Used by the browser action menu.
 pub fn rename_session_by_id(repo_id: &str, session_id: &str, new_name: &str) -> Result<()> {
+    let repo_entry = repo::store::load_index()?
+        .repos
+        .into_iter()
+        .find(|r| r.id == repo_id)
+        .ok_or_else(|| EzError::RepoNotFound(repo_id.into()))?;
+
     let mut tree = store::load_sessions(repo_id)?;
 
     if tree.find_by_name(new_name).is_some() {
@@ -956,9 +1273,31 @@ pub fn rename_session_by_id(repo_id: &str, session_id: &str, new_name: &str) -> 
         .find(|s| s.id == session_id)
         .ok_or_else(|| EzError::SessionNotFound(session_id.into()))?;
 
-    session.name = new_name.to_string();
+    let old_name = session.name.clone();
+    let rename_result =
+        perform_session_rename(session, new_name, &repo_entry.path, repo_entry.is_git);
 
     store::save_sessions(repo_id, &tree)?;
+
+    let config = crate::config::load()?;
+    if config.copy_cursor_conversations {
+        if let (Some(old_path), Some(new_path)) = (&rename_result.old_path, &rename_result.new_path)
+        {
+            cursor::copy_cursor_conversations(old_path, new_path);
+        }
+    }
+
+    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+    run_rename_hooks(
+        &repo_entry,
+        &repo_meta,
+        &tree,
+        &old_name,
+        new_name,
+        &rename_result,
+        &config,
+    );
+
     Ok(())
 }
 

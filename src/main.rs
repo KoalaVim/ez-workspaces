@@ -51,6 +51,9 @@ fn main() {
         }),
         Some(Command::Clone { url, path }) => repo::clone_repo(&url, path.as_deref()),
         Some(Command::Add { path }) => repo::add_repo(path.as_deref()),
+        Some(Command::Remove { name, purge }) => {
+            repo::dispatch(cli::RepoCommand::Remove { name, purge })
+        }
         Some(Command::Session { command }) => session::dispatch(
             command,
             cli.cd_file.as_deref(),

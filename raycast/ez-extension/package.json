@@ -1,0 +1,45 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "ez-workspaces",
+  "title": "EZ Workspaces",
+  "description": "Browse and manage ez-workspaces repos and sessions",
+  "icon": "extension-icon.png",
+  "author": "ez-workspaces",
+  "categories": [
+    "Developer Tools",
+    "Productivity"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "browse-repos",
+      "title": "Browse Repos",
+      "description": "Browse registered repos and drill into sessions",
+      "mode": "view"
+    },
+    {
+      "name": "search-sessions",
+      "title": "Search Sessions",
+      "description": "Search all sessions across repos",
+      "mode": "view"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.83.1",
+    "@raycast/utils": "^1.17.0"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^1.0.11",
+    "@types/node": "22.5.4",
+    "@types/react": "^19.0.10",
+    "eslint": "^8.57.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.5.4"
+  },
+  "scripts": {
+    "build": "ray build --skip-types -e dist -o dist",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint"
+  }
+}

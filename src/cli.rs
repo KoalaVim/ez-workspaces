@@ -72,6 +72,15 @@ pub enum Command {
         path: Option<PathBuf>,
     },
 
+    /// Remove (unregister) a repository
+    Remove {
+        /// Repo name, ID, or path
+        name: String,
+        /// Also delete all session metadata and plugin state
+        #[arg(long)]
+        purge: bool,
+    },
+
     /// Session management
     #[command(alias = "s")]
     Session {
@@ -157,6 +166,9 @@ pub enum SessionCommand {
         /// Show as flat list instead of tree
         #[arg(long)]
         flat: bool,
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
     },
 
     /// Register an existing git worktree as a session
@@ -245,6 +257,9 @@ pub enum RepoCommand {
         /// Only show repos carrying this label
         #[arg(long)]
         label: Option<String>,
+        /// Output as JSON array
+        #[arg(long)]
+        json: bool,
     },
 
     /// Unregister a repository

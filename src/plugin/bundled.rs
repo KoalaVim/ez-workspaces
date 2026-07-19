@@ -26,6 +26,12 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
         executable_name: "tmux-plugin",
         executable: include_str!("../../plugins/tmux/tmux-plugin"),
     },
+    BundledPlugin {
+        name: "cursor-mcp-auth",
+        manifest: include_str!("../../plugins/cursor-mcp-auth/manifest.toml"),
+        executable_name: "cursor-mcp-auth-plugin",
+        executable: include_str!("../../plugins/cursor-mcp-auth/cursor-mcp-auth-plugin"),
+    },
 ];
 
 /// Ensure all bundled plugins are extracted to the plugins directory.

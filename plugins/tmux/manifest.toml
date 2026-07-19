@@ -1,7 +1,7 @@
 name = "tmux"
 version = "0.2.0"
 description = "Manages tmux sessions for workspaces"
-hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_bind", "on_view", "on_view_select"]
+hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_session_rename", "on_bind", "on_view", "on_view_select"]
 executable = "tmux-plugin"
 
 # In the session picker: alt-a creates/attaches to the tmux session for the selected session

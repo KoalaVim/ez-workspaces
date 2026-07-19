@@ -83,6 +83,10 @@ pub struct EzConfig {
     /// Default sort mode for the interactive browser (`"alpha"` or `"lru"`).
     #[serde(default = "default_sort")]
     pub default_sort: String,
+
+    /// Whether to copy Cursor IDE conversations when renaming a session.
+    #[serde(default)]
+    pub copy_cursor_conversations: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -224,6 +228,7 @@ impl Default for EzConfig {
             on_enter: default_on_enter(),
             on_create: default_on_create(),
             default_sort: default_sort(),
+            copy_cursor_conversations: false,
         }
     }
 }

@@ -16,7 +16,8 @@ use crate::repo::model::{RepoEntry, RepoMeta};
 use crate::session::model::{Session, SessionTree};
 use model::{HookType, PluginManifest};
 use protocol::{
-    HookRequest, HookResponse, NameResolveContext, PluginConfig, RepoInfo, SessionInfo, ViewContext,
+    HookRequest, HookResponse, NameResolveContext, PluginConfig, RenameContext, RepoInfo,
+    SessionInfo, ViewContext,
 };
 
 /// Dispatch plugin subcommands.
@@ -237,6 +238,77 @@ pub fn run_hooks(
     Ok(())
 }
 
+/// Run hooks with a rename context attached to the request.
+/// Used by session rename to pass old/new names and paths to plugins.
+pub fn run_hooks_with_rename(
+    hook: HookType,
+    repo_entry: &RepoEntry,
+    repo_meta: &RepoMeta,
+    session: Option<&Session>,
+    config: &EzConfig,
+    tree: &mut SessionTree,
+    rename_context: Option<RenameContext>,
+) -> Result<()> {
+    let plugins_dir = resolve_plugins_dir(config)?;
+    bundled::ensure_bundled_plugins(&plugins_dir)?;
+
+    log::debug!(
+        "run_hooks_with_rename: hook={:?} repo={} rename_context={:?}",
+        hook,
+        repo_entry.name,
+        rename_context
+    );
+
+    let mut plugins: Vec<(String, PluginManifest)> = Vec::new();
+    for plugin_name in &config.plugins.enabled {
+        let manifest_path = plugins_dir.join(plugin_name).join("manifest.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let manifest_contents = fs::read_to_string(&manifest_path)?;
+        let manifest: PluginManifest = toml::from_str(&manifest_contents)?;
+        if !manifest.hooks.contains(&hook) {
+            continue;
+        }
+        plugins.push((plugin_name.clone(), manifest));
+    }
+    plugins.sort_by_key(|(_, m)| !m.mutates_session_path);
+
+    for (plugin_name, manifest) in &plugins {
+        let plugin_dir = plugins_dir.join(plugin_name);
+        let current_session = session.and_then(|s| tree.find_by_id(&s.id)).or(session);
+        let mut request = build_request(
+            &hook,
+            repo_entry,
+            repo_meta,
+            current_session,
+            tree,
+            plugin_name,
+            config,
+        );
+        request.rename_context = rename_context.clone();
+
+        match runner::execute(manifest, &plugin_dir, &request, config.plugin_timeout) {
+            Ok(response) => {
+                log::debug!(
+                    "run_hooks_with_rename: plugin [{}] response success={}",
+                    plugin_name,
+                    response.success
+                );
+            }
+            Err(e) => {
+                log::debug!(
+                    "run_hooks_with_rename: plugin [{}] error: {}",
+                    plugin_name,
+                    e
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn build_request(
     hook: &HookType,
     repo_entry: &RepoEntry,
@@ -299,6 +371,7 @@ fn build_request(
         bind_context: None,
         view_context: None,
         name_resolve_context: None,
+        rename_context: None,
     }
 }
 
@@ -431,6 +504,7 @@ pub fn run_view_hook(
             selected_display: None,
         }),
         name_resolve_context: None,
+        rename_context: None,
     };
 
     runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout)
@@ -477,6 +551,7 @@ pub fn run_view_select_hook(
             selected_display: Some(selected_display.to_string()),
         }),
         name_resolve_context: None,
+        rename_context: None,
     };
 
     runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout)
@@ -485,7 +560,7 @@ pub fn run_view_select_hook(
 /// Execute OnNameResolve hook across enabled plugins.
 /// Returns the first `resolved_name` from a plugin that provides one.
 /// On timeout or failure, logs the error and returns `None`.
-#[allow(dead_code)] // Will be called by prompt_github_pr (task 8.6)
+#[allow(dead_code)] // Public API for plugin-based name resolution (Jira, custom URLs)
 pub fn run_name_resolve_hook(
     raw_url: &str,
     candidate_name: &str,
@@ -547,6 +622,7 @@ pub fn run_name_resolve_hook(
                 raw_url: raw_url.to_string(),
                 candidate_name: candidate_name.to_string(),
             }),
+            rename_context: None,
         };
 
         log::debug!("run_name_resolve_hook: invoking plugin [{}]", plugin_name);

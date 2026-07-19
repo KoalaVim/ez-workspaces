@@ -25,6 +25,7 @@ regex = "1"
 log = "0.4"
 env_logger = "0.11"
 libc = "0.2"
+md5 = "0.7"
 
 [dev-dependencies]
 assert_cmd = "2"

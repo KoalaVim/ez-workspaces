@@ -1,0 +1,5 @@
+name = "cursor-mcp-auth"
+version = "0.1.0"
+description = "Shares Cursor IDE MCP auth tokens across worktree sessions"
+hooks = ["on_session_create", "on_session_delete", "on_session_rename"]
+executable = "cursor-mcp-auth-plugin"

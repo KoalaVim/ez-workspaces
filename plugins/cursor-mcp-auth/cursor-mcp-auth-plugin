@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# cursor-mcp-auth plugin for ez-workspaces
+# Symlinks Cursor IDE's mcp-auth.json from the main repo's Cursor project
+# directory to each worktree session's project directory.
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+
+set -euo pipefail
+
+# Debug logger: writes to EZ_PLUGIN_DEBUG_LOG when set (injected by --debug).
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== cursor-mcp-auth-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# Compute Cursor workspace slug from a path.
+# Cursor stores per-workspace data under ~/.cursor/projects/<slug>/
+cursor_slug() {
+    echo "$1" | sed -E 's/[^a-zA-Z0-9]/-/g; s/-+/-/g; s/^-+|-+$//g'
+}
+
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_PATH=$(echo "$REQUEST" | jq -r '.repo.path')
+SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // empty')
+IS_GIT=$(echo "$REQUEST" | jq -r '.repo.is_git // true')
+
+dbg "hook=$HOOK repo=$REPO_PATH session_path=$SESSION_PATH is_git=$IS_GIT"
+
+CURSOR_PROJECTS_DIR="${HOME}/.cursor/projects"
+
+if [ "$IS_GIT" = "false" ]; then
+    dbg "skipping: non-git repo"
+    echo '{"success": true}'
+    exit 0
+fi
+
+if [ -z "$SESSION_PATH" ]; then
+    dbg "skipping: no session path"
+    echo '{"success": true}'
+    exit 0
+fi
+
+case "$HOOK" in
+    on_session_create)
+        MAIN_SLUG=$(cursor_slug "$REPO_PATH")
+        WORKTREE_SLUG=$(cursor_slug "$SESSION_PATH")
+        SOURCE="${CURSOR_PROJECTS_DIR}/${MAIN_SLUG}/mcp-auth.json"
+
+        dbg "main_slug=$MAIN_SLUG worktree_slug=$WORKTREE_SLUG"
+        dbg "source=$SOURCE"
+
+        if [ ! -f "$SOURCE" ]; then
+            dbg "source mcp-auth.json not found, skipping"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        TARGET_DIR="${CURSOR_PROJECTS_DIR}/${WORKTREE_SLUG}"
+        TARGET="${TARGET_DIR}/mcp-auth.json"
+
+        dbg "target=$TARGET"
+
+        mkdir -p "$TARGET_DIR"
+        ln -sf "$SOURCE" "$TARGET"
+        dbg "symlink created: $TARGET -> $SOURCE"
+
+        echo '{"success": true}'
+        ;;
+
+    on_session_delete)
+        WORKTREE_SLUG=$(cursor_slug "$SESSION_PATH")
+        TARGET="${CURSOR_PROJECTS_DIR}/${WORKTREE_SLUG}/mcp-auth.json"
+
+        dbg "worktree_slug=$WORKTREE_SLUG target=$TARGET"
+
+        if [ -L "$TARGET" ]; then
+            rm "$TARGET"
+            dbg "symlink removed: $TARGET"
+        else
+            dbg "no symlink found at $TARGET, skipping"
+        fi
+
+        echo '{"success": true}'
+        ;;
+
+    on_session_rename)
+        OLD_PATH=$(echo "$REQUEST" | jq -r '.rename_context.old_path // empty')
+        NEW_PATH=$(echo "$REQUEST" | jq -r '.rename_context.new_path // empty')
+
+        dbg "old_path=$OLD_PATH new_path=$NEW_PATH"
+
+        if [ -z "$OLD_PATH" ] || [ -z "$NEW_PATH" ]; then
+            dbg "skipping: missing old_path or new_path in rename_context"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        MAIN_SLUG=$(cursor_slug "$REPO_PATH")
+        SOURCE="${CURSOR_PROJECTS_DIR}/${MAIN_SLUG}/mcp-auth.json"
+
+        # Remove old symlink
+        OLD_SLUG=$(cursor_slug "$OLD_PATH")
+        OLD_TARGET="${CURSOR_PROJECTS_DIR}/${OLD_SLUG}/mcp-auth.json"
+        if [ -L "$OLD_TARGET" ]; then
+            rm "$OLD_TARGET"
+            dbg "old symlink removed: $OLD_TARGET"
+        fi
+
+        # Create new symlink if source exists
+        if [ -f "$SOURCE" ]; then
+            NEW_SLUG=$(cursor_slug "$NEW_PATH")
+            NEW_TARGET_DIR="${CURSOR_PROJECTS_DIR}/${NEW_SLUG}"
+            NEW_TARGET="${NEW_TARGET_DIR}/mcp-auth.json"
+            mkdir -p "$NEW_TARGET_DIR"
+            ln -sf "$SOURCE" "$NEW_TARGET"
+            dbg "new symlink created: $NEW_TARGET -> $SOURCE"
+        else
+            dbg "source mcp-auth.json not found, skipping new symlink"
+        fi
+
+        echo '{"success": true}'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac

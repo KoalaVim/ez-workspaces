@@ -22,6 +22,9 @@ pub struct HookRequest {
     /// Present for OnNameResolve hooks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_resolve_context: Option<NameResolveContext>,
+    /// Present for OnSessionRename hooks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rename_context: Option<RenameContext>,
 }
 
 /// Context passed to a plugin when one of its registered binds is pressed.
@@ -59,6 +62,15 @@ pub struct NameResolveContext {
     pub raw_url: String,
     /// The candidate name derived from the URL (e.g. "pr123").
     pub candidate_name: String,
+}
+
+/// Context passed to a plugin for session rename hooks.
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct RenameContext {
+    pub old_name: String,
+    pub new_name: String,
+    pub old_path: Option<String>,
+    pub new_path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

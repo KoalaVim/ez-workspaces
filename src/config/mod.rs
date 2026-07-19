@@ -121,6 +121,11 @@ fn set_value(key: &str, value: &str) -> Result<()> {
         "on_create" => config.on_create = value.to_string(),
         "selector.backend" => config.selector.backend = value.to_string(),
         "selector.fzf_opts" => config.selector.fzf_opts = Some(value.to_string()),
+        "copy_cursor_conversations" => {
+            config.copy_cursor_conversations = value
+                .parse()
+                .map_err(|_| EzError::Config(format!("Expected true/false, got: {value}")))?;
+        }
         _ => return Err(EzError::Config(format!("Unknown key: {key}"))),
     }
     save(&config)?;
