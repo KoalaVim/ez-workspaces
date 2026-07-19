@@ -1,28 +1,6 @@
-Refinments for v1:
-- README
-
-V2:
-- mcp-auth plugin
-- make session from pr link - fetch branch from pr and set it
-- trusted-workspace plugin
-- inject env vars (e.g KOALA_ENV)
-- rename session + branch + worktree
-    - extra: copy cursor conversation
-- remove repos (non git as well)
-
-v3:
-- raycast adapter
-- pr status on session info (merged/not merged)
+v2:
+- raycast adapter refinement
 - re-work tmux resurrect to be resurrect on demand
+- inject env vars (e.g KOALA_ENV)
 
 ------------
-
-now lets do /opsx-propose with subagents on:
-
-- cursor mcp-auth plugin: /Users/ofirg/dotfiles/dotfiles/my-zsh-conf/aliases.zsh lines 173-191
-- when making session from pr link - use gh bin to see which branch its on reset --hard on this branch and then reset to merge-base of main (to make the directory show the pr changes as dirty)
-- rename session + branch + worktree
-    - extra: copy cursor conversation (see /Users/ofirg/dotfiles/scripts/cursor/copy-conv.sh)
-- ez remove <repo-path>/<dir-path (non git repo)>
-- raycast adapter
-- pr status on session info (merged/not merged) (in the metadata, use gh binary)
