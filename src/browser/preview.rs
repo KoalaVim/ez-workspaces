@@ -122,12 +122,28 @@ fn preview_session(repo_path: &Path, session_id: &str) -> Result<()> {
                     "closed" => status.red().to_string(),
                     _ => status.to_string(),
                 };
-                println!("  {} #{} {}", "pr:".bold(), num.cyan(), status_colored);
-                if let Some(url) = session.env.get("ez_pr_url") {
-                    println!("  {}", url.dimmed());
-                }
+                let url_part = session
+                    .env
+                    .get("ez_pr_url")
+                    .map(|u| format!(" {}", u.dimmed()))
+                    .unwrap_or_default();
+                println!(
+                    "  {} #{} {}{}",
+                    "pr:".bold(),
+                    num.cyan(),
+                    status_colored,
+                    url_part
+                );
             }
+        }
+    }
 
+    println!();
+    preview_keybind_help();
+
+    // Recent commits last, after keybinds
+    if let Some(ref worktree_path) = session.path {
+        if worktree_path.exists() && entry.is_git {
             println!();
             preview_section("Recent Commits");
             if let Some(log) = git_cmd(
@@ -144,9 +160,6 @@ fn preview_session(repo_path: &Path, session_id: &str) -> Result<()> {
             }
         }
     }
-
-    println!();
-    preview_keybind_help();
 
     Ok(())
 }
@@ -225,44 +238,10 @@ fn preview_repo(path: &Path) -> Result<()> {
     }
 
     println!();
+    preview_main_keybind_help();
 
-    // ── Git Info ──
-    preview_section("Git Info");
-    let branch = get_branch(path).unwrap_or_else(|| "detached".into());
-    println!("  {} {}", "branch:".bold(), branch.cyan());
-
-    if let Some(remote) = git_cmd(path, &["remote", "get-url", "origin"]) {
-        println!("  {} {}", "remote:".bold(), remote.dimmed());
-    }
-
-    let dirty_count = git_cmd(path, &["status", "--porcelain"])
-        .map(|s| s.lines().count())
-        .unwrap_or(0);
-    if dirty_count > 0 {
-        println!(
-            "  {} {}",
-            "status:".bold(),
-            format!("{dirty_count} modified file(s)").yellow()
-        );
-    } else {
-        println!("  {} {}", "status:".bold(), "clean".green());
-    }
-
-    if let Some(tags) = git_cmd(path, &["tag", "--sort=-creatordate"]) {
-        let tag_list: Vec<&str> = tags.lines().take(3).collect();
-        if !tag_list.is_empty() {
-            println!("  {}  {}", "tags:".bold(), tag_list.join(", ").magenta());
-        }
-    }
-
-    if let Some(branches) = git_cmd(path, &["branch", "--list"]) {
-        let count = branches.lines().count();
-        println!("  {} {count}", "branches:".bold());
-    }
-
+    // Recent commits last, after keybinds
     println!();
-
-    // ── Recent Commits ──
     preview_section("Recent Commits");
     if let Some(log) = git_cmd(
         path,
@@ -390,6 +369,9 @@ fn preview_non_git_repo(path: &Path) -> Result<()> {
         }
     }
 
+    println!();
+    preview_main_keybind_help();
+
     Ok(())
 }
 
@@ -473,41 +455,213 @@ fn preview_directory(path: &Path) {
             println!("  {}", "(empty)".dimmed());
         }
     }
+
+    println!();
+    preview_main_keybind_help();
+}
+
+fn fmt_key(k: &str) -> String {
+    k.replace("alt-", "Alt-")
+        .replace("ctrl-", "Ctrl-")
+        .replace("shift-", "Shift-")
+}
+
+fn ansi_pad(s: &str, width: usize) -> String {
+    let visible = console::measure_text_width(s);
+    if visible >= width {
+        s.to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(width - visible))
+    }
+}
+
+const KEYBIND_KEY_W: usize = 8;
+
+fn center_in(text: &str, width: usize) -> String {
+    let visible = console::measure_text_width(text);
+    if visible >= width {
+        return text.to_string();
+    }
+    let pad_left = (width - visible) / 2;
+    format!("{}{}", " ".repeat(pad_left), text)
+}
+
+fn keybind_col_width(entries: &[(String, String)]) -> usize {
+    let max_entry = entries
+        .iter()
+        .map(|(_k, v)| {
+            // "  " + key padded to KEYBIND_KEY_W + " " + description
+            2 + KEYBIND_KEY_W + 1 + console::measure_text_width(v)
+        })
+        .max()
+        .unwrap_or(20);
+    max_entry + 2 // breathing room
+}
+
+fn print_keybind_table(
+    left_title: &str,
+    right_title: &str,
+    left: &[(String, String)],
+    right: &[(String, String)],
+) {
+    let col_w = keybind_col_width(left);
+    let sep = "│".dimmed();
+
+    // Header
+    let left_h = center_in(&left_title.bold().cyan().to_string(), col_w);
+    let right_h = center_in(&right_title.bold().cyan().to_string(), col_w);
+    println!("{}{sep}{}", ansi_pad(&left_h, col_w), right_h);
+    println!(
+        "{}",
+        format!("{}┼{}", "─".repeat(col_w), "─".repeat(col_w)).dimmed()
+    );
+
+    // Rows
+    let rows = left.len().max(right.len());
+    for i in 0..rows {
+        let left_cell = if i < left.len() {
+            format!("  {} {}", ansi_pad(&left[i].0, KEYBIND_KEY_W), left[i].1)
+        } else {
+            String::new()
+        };
+        let right_cell = if i < right.len() {
+            format!(" {} {}", ansi_pad(&right[i].0, KEYBIND_KEY_W), right[i].1)
+        } else {
+            String::new()
+        };
+        println!("{}{sep}{}", ansi_pad(&left_cell, col_w), right_cell);
+    }
 }
 
 fn preview_keybind_help() {
     let config = config::load().unwrap_or_default();
     let keybinds = &config.keybinds;
 
-    let fmt_key = |k: &str| k.replace("alt-", "Alt-").replace("ctrl-", "Ctrl-");
-
     preview_section("Keybinds");
-    println!("  {}  Enter session", "Enter".bold().green());
-    println!(
-        "  {}  New child session",
-        fmt_key(&keybinds.new_session).bold().yellow()
-    );
-    println!(
-        "  {}  Rename session",
-        fmt_key(&keybinds.rename_session).bold().yellow()
-    );
-    println!(
-        "  {}  Delete session",
-        fmt_key(&keybinds.delete_session).bold().red()
-    );
-    println!(
-        "  {}  Edit labels",
-        fmt_key(&keybinds.edit_labels).bold().magenta()
-    );
-    println!(
-        "  {}  Cd into session worktree",
-        fmt_key(&keybinds.cd_session).bold().yellow()
-    );
+
+    let mut left: Vec<(String, String)> = vec![
+        ("Enter".bold().green().to_string(), "Enter session".into()),
+        (
+            fmt_key(&keybinds.new_session).bold().yellow().to_string(),
+            "New child session".into(),
+        ),
+        (
+            fmt_key(&keybinds.new_bare_session)
+                .bold()
+                .yellow()
+                .to_string(),
+            "New bare session".into(),
+        ),
+        (
+            fmt_key(&keybinds.session_from_dirty)
+                .bold()
+                .yellow()
+                .to_string(),
+            "From dirty".into(),
+        ),
+        (
+            fmt_key(&keybinds.rename_session)
+                .bold()
+                .yellow()
+                .to_string(),
+            "Rename".into(),
+        ),
+        (
+            fmt_key(&keybinds.delete_session).bold().red().to_string(),
+            "Delete".into(),
+        ),
+        (
+            fmt_key(&keybinds.edit_labels)
+                .bold()
+                .magenta()
+                .to_string(),
+            "Edit labels".into(),
+        ),
+        (
+            fmt_key(&keybinds.cd_session).bold().yellow().to_string(),
+            "Cd into worktree".into(),
+        ),
+    ];
     for pb in plugin::collect_plugin_binds("session", &config).unwrap_or_default() {
         let desc = pb.description.as_deref().unwrap_or(&pb.label);
-        println!("  {}  {}", fmt_key(&pb.key).bold().cyan(), desc);
+        left.push((fmt_key(&pb.key).bold().cyan().to_string(), desc.into()));
     }
-    println!("  {}  Go back", "Esc".bold().dimmed());
+
+    let mut right: Vec<(String, String)> = vec![
+        (
+            fmt_key(&keybinds.sort_toggle).bold().yellow().to_string(),
+            "Toggle sort".into(),
+        ),
+        ("Esc".bold().dimmed().to_string(), "Go back".into()),
+    ];
+    for pv in plugin::collect_plugin_views("session", &config).unwrap_or_default() {
+        right.push((
+            fmt_key(&pv.key).bold().cyan().to_string(),
+            format!("{} view", pv.label),
+        ));
+    }
+
+    print_keybind_table("Session", "Menu", &left, &right);
+}
+
+fn preview_main_keybind_help() {
+    let config = config::load().unwrap_or_default();
+    let keybinds = &config.keybinds;
+
+    preview_section("Keybinds");
+
+    let left: Vec<(String, String)> = vec![
+        (
+            "Enter".bold().green().to_string(),
+            "Open sessions".into(),
+        ),
+        (
+            fmt_key(&keybinds.edit_labels)
+                .bold()
+                .magenta()
+                .to_string(),
+            "Edit labels".into(),
+        ),
+        (
+            fmt_key(&keybinds.sort_toggle).bold().yellow().to_string(),
+            "Toggle sort".into(),
+        ),
+        ("Esc".bold().dimmed().to_string(), "Quit".into()),
+    ];
+
+    let mut right: Vec<(String, String)> = vec![
+        (
+            fmt_key(&keybinds.view_tree).bold().yellow().to_string(),
+            "Tree".into(),
+        ),
+        (
+            fmt_key(&keybinds.view_workspace)
+                .bold()
+                .yellow()
+                .to_string(),
+            "Workspace".into(),
+        ),
+        (
+            fmt_key(&keybinds.view_repo).bold().yellow().to_string(),
+            "Repo".into(),
+        ),
+        (
+            fmt_key(&keybinds.view_owner).bold().yellow().to_string(),
+            "Owner".into(),
+        ),
+        (
+            fmt_key(&keybinds.view_label).bold().yellow().to_string(),
+            "Label".into(),
+        ),
+    ];
+    for pv in plugin::collect_plugin_views("repo", &config).unwrap_or_default() {
+        right.push((
+            fmt_key(&pv.key).bold().cyan().to_string(),
+            pv.label.clone(),
+        ));
+    }
+
+    print_keybind_table("Repo", "Views", &left, &right);
 }
 
 fn preview_section(title: &str) {

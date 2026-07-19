@@ -164,15 +164,8 @@ pub(super) fn match_view_switch(
 
 pub(super) fn view_header(
     current: &str,
-    kb: &config::model::KeybindsConfig,
-    plugin_views: &[plugin::PluginViewInfo],
+    _kb: &config::model::KeybindsConfig,
+    _plugin_views: &[plugin::PluginViewInfo],
 ) -> String {
-    let mut header = format!(
-        "view: {} │ {}:tree {}:workspace {}:repo {}:owner {}:label",
-        current, kb.view_tree, kb.view_workspace, kb.view_repo, kb.view_owner, kb.view_label,
-    );
-    for pv in plugin_views {
-        header.push_str(&format!(" {}:{}", pv.key, pv.label));
-    }
-    header
+    format!("view: {current}")
 }

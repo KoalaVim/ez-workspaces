@@ -71,12 +71,11 @@ pub(super) fn run(
             })
             .collect();
 
-        let base_header = view_header("repo", &config.keybinds, &plugin_views);
         let header = format!(
-            "sort: {} ({})  {}",
+            "{}  sort: {} ({})",
+            view_header("repo", &config.keybinds, &plugin_views),
             sort_mode.label(),
             config.keybinds.sort_toggle,
-            base_header,
         );
         let keys = {
             let mut k = view_switch_keys(&config.keybinds, &plugin_views);

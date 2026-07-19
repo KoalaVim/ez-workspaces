@@ -276,7 +276,7 @@ fn default_selector_backend() -> String {
 }
 
 fn default_fzf_height() -> String {
-    "90%".into()
+    "100%".into()
 }
 
 fn default_bind_new() -> String {

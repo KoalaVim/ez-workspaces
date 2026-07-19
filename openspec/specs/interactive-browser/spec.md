@@ -13,9 +13,9 @@ The browser SHALL support multiple top-level views: Tree, Workspace, Repo, Owner
 - **WHEN** user presses Ctrl-e (default) while in the Workspace view
 - **THEN** browser exits the current fzf instance and renders the Repo view
 
-#### Scenario: View header shows available switches
+#### Scenario: View header shows current view
 - **WHEN** any view is displayed
-- **THEN** the fzf header shows the current view name and all available view-switch keybinds (including plugin views)
+- **THEN** the fzf header shows only the current view name (keybinds are shown in the preview pane instead)
 
 #### Scenario: Select starting view
 - **WHEN** user runs `ez --select-by tree`
@@ -157,15 +157,35 @@ The browser SHALL auto-detect whether the user is inside a registered repo (or o
 - **THEN** auto-detection is skipped and the full view layer is shown
 
 ### Requirement: Preview pane
-The browser SHALL show a preview pane (right 50%) in fzf. The preview calls back into the ez binary (`ez preview <path>`) to render repo info, git status, or keybind help depending on context.
+The browser SHALL show a preview pane (right 50%) in fzf. The preview calls back into the ez binary (`ez preview <path>`) to render context-dependent information. The fzf title/header SHALL only show minimal state (current view name, sort mode) — all keybinds SHALL be displayed in the preview pane instead.
 
 #### Scenario: Repo preview
-- **WHEN** user highlights a repo or directory in the browser
-- **THEN** preview pane shows git branch, recent commits, and repo info
+- **WHEN** user highlights a repo in the main view (Repo, Tree, Workspace, etc.)
+- **THEN** preview pane shows Sessions tree, Repo Labels (if any), a two-column Keybinds table (Repo actions | View switches), and Recent Commits (last section)
+- **AND** does NOT show a Git Info section (branch, remote, status) since sessions carry that context
 
-#### Scenario: Session actions preview
-- **WHEN** user is in the session picker
-- **THEN** preview pane shows keybind help for available session actions
+#### Scenario: Session-specific preview
+- **WHEN** user is in the session action loop and highlights a session
+- **THEN** preview receives the session ID via `--session-id` and renders a session-specific preview
+- **AND** shows Metadata (repo name, worktree path, last used as `dd/mm/yyyy HH:MM (X ago)`, labels)
+- **AND** shows Git Info for the session's worktree (branch, dirty status)
+- **AND** shows PR status inline (pr number, state, URL on same line) when `ez_pr_number` is set
+- **AND** shows a two-column Keybinds table (Session actions | Menu actions)
+- **AND** shows Recent Commits as the last section
+
+#### Scenario: Keybind table layout
+- **WHEN** keybinds are displayed in the preview pane
+- **THEN** they render as a single section with two columns separated by a vertical line
+- **AND** column headers are centered and cyan, separated from rows by a horizontal divider
+- **AND** column width adapts dynamically to the widest entry using ANSI-aware measurement
+
+#### Scenario: Directory preview
+- **WHEN** user highlights a non-repo directory
+- **THEN** preview pane shows directory contents (repos with branch, subdirectories) and Keybinds table
+
+#### Scenario: Non-git repo preview
+- **WHEN** user highlights a registered non-git directory
+- **THEN** preview pane shows Sessions tree, Repo Labels, directory Contents, and Keybinds table
 
 ### Requirement: Label input parsing
 The browser SHALL parse comma-separated label edit strings where labels prefixed with `-` indicate removal.
@@ -203,7 +223,7 @@ The browser SHALL support a `ctrl-s` keybind in all views (Repo, Workspace, Owne
 
 #### Scenario: Sort indicator in header
 - **WHEN** LRU sort is active
-- **THEN** the fzf header displays "Sort: LRU" alongside the view name
+- **THEN** the fzf header displays "sort: LRU (ctrl-s)" alongside the view name
 
 #### Scenario: Sort persists across views
 - **WHEN** user toggles to LRU and switches from Repo view to Workspace view

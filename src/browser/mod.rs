@@ -339,24 +339,7 @@ pub(crate) fn session_action_loop(
             )
         });
 
-        let mut header = format!(
-            "sort: {} ({})  {}: new  {}: bare  {}: from dirty  {}: rename  {}: delete  {}: labels  {}: cd",
-            sort_mode.label(),
-            keybinds.sort_toggle,
-            keybinds.new_session,
-            keybinds.new_bare_session,
-            keybinds.session_from_dirty,
-            keybinds.rename_session,
-            keybinds.delete_session,
-            keybinds.edit_labels,
-            keybinds.cd_session,
-        );
-        for pv in &plugin_views {
-            header.push_str(&format!("  {}:{}", pv.key, pv.label));
-        }
-        for pb in &plugin_binds {
-            header.push_str(&format!("  {}:{}", pb.key, pb.label));
-        }
+        let header = format!("sort: {} ({})", sort_mode.label(), keybinds.sort_toggle);
 
         let mut expect_keys: Vec<&str> = vec![
             keybinds.new_session.as_str(),
