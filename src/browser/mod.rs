@@ -395,7 +395,7 @@ pub(crate) fn session_action_loop(
         match action {
             ActionResult::Select(idx) => {
                 let selected = rendered[idx].session;
-                update_last_accessed(&repo_entry.id, &selected.id);
+                update_last_accessed(repo_entry, &selected.id);
                 let target_dir = selected
                     .path
                     .as_ref()
@@ -749,17 +749,19 @@ pub(crate) fn drill_into_directory(
 }
 
 /// Update `last_accessed` timestamp on a session and its repo after browser selection.
-fn update_last_accessed(repo_id: &str, session_id: &str) {
+/// Also triggers PR auto-detection if the session has no PR metadata.
+fn update_last_accessed(repo_entry: &repo::model::RepoEntry, session_id: &str) {
     let now = chrono::Utc::now().to_rfc3339();
-    if let Ok(mut tree) = session::store::load_sessions(repo_id) {
+    if let Ok(mut tree) = session::store::load_sessions(&repo_entry.id) {
+        session::detect_pr_for_session(&mut tree, session_id, repo_entry);
         if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session_id) {
             s.last_accessed = Some(now.clone());
         }
-        let _ = session::store::save_sessions(repo_id, &tree);
+        let _ = session::store::save_sessions(&repo_entry.id, &tree);
     }
-    if let Ok(mut meta) = repo::store::load_repo_meta(repo_id) {
+    if let Ok(mut meta) = repo::store::load_repo_meta(&repo_entry.id) {
         meta.last_accessed = Some(now);
-        let _ = repo::store::save_repo_meta(repo_id, &meta);
+        let _ = repo::store::save_repo_meta(&repo_entry.id, &meta);
     }
 }
 

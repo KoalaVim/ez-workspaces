@@ -788,6 +788,115 @@ fn refresh_pr_status(tree: &mut SessionTree, session_id: &str) {
     }
 }
 
+/// Auto-detect a GitHub PR for a session by its branch name.
+/// Skips bare sessions, non-git repos, default sessions, and sessions that
+/// already have `ez_pr_number` set. Returns `true` if PR metadata was populated.
+pub(crate) fn detect_pr_for_session(
+    tree: &mut SessionTree,
+    session_id: &str,
+    repo_entry: &crate::repo::model::RepoEntry,
+) -> bool {
+    let (branch, should_detect) = {
+        let session = match tree.sessions.iter().find(|s| s.id == session_id) {
+            Some(s) => s,
+            None => return false,
+        };
+        if session.bare || session.is_default || !repo_entry.is_git {
+            return false;
+        }
+        if session.env.contains_key("ez_pr_number") {
+            return false;
+        }
+        let path = match &session.path {
+            Some(p) if p.exists() => p.clone(),
+            _ => return false,
+        };
+        let branch = git_output(&path, &["rev-parse", "--abbrev-ref", "HEAD"])
+            .ok()
+            .filter(|b| b != "HEAD");
+        let should = branch.is_some();
+        (branch, should)
+    };
+
+    if !should_detect {
+        return false;
+    }
+    let branch = match branch {
+        Some(b) => b,
+        None => return false,
+    };
+
+    if which::which("gh").is_err() {
+        log::debug!("detect_pr_for_session: gh not found, skipping");
+        return false;
+    }
+
+    log::debug!("detect_pr_for_session: checking for PR on branch '{branch}'");
+
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "list",
+            "--head",
+            &branch,
+            "--state",
+            "all",
+            "--json",
+            "number,url,state",
+            "--limit",
+            "1",
+        ])
+        .current_dir(&repo_entry.path)
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let prs: Vec<serde_json::Value> = match serde_json::from_slice(&o.stdout) {
+                Ok(v) => v,
+                Err(e) => {
+                    log::debug!("detect_pr_for_session: failed to parse gh output: {e}");
+                    return false;
+                }
+            };
+            let pr = match prs.first() {
+                Some(pr) => pr,
+                None => {
+                    log::debug!("detect_pr_for_session: no PR found for branch '{branch}'");
+                    return false;
+                }
+            };
+            let number = pr.get("number").and_then(|v| v.as_u64());
+            let url = pr.get("url").and_then(|v| v.as_str());
+            let state = pr.get("state").and_then(|v| v.as_str()).unwrap_or("open");
+
+            if let (Some(number), Some(url)) = (number, url) {
+                log::debug!(
+                    "detect_pr_for_session: found PR #{number} ({state}) for branch '{branch}'"
+                );
+                if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session_id) {
+                    s.env.insert("ez_pr_number".into(), number.to_string());
+                    s.env.insert("ez_pr_url".into(), url.to_string());
+                    s.env.insert("ez_pr_status".into(), state.to_lowercase());
+                    s.env
+                        .insert("ez_pr_status_updated".into(), Utc::now().to_rfc3339());
+                }
+                return true;
+            }
+            false
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            log::debug!("detect_pr_for_session: gh pr list failed: {stderr}");
+            false
+        }
+        Err(e) => {
+            log::debug!("detect_pr_for_session: failed to run gh: {e}");
+            false
+        }
+    }
+}
+
 fn enter_session(
     name: &str,
     repo_arg: Option<&str>,
@@ -818,7 +927,10 @@ fn enter_session(
         &mut tree,
     )?;
 
-    refresh_pr_status(&mut tree, &session.id);
+    let detected = detect_pr_for_session(&mut tree, &session.id, &repo_entry);
+    if !detected {
+        refresh_pr_status(&mut tree, &session.id);
+    }
 
     let now = Utc::now().to_rfc3339();
     if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session.id) {
