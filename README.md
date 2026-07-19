@@ -1,5 +1,7 @@
 # ez-workspaces
 
+<img width="1254" height="1254" alt="ChatGPT Image Jul 19, 2026, 04_44_15 PM" src="https://github.com/user-attachments/assets/b77cae31-5043-480d-9142-a3214803191d" />
+
 A fast, plugin-extensible workspace and session manager for git repos. Browse, create, and switch between worktree-based sessions with a single command.
 
 <!-- TODO: Add demo GIF here -->
