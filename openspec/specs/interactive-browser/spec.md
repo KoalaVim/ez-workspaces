@@ -98,7 +98,7 @@ When a repo is selected, the browser SHALL enter a session action loop that repe
 
 #### Scenario: Rename session
 - **WHEN** user presses Alt-r on a session
-- **THEN** system prompts for a new name, renames the session, and re-renders
+- **THEN** system prompts for a new name, renames the session (including branch and worktree if applicable), and re-renders
 
 #### Scenario: Edit labels
 - **WHEN** user presses Alt-l on a session
@@ -109,7 +109,7 @@ When a repo is selected, the browser SHALL enter a session action loop that repe
 - **THEN** system runs the plugin's `OnBind` hook with the session context
 
 #### Scenario: Cd keybind
-- **WHEN** user presses the `cd_session` keybind (default Alt-c) on a session
+- **WHEN** user presses the `cd_session` keybind (default Ctrl-d) on a session
 - **THEN** system writes the session's worktree path to the cd-file regardless of the configured `on_enter` action
 - **THEN** the browser exits and the shell wrapper cd's into that path
 
@@ -132,6 +132,14 @@ When a repo is selected, the browser SHALL enter a session action loop that repe
 #### Scenario: Sort toggle in session loop
 - **WHEN** user presses `ctrl-s` in the session action loop
 - **THEN** session list re-renders sorted by LRU or alphabetical (toggled)
+
+#### Scenario: PR status indicator in session display
+- **WHEN** a session has `ez_pr_number` and `ez_pr_status` in its env
+- **THEN** the session line displays a colored PR status indicator (e.g. `[PR #42 open]` in green, `[PR #42 merged]` in magenta)
+
+#### Scenario: Full rename in browser
+- **WHEN** user presses Alt-r on a git-backed session and enters a new name
+- **THEN** system renames the git branch, moves the worktree directory, updates the session metadata, and re-renders
 
 ### Requirement: Auto-detect current repo
 The browser SHALL auto-detect whether the user is inside a registered repo (or one of its worktrees) and skip directly to the session picker. This uses `git rev-parse --git-common-dir` to resolve the main repo root from worktrees.

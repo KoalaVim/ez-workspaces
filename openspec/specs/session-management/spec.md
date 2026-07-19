@@ -80,6 +80,10 @@ The system SHALL delete a session by ID, removing it from `sessions.toml`. If th
 ### Requirement: Enter session
 The system SHALL enter a session by applying the `on_enter` action. The default action is `cd` (write the session's worktree path to the cd-file). The action can be overridden to a plugin-bind name (e.g. `tmux`), which runs that bind's `OnBind` hook. If the plugin bind produces no navigation effect, the system SHALL fall back to `cd`.
 
+Before applying the enter action, if the session is git-backed, not bare, not the default session, has no `ez_pr_number` in its env, and `gh` is available, the system SHALL attempt to auto-detect a GitHub PR associated with the session's branch using `gh pr list --head <branch> --state all --json number,url,state --limit 1`. If a PR is found, the system SHALL populate `ez_pr_number`, `ez_pr_url`, and `ez_pr_status` in the session env and persist the change. Detection is best-effort and SHALL be silently skipped if `gh` is not installed, not authenticated, or the command fails.
+
+If the session already has `ez_pr_number` set, the existing refresh logic (re-check if status is older than 5 minutes) SHALL apply instead.
+
 #### Scenario: Default cd enter
 - **WHEN** user enters a session with `on_enter = "cd"`
 - **THEN** system writes the session's path to the cd-file for the shell wrapper to cd into
@@ -93,6 +97,22 @@ The system SHALL enter a session by applying the `on_enter` action. The default 
 - **WHEN** the plugin bind produces no navigation effect or fails
 - **THEN** system falls back to plain `cd` into the session path
 
+#### Scenario: Auto-detect PR on session enter
+- **WHEN** user enters a git-backed, non-bare, non-default session that has no `ez_pr_number` env
+- **AND** `gh` CLI is installed and the session's branch has a PR on GitHub
+- **THEN** the system populates `ez_pr_number`, `ez_pr_url`, `ez_pr_status` in the session env
+- **AND** persists the updated session to disk
+- **AND** the PR indicator appears in the session picker on subsequent renders
+
+#### Scenario: Auto-detect PR with no PR found
+- **WHEN** user enters a session whose branch has no associated PR
+- **THEN** no env vars are set and the session is unchanged
+- **AND** the next enter will attempt detection again
+
+#### Scenario: Auto-detect PR without gh
+- **WHEN** `gh` CLI is not installed or not authenticated
+- **THEN** detection is silently skipped with a debug log
+
 ### Requirement: Exit session
 The system SHALL exit the current session by running `OnSessionExit` plugin hooks.
 
@@ -101,11 +121,41 @@ The system SHALL exit the current session by running `OnSessionExit` plugin hook
 - **THEN** system runs `OnSessionExit` hooks for the current session
 
 ### Requirement: Rename session
-The system SHALL rename a session by ID, updating its name in `sessions.toml` and running `OnSessionRename` plugin hooks.
+The system SHALL rename a session by ID, updating its name in `sessions.toml` and running `OnSessionRename` plugin hooks. For git-backed sessions, the system SHALL also rename the git branch (`git branch -m <old> <new>`) and move the worktree directory (`git worktree move <old-path> <new-path>`). The session's `path` SHALL be updated to reflect the new worktree location. Optionally, the system SHALL copy Cursor IDE conversations from the old workspace slug to the new one.
 
 #### Scenario: Rename session
 - **WHEN** user runs `ez session rename old-name new-name`
 - **THEN** system updates the session name and runs `OnSessionRename` hooks
+
+#### Scenario: Rename updates git branch
+- **WHEN** user renames a session that has a git worktree
+- **THEN** system runs `git branch -m old-name new-name` in the worktree
+- **THEN** the branch name in the worktree matches the new session name
+
+#### Scenario: Rename moves worktree directory
+- **WHEN** user renames a session that has a worktree at `.ez/repo/old-name`
+- **THEN** system runs `git worktree move` to `.ez/repo/new-name`
+- **THEN** the session's `path` is updated to the new location
+
+#### Scenario: Rename with Cursor conversation copy
+- **WHEN** user renames a session and `copy_cursor_conversations` is enabled
+- **THEN** system computes old and new Cursor workspace slugs
+- **THEN** copies agent-transcripts and chats directories from old slug to new slug
+
+#### Scenario: Rename bare session
+- **WHEN** user renames a bare session
+- **THEN** system updates only the session name in metadata (no branch or worktree operations)
+
+#### Scenario: Rename non-git session
+- **WHEN** user renames a session under a non-git repo
+- **THEN** system updates only the session name (no git branch or worktree operations)
+
+### Requirement: Rename hook protocol
+The `OnSessionRename` hook request SHALL include a `rename_context` with `old_name`, `new_name`, `old_path` (optional), and `new_path` (optional). Plugins SHALL use this context to update their own state (e.g. tmux session name, cursor-mcp-auth symlinks).
+
+#### Scenario: Plugin receives rename context
+- **WHEN** a session is renamed and `OnSessionRename` hooks fire
+- **THEN** each plugin receives `rename_context` with old and new names and paths
 
 ### Requirement: Register existing worktree
 The system SHALL register an existing git worktree as a session without running `OnSessionCreate` hooks. It resolves the worktree root and common repo via `git rev-parse`, matches that repo to the registered repo index, and writes a `Session` with `path` set to the existing worktree. If no parent is specified, the system SHALL default `parent_id` to the repo's default (main) session.
@@ -132,6 +182,10 @@ Sessions SHALL be organized in a tree using `parent_id` pointers. The system SHA
 #### Scenario: Flat list
 - **WHEN** user runs `ez session list --flat`
 - **THEN** system renders sessions as a flat list without tree structure
+
+#### Scenario: JSON session list
+- **WHEN** user runs `ez session list --json --repo my-repo`
+- **THEN** system outputs a JSON array of session objects with fields: `id`, `name`, `parent_id`, `path`, `bare`, `labels`, `last_accessed`, `env`, `is_default`
 
 ### Requirement: Default session
 The system SHALL auto-create a `main` session (marked `is_default = true`) when a repo's session list is empty. This ensures every repo always has at least one session.
