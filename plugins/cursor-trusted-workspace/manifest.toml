@@ -1,0 +1,5 @@
+name = "cursor-trusted-workspace"
+version = "0.1.0"
+description = "Auto-trusts Cursor IDE workspaces for worktree sessions"
+hooks = ["on_session_create", "on_session_delete", "on_session_rename"]
+executable = "cursor-trusted-workspace-plugin"

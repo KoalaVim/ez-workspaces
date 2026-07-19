@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# cursor-mcp-approvals plugin for ez-workspaces
+# Auto-approves MCP servers in Cursor IDE for worktree sessions by
+# computing approval IDs from .cursor/mcp.json and writing them to
+# the worktree's Cursor project directory.
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+
+set -euo pipefail
+
+# Debug logger: writes to EZ_PLUGIN_DEBUG_LOG when set (injected by --debug).
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== cursor-mcp-approvals-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# Compute Cursor workspace slug from a path.
+# Cursor stores per-workspace data under ~/.cursor/projects/<slug>/
+cursor_slug() {
+    echo "$1" | sed -E 's/[^a-zA-Z0-9]/-/g; s/-+/-/g; s/^-+|-+$//g'
+}
+
+# Compute approval IDs for all MCP servers defined in .cursor/mcp.json.
+# Outputs a JSON array of approval ID strings.
+compute_approval_ids() {
+    local repo_path="$1"
+    local worktree_path="$2"
+    local mcp_file="${repo_path}/.cursor/mcp.json"
+
+    if [ ! -f "$mcp_file" ]; then
+        dbg "no .cursor/mcp.json at $mcp_file"
+        echo '[]'
+        return
+    fi
+
+    local mcp_json
+    mcp_json=$(cat "$mcp_file")
+
+    local server_names
+    server_names=$(echo "$mcp_json" | jq -r '.mcpServers // {} | keys[]' 2>/dev/null || true)
+
+    if [ -z "$server_names" ]; then
+        dbg "no mcpServers found in mcp.json"
+        echo '[]'
+        return
+    fi
+
+    local ids=()
+    while IFS= read -r server_name; do
+        [ -n "$server_name" ] || continue
+        local server_config
+        server_config=$(echo "$mcp_json" | jq -c ".mcpServers[\"$server_name\"]")
+        local hash_input
+        hash_input=$(printf '{"path":"%s","server":%s}' "$worktree_path" "$server_config")
+        local hash
+        hash=$(printf '%s' "$hash_input" | shasum -a 256 | cut -c1-16)
+        local approval_id="${server_name}-${hash}"
+        dbg "server=$server_name hash_input=$hash_input approval_id=$approval_id"
+        ids+=("$approval_id")
+    done <<< "$server_names"
+
+    printf '%s\n' "${ids[@]}" | jq -R . | jq -s .
+}
+
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_PATH=$(echo "$REQUEST" | jq -r '.repo.path')
+SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // empty')
+IS_GIT=$(echo "$REQUEST" | jq -r '.repo.is_git // true')
+
+dbg "hook=$HOOK repo=$REPO_PATH session_path=$SESSION_PATH is_git=$IS_GIT"
+
+CURSOR_PROJECTS_DIR="${HOME}/.cursor/projects"
+
+if [ "$IS_GIT" = "false" ]; then
+    dbg "skipping: non-git repo"
+    echo '{"success": true}'
+    exit 0
+fi
+
+if [ -z "$SESSION_PATH" ]; then
+    dbg "skipping: no session path"
+    echo '{"success": true}'
+    exit 0
+fi
+
+case "$HOOK" in
+    on_session_create)
+        MCP_FILE="${REPO_PATH}/.cursor/mcp.json"
+
+        if [ ! -f "$MCP_FILE" ]; then
+            dbg "no .cursor/mcp.json found, skipping"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        WORKTREE_SLUG=$(cursor_slug "$SESSION_PATH")
+        TARGET_DIR="${CURSOR_PROJECTS_DIR}/${WORKTREE_SLUG}"
+        TARGET="${TARGET_DIR}/mcp-approvals.json"
+
+        dbg "worktree_slug=$WORKTREE_SLUG target=$TARGET"
+
+        APPROVAL_IDS=$(compute_approval_ids "$REPO_PATH" "$SESSION_PATH")
+        dbg "approval_ids=$APPROVAL_IDS"
+
+        mkdir -p "$TARGET_DIR"
+        TMP_FILE="${TARGET}.tmp.$$"
+        printf '%s\n' "$APPROVAL_IDS" > "$TMP_FILE"
+        mv "$TMP_FILE" "$TARGET"
+        dbg "approvals written to $TARGET"
+
+        echo '{"success": true}'
+        ;;
+
+    on_session_delete)
+        WORKTREE_SLUG=$(cursor_slug "$SESSION_PATH")
+        TARGET="${CURSOR_PROJECTS_DIR}/${WORKTREE_SLUG}/mcp-approvals.json"
+
+        dbg "worktree_slug=$WORKTREE_SLUG target=$TARGET"
+
+        if [ -f "$TARGET" ]; then
+            rm "$TARGET"
+            dbg "approvals file removed: $TARGET"
+        else
+            dbg "no approvals file found at $TARGET, skipping"
+        fi
+
+        echo '{"success": true}'
+        ;;
+
+    on_session_rename)
+        OLD_PATH=$(echo "$REQUEST" | jq -r '.rename_context.old_path // empty')
+        NEW_PATH=$(echo "$REQUEST" | jq -r '.rename_context.new_path // empty')
+
+        dbg "old_path=$OLD_PATH new_path=$NEW_PATH"
+
+        if [ -z "$OLD_PATH" ] || [ -z "$NEW_PATH" ]; then
+            dbg "skipping: missing old_path or new_path in rename_context"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        # Remove old approvals file
+        OLD_SLUG=$(cursor_slug "$OLD_PATH")
+        OLD_TARGET="${CURSOR_PROJECTS_DIR}/${OLD_SLUG}/mcp-approvals.json"
+        if [ -f "$OLD_TARGET" ]; then
+            rm "$OLD_TARGET"
+            dbg "old approvals file removed: $OLD_TARGET"
+        fi
+
+        # Recompute and write new approvals file
+        MCP_FILE="${REPO_PATH}/.cursor/mcp.json"
+        if [ -f "$MCP_FILE" ]; then
+            NEW_SLUG=$(cursor_slug "$NEW_PATH")
+            NEW_TARGET_DIR="${CURSOR_PROJECTS_DIR}/${NEW_SLUG}"
+            NEW_TARGET="${NEW_TARGET_DIR}/mcp-approvals.json"
+
+            APPROVAL_IDS=$(compute_approval_ids "$REPO_PATH" "$NEW_PATH")
+            dbg "approval_ids=$APPROVAL_IDS"
+
+            mkdir -p "$NEW_TARGET_DIR"
+            TMP_FILE="${NEW_TARGET}.tmp.$$"
+            printf '%s\n' "$APPROVAL_IDS" > "$TMP_FILE"
+            mv "$TMP_FILE" "$NEW_TARGET"
+            dbg "new approvals written to $NEW_TARGET"
+        else
+            dbg "no .cursor/mcp.json found, skipping new approvals"
+        fi
+
+        echo '{"success": true}'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac

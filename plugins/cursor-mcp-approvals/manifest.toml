@@ -1,0 +1,5 @@
+name = "cursor-mcp-approvals"
+version = "0.1.0"
+description = "Auto-approves MCP servers in Cursor IDE for worktree sessions"
+hooks = ["on_session_create", "on_session_delete", "on_session_rename"]
+executable = "cursor-mcp-approvals-plugin"

@@ -250,12 +250,24 @@ ez completions fish > ~/.config/fish/completions/ez.fish
 
 ## Plugins
 
-Built-in plugins (git-worktree, tmux) are bundled in the binary and auto-extracted on first use. Just enable them:
+Built-in plugins are bundled in the binary and auto-extracted on first use. Just enable them:
 
 ```bash
 ez plugin enable git-worktree
 ez plugin enable tmux
 ```
+
+### Cursor IDE Plugins
+
+Three plugins provide seamless Cursor IDE integration across worktree sessions:
+
+```bash
+ez plugin enable cursor-mcp-auth          # Share MCP OAuth tokens across worktrees
+ez plugin enable cursor-trusted-workspace  # Auto-trust worktree workspaces (skip trust prompt)
+ez plugin enable cursor-mcp-approvals      # Auto-approve MCP servers (skip per-server prompts)
+```
+
+These plugins ensure that when you open a worktree session in Cursor, all MCP servers (Jira, Notion, Figma, Slack, etc.) work immediately without re-authentication or re-approval.
 
 Plugins can register custom views (shown as extra keybinds in the browser), declare configuration options, and run commands in the user's shell after ez exits. See [Plugin Guide](docs/plugin-guide.md).
 

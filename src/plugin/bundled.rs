@@ -32,6 +32,22 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
         executable_name: "cursor-mcp-auth-plugin",
         executable: include_str!("../../plugins/cursor-mcp-auth/cursor-mcp-auth-plugin"),
     },
+    BundledPlugin {
+        name: "cursor-trusted-workspace",
+        manifest: include_str!("../../plugins/cursor-trusted-workspace/manifest.toml"),
+        executable_name: "cursor-trusted-workspace-plugin",
+        executable: include_str!(
+            "../../plugins/cursor-trusted-workspace/cursor-trusted-workspace-plugin"
+        ),
+    },
+    BundledPlugin {
+        name: "cursor-mcp-approvals",
+        manifest: include_str!("../../plugins/cursor-mcp-approvals/manifest.toml"),
+        executable_name: "cursor-mcp-approvals-plugin",
+        executable: include_str!(
+            "../../plugins/cursor-mcp-approvals/cursor-mcp-approvals-plugin"
+        ),
+    },
 ];
 
 /// Ensure all bundled plugins are extracted to the plugins directory.

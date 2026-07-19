@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# cursor-trusted-workspace plugin for ez-workspaces
+# Auto-trusts Cursor IDE workspaces for worktree sessions by creating
+# .workspace-trusted files in Cursor's project directories.
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+
+set -euo pipefail
+
+# Debug logger: writes to EZ_PLUGIN_DEBUG_LOG when set (injected by --debug).
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== cursor-trusted-workspace-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# Compute Cursor workspace slug from a path.
+# Cursor stores per-workspace data under ~/.cursor/projects/<slug>/
+cursor_slug() {
+    echo "$1" | sed -E 's/[^a-zA-Z0-9]/-/g; s/-+/-/g; s/^-+|-+$//g'
+}
+
+# Write a .workspace-trusted file atomically for the given path and slug.
+write_trusted_file() {
+    local session_path="$1"
+    local slug="$2"
+    local target_dir="${CURSOR_PROJECTS_DIR}/${slug}"
+    local target="${target_dir}/.workspace-trusted"
+    local timestamp
+    timestamp=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+    mkdir -p "$target_dir"
+
+    local tmpfile
+    tmpfile=$(mktemp "${target_dir}/.workspace-trusted.XXXXXX")
+    printf '{"trustedAt":"%s","workspacePath":"%s"}' "$timestamp" "$session_path" > "$tmpfile"
+    mv "$tmpfile" "$target"
+    dbg "wrote trusted file: $target"
+}
+
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_PATH=$(echo "$REQUEST" | jq -r '.repo.path')
+SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // empty')
+IS_GIT=$(echo "$REQUEST" | jq -r '.repo.is_git // true')
+
+dbg "hook=$HOOK repo=$REPO_PATH session_path=$SESSION_PATH is_git=$IS_GIT"
+
+CURSOR_PROJECTS_DIR="${HOME}/.cursor/projects"
+
+if [ "$IS_GIT" = "false" ]; then
+    dbg "skipping: non-git repo"
+    echo '{"success": true}'
+    exit 0
+fi
+
+if [ -z "$SESSION_PATH" ]; then
+    dbg "skipping: no session path"
+    echo '{"success": true}'
+    exit 0
+fi
+
+case "$HOOK" in
+    on_session_create)
+        WORKTREE_SLUG=$(cursor_slug "$SESSION_PATH")
+        dbg "worktree_slug=$WORKTREE_SLUG"
+
+        write_trusted_file "$SESSION_PATH" "$WORKTREE_SLUG"
+
+        echo '{"success": true}'
+        ;;
+
+    on_session_delete)
+        WORKTREE_SLUG=$(cursor_slug "$SESSION_PATH")
+        TARGET="${CURSOR_PROJECTS_DIR}/${WORKTREE_SLUG}/.workspace-trusted"
+
+        dbg "worktree_slug=$WORKTREE_SLUG target=$TARGET"
+
+        if [ -f "$TARGET" ]; then
+            rm "$TARGET"
+            dbg "trusted file removed: $TARGET"
+        else
+            dbg "no trusted file found at $TARGET, skipping"
+        fi
+
+        echo '{"success": true}'
+        ;;
+
+    on_session_rename)
+        OLD_PATH=$(echo "$REQUEST" | jq -r '.rename_context.old_path // empty')
+        NEW_PATH=$(echo "$REQUEST" | jq -r '.rename_context.new_path // empty')
+
+        dbg "old_path=$OLD_PATH new_path=$NEW_PATH"
+
+        if [ -z "$OLD_PATH" ] || [ -z "$NEW_PATH" ]; then
+            dbg "skipping: missing old_path or new_path in rename_context"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        # Remove old trusted file
+        OLD_SLUG=$(cursor_slug "$OLD_PATH")
+        OLD_TARGET="${CURSOR_PROJECTS_DIR}/${OLD_SLUG}/.workspace-trusted"
+        if [ -f "$OLD_TARGET" ]; then
+            rm "$OLD_TARGET"
+            dbg "old trusted file removed: $OLD_TARGET"
+        fi
+
+        # Create new trusted file
+        NEW_SLUG=$(cursor_slug "$NEW_PATH")
+        write_trusted_file "$NEW_PATH" "$NEW_SLUG"
+        dbg "new trusted file created for slug=$NEW_SLUG"
+
+        echo '{"success": true}'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac

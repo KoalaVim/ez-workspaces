@@ -83,6 +83,11 @@ Built-in plugins are bundled in the binary and auto-extracted on first use:
 ```bash
 ez plugin enable git-worktree
 ez plugin enable tmux
+
+# Cursor IDE integration (enable all three for full support)
+ez plugin enable cursor-mcp-auth           # Share MCP OAuth tokens across worktrees
+ez plugin enable cursor-trusted-workspace  # Auto-trust worktree workspaces
+ez plugin enable cursor-mcp-approvals      # Auto-approve MCP servers in worktrees
 ```
 
 ### 4. Create and use sessions
