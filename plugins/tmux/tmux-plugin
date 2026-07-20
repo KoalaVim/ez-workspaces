@@ -95,7 +95,7 @@ case "$HOOK" in
 
             if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
                 build_env_flags
-                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" "${ENV_FLAGS[@]}" >/dev/null || true
+                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" ${ENV_FLAGS[@]+"${ENV_FLAGS[@]}"} >/dev/null || true
             else
                 dbg "session already exists, skipping new-session"
             fi
@@ -200,7 +200,7 @@ case "$HOOK" in
 
         build_env_flags
         if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
-            tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" "${ENV_FLAGS[@]}" 2>&1 >&2 || true
+            tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" ${ENV_FLAGS[@]+"${ENV_FLAGS[@]}"} 2>&1 >&2 || true
         else
             # Session already exists — push env vars so new panes inherit them
             echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key val; do
