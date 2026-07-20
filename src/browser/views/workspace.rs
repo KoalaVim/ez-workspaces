@@ -90,8 +90,8 @@ pub(super) fn run(
         }
     };
 
-    // Drill into directories to find a repo.
-    let repo_path = drill_into_directory(&root_path, selector)?;
+    // Drill into directories to find a repo (supports clone keybind).
+    let repo_path = drill_into_directory(&root_path, selector, config)?;
     let repo_path = match repo_path {
         Some(p) => p,
         None => return Ok(Outcome::Switch(ViewMode::Workspace)),

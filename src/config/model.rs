@@ -197,6 +197,10 @@ pub struct KeybindsConfig {
     /// Create session from dirty changes (default: "alt-s")
     #[serde(default = "default_bind_from_dirty")]
     pub session_from_dirty: String,
+
+    /// Clone a repo into the browsed directory (default: "alt-a")
+    #[serde(default = "default_bind_clone_repo")]
+    pub clone_repo: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -267,6 +271,7 @@ impl Default for KeybindsConfig {
             new_bare_session: default_bind_new_bare(),
             sort_toggle: default_bind_sort_toggle(),
             session_from_dirty: default_bind_from_dirty(),
+            clone_repo: default_bind_clone_repo(),
         }
     }
 }
@@ -329,6 +334,10 @@ fn default_bind_new_bare() -> String {
 
 fn default_bind_from_dirty() -> String {
     "alt-s".into()
+}
+
+fn default_bind_clone_repo() -> String {
+    "alt-a".into()
 }
 
 fn default_plugin_timeout() -> u64 {

@@ -37,7 +37,7 @@ The Tree view SHALL render all workspace roots, their repos, and each repo's ses
 - **THEN** system runs the `accept_session` flow with `post_cmd_file` passthrough, applying the configured `on_enter` action (cd, tmux attach, or other plugin bind)
 
 ### Requirement: Workspace view with drill-down
-The Workspace view SHALL first present a list of configured workspace roots. On selection, it SHALL drill into directories level by level until a git repo is found, then transition to the session picker. Directories with a `.git` folder are shown with branch info; hidden directories (starting with `.`) are excluded.
+The Workspace view SHALL first present a list of configured workspace roots. On selection, it SHALL drill into directories level by level until a git repo is found, then transition to the session picker. Directories with a `.git` folder are shown with branch info; hidden directories (starting with `.`) are excluded. The drill-down SHALL support action keybinds including a clone keybind that allows cloning a new repo into the currently browsed directory.
 
 #### Scenario: Drill into directories
 - **WHEN** user selects a workspace root
@@ -51,6 +51,10 @@ The Workspace view SHALL first present a list of configured workspace roots. On 
 #### Scenario: Jump to workspace
 - **WHEN** user runs `ez --workspace personal`
 - **THEN** system skips the root picker and starts drill-down in the matching workspace root
+
+#### Scenario: Clone repo during drill-down
+- **WHEN** user presses the clone keybind (default `alt-a`) during directory drill-down
+- **THEN** system prompts for a git URL, clones into the current directory, and enters the session picker for the cloned repo
 
 ### Requirement: Repo view
 The Repo view SHALL display a flat list of all registered repos with name, path, branch, and labels. Selecting a repo SHALL transition to its session picker. The view SHALL also support session actions (new, delete, rename, labels) and view-switch keybinds.

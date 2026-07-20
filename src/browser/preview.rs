@@ -610,6 +610,10 @@ fn preview_main_keybind_help() {
     let left: Vec<(String, String)> = vec![
         ("Enter".bold().green().to_string(), "Open sessions".into()),
         (
+            fmt_key(&keybinds.clone_repo).bold().yellow().to_string(),
+            "Clone repo".into(),
+        ),
+        (
             fmt_key(&keybinds.edit_labels).bold().magenta().to_string(),
             "Edit labels".into(),
         ),

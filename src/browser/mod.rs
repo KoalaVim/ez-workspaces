@@ -678,9 +678,11 @@ pub(crate) fn session_action_loop(
 }
 
 /// Drill into directories until a git repo is found or user selects one.
+/// Supports action keybinds (e.g. clone) via `select_with_actions`.
 pub(crate) fn drill_into_directory(
     start: &Path,
     selector: &dyn InteractiveSelector,
+    config: &config::model::EzConfig,
 ) -> Result<Option<std::path::PathBuf>> {
     let mut current = start.to_path_buf();
     let mut history: Vec<std::path::PathBuf> = Vec::new();
@@ -744,23 +746,58 @@ pub(crate) fn drill_into_directory(
         let ez_bin = std::env::current_exe().ok();
         let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
 
-        let idx = match selector.select_one(
+        let expect_keys = vec![config.keybinds.clone_repo.as_str()];
+
+        let action = selector.select_with_actions(
             &items,
             &current.file_name().unwrap_or_default().to_string_lossy(),
             preview_cmd.as_deref(),
-        )? {
-            Some(idx) => idx,
-            None => {
-                if let Some(prev) = history.pop() {
-                    current = prev;
+            &expect_keys,
+            None,
+        )?;
+
+        match action {
+            ActionResult::Select(idx) => {
+                history.push(current.clone());
+                current = entries[idx].1.clone();
+            }
+            ActionResult::Action(ref key, _) if key == &config.keybinds.clone_repo => {
+                let url = selector.input("Git URL to clone", None)?;
+                if url.trim().is_empty() {
                     continue;
                 }
-                return Ok(None);
+                let name = url
+                    .trim()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("repo")
+                    .trim_end_matches(".git");
+                let target = current.join(name);
+                log::debug!(
+                    "drill_into_directory: cloning {} into {}",
+                    url,
+                    target.display()
+                );
+                match repo::clone_repo(url.trim(), Some(&target)) {
+                    Ok(()) => {
+                        let canonical = fs::canonicalize(&target).unwrap_or(target);
+                        return Ok(Some(canonical));
+                    }
+                    Err(e) => {
+                        eprintln!("{} {}", "Clone failed:".red(), e);
+                        continue;
+                    }
+                }
             }
-        };
-
-        history.push(current.clone());
-        current = entries[idx].1.clone();
+            ActionResult::Action(_, _) => {}
+            ActionResult::Cancel => {
+                if let Some(prev) = history.pop() {
+                    current = prev;
+                } else {
+                    return Ok(None);
+                }
+            }
+        }
     }
 }
 

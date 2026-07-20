@@ -246,7 +246,7 @@ Run bare `ez` to get an fzf-powered browser:
 
 1. Select a workspace root
 2. Drill into directories (repos show `[branch]`)
-3. Select a repo to see its sessions
+3. Press **Alt-a** to clone a new repo into the current directory, or select a repo to see its sessions
 4. Select a session to enter it
 
 At any top-level selector, press a keybind to switch views:

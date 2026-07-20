@@ -66,6 +66,10 @@ Launch with `ez`. The preview pane shows all available keybinds.
 
 - `Ctrl-t` Tree · `Ctrl-w` Workspace · `Ctrl-e` Repo · `Ctrl-o` Owner · `Ctrl-g` Label
 
+**Workspace drill-down** — while browsing directories:
+
+- `Alt-a` clone a repo into the current directory
+
 **Session actions** — inside a repo's session picker:
 
 - `Enter` enter · `Alt-n` new · `Alt-N` bare · `Alt-s` from dirty · `Alt-r` rename · `Alt-d` delete · `Alt-l` labels · `Ctrl-d` cd · `Ctrl-s` sort
