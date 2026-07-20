@@ -150,8 +150,8 @@ pub fn run_hooks(
         }
         plugins.push((plugin_name.clone(), manifest));
     }
-    // Stable sort: path-mutators first, preserving enable-order otherwise.
-    plugins.sort_by_key(|(_, m)| !m.mutates_session_path);
+    // Sort: path-mutators first, higher priority first within that group.
+    plugins.sort_by_key(|(_, m)| (!m.mutates_session_path, std::cmp::Reverse(m.priority)));
     log::debug!(
         "hook={:?} plugin order: {:?}",
         hook,
@@ -281,7 +281,7 @@ pub fn run_hooks_with_rename(
         }
         plugins.push((plugin_name.clone(), manifest));
     }
-    plugins.sort_by_key(|(_, m)| !m.mutates_session_path);
+    plugins.sort_by_key(|(_, m)| (!m.mutates_session_path, std::cmp::Reverse(m.priority)));
 
     for (plugin_name, manifest) in &plugins {
         let plugin_dir = plugins_dir.join(plugin_name);

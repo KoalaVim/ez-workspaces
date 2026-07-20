@@ -4,6 +4,7 @@ description = "Manages KoalaVim (kv) environments per session"
 hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_rename"]
 executable = "kv-plugin"
 mutates_session_path = true
+priority = 10
 
 [[config_schema]]
 name = "source_env"

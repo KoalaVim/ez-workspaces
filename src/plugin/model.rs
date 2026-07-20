@@ -23,6 +23,10 @@ pub struct PluginManifest {
     /// each hook, so downstream plugins see the resolved path.
     #[serde(default)]
     pub mutates_session_path: bool,
+    /// Execution priority within the `mutates_session_path` group.
+    /// Higher values run first. Default 0.
+    #[serde(default)]
+    pub priority: i32,
 }
 
 /// A keybind registered by a plugin for actions on the currently selected item.
