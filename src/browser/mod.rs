@@ -125,6 +125,13 @@ pub(crate) fn browse_repo(
     let index = repo::store::load_index()?;
     let repo_entry = if let Some(entry) = index.find_by_path(repo_path) {
         entry.clone()
+    } else if let Some(owner) = find_repo_owning_session_path(&index, repo_path) {
+        log::debug!(
+            "browse_repo: path {} is a session worktree under repo '{}', skipping registration",
+            repo_path.display(),
+            owner.name
+        );
+        owner
     } else {
         repo::add_repo(Some(repo_path))?;
         let index = repo::store::load_index()?;
@@ -135,6 +142,37 @@ pub(crate) fn browse_repo(
     };
 
     session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config)
+}
+
+/// Check if a path is already tracked as a session worktree under any registered repo.
+/// Returns the owning repo entry if found.
+fn find_repo_owning_session_path(
+    index: &repo::model::RepoIndex,
+    path: &Path,
+) -> Option<repo::model::RepoEntry> {
+    let canonical = std::fs::canonicalize(path).ok()?;
+    for entry in &index.repos {
+        if let Ok(tree) = session::store::load_sessions(&entry.id) {
+            for s in &tree.sessions {
+                if let Some(ref session_path) = s.path {
+                    let matches = session_path
+                        .canonicalize()
+                        .map(|p| p == canonical)
+                        .unwrap_or(false);
+                    if matches {
+                        log::debug!(
+                            "find_repo_owning_session_path: {} matches session '{}' in repo '{}'",
+                            path.display(),
+                            s.name,
+                            entry.name
+                        );
+                        return Some(entry.clone());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Write the target directory for the shell wrapper to cd into.
