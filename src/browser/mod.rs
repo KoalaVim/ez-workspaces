@@ -85,8 +85,10 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         } else {
             std::env::current_dir()?.join(repo_path)
         };
-        browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config)?;
-        return Ok(());
+        if browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config)? {
+            return Ok(());
+        }
+        // Esc/cancel: fall through to global view
     }
 
     // Auto-detect: if cwd is inside a registered repo (or one of its worktrees),
@@ -248,6 +250,9 @@ pub(crate) fn accept_session(
                 let has_effect =
                     response.cd_target.is_some() || !response.post_shell_commands.is_empty();
                 if has_effect {
+                    if response.cd_target.is_none() {
+                        write_cd_target(cd_file, target_dir)?;
+                    }
                     let mut all_commands = response.post_shell_commands.clone();
                     all_commands.extend(env_exports);
                     let merged = plugin::protocol::HookResponse {

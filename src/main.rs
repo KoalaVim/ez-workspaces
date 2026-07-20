@@ -139,10 +139,15 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
             r#"ez() {
     local tmp=$(mktemp)
     local post_cmd=$(mktemp)
+    local extra_args=()
     while true; do
-        command ez "$@" --cd-file="$tmp" --post-cmd-file="$post_cmd"
+        command ez "$@" "${extra_args[@]}" --cd-file="$tmp" --post-cmd-file="$post_cmd"
         local ret=$?
+        extra_args=()
         if [ -s "$post_cmd" ]; then
+            if [ -s "$tmp" ]; then
+                extra_args=(--repo "$(cat "$tmp")")
+            fi
             source "$post_cmd"
             : > "$post_cmd"
             : > "$tmp"
@@ -161,10 +166,15 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
             r#"function ez
     set tmp (mktemp)
     set post_cmd (mktemp)
+    set extra_args
     while true
-        command ez $argv --cd-file="$tmp" --post-cmd-file="$post_cmd"
+        command ez $argv $extra_args --cd-file="$tmp" --post-cmd-file="$post_cmd"
         set ret $status
+        set extra_args
         if test -s "$post_cmd"
+            if test -s "$tmp"
+                set extra_args --repo (cat "$tmp")
+            end
             source "$post_cmd"
             echo -n > "$post_cmd"
             echo -n > "$tmp"
