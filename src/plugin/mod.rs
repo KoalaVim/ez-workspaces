@@ -208,7 +208,16 @@ pub fn run_hooks(
                                 s.path
                             );
                         }
-                        s.env.extend(mutations.env.clone());
+                        for (k, v) in &mutations.env {
+                            s.env.insert(k.clone(), v.clone());
+                            std::env::set_var(k, v);
+                            log::debug!(
+                                "plugin [{}]: propagated env {}={} to process",
+                                plugin_name,
+                                k,
+                                v
+                            );
+                        }
                         s.plugin_state.extend(
                             mutations
                                 .plugin_state

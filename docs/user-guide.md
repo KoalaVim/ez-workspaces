@@ -88,6 +88,7 @@ ez plugin enable tmux
 ez plugin enable cursor-mcp-auth           # Share MCP OAuth tokens across worktrees
 ez plugin enable cursor-trusted-workspace  # Auto-trust worktree workspaces
 ez plugin enable cursor-mcp-approvals      # Auto-approve MCP servers in worktrees
+ez plugin enable kv                        # Per-session KoalaVim environments
 ```
 
 ### 4. Create and use sessions
@@ -330,6 +331,28 @@ ez --on-create tmux session new my-feature
 In the interactive picker, when `on_create` is set, **Alt-n** creates the session, performs the action, and exits (just like pressing Enter on an existing session). With `"none"` (default) it stays in the picker as it does today.
 
 If the named bind is unavailable (plugin disabled, tmux not installed), ez silently falls back to `cd`.
+
+### KoalaVim (kv) Plugin
+
+The `kv` plugin gives each session its own isolated KoalaVim environment. When you create a session, the plugin forks the `main` kv env so the editor gets a separate config, cache, and state directory. Requires the `kv` CLI to be installed.
+
+```bash
+ez plugin enable kv
+```
+
+On session create, the plugin runs `kv env fork main <session-name>`. On enter, it sets `KV_ENV=<session-name>` so `kv` uses the right environment. On delete, it cleans up with `kv env delete`. On rename, it runs `kv env rename`.
+
+If `kv` is not installed, the plugin silently no-ops — it won't block session creation.
+
+**Configuration:**
+
+```toml
+[plugin_settings.kv]
+source_env = "main"                            # which kv env to fork from (default: "main")
+repos = "KoalaVim, my-editor"    # only activate on these repo names (empty = no repos)
+```
+
+The `repos` field is required to activate the plugin — set it to a comma-separated list of repo directory names (the folder name, not the full path). If empty, the plugin skips all repos.
 
 ## Labels
 

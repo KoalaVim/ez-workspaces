@@ -44,9 +44,13 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
         name: "cursor-mcp-approvals",
         manifest: include_str!("../../plugins/cursor-mcp-approvals/manifest.toml"),
         executable_name: "cursor-mcp-approvals-plugin",
-        executable: include_str!(
-            "../../plugins/cursor-mcp-approvals/cursor-mcp-approvals-plugin"
-        ),
+        executable: include_str!("../../plugins/cursor-mcp-approvals/cursor-mcp-approvals-plugin"),
+    },
+    BundledPlugin {
+        name: "kv",
+        manifest: include_str!("../../plugins/kv/manifest.toml"),
+        executable_name: "kv-plugin",
+        executable: include_str!("../../plugins/kv/kv-plugin"),
     },
 ];
 

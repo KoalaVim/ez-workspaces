@@ -78,6 +78,13 @@ if [ "$SESSION_IS_DEFAULT" = "true" ]; then
     exit 0
 fi
 
+# If another mutates_session_path plugin already set the path, skip worktree creation
+if [ "$HOOK" = "on_session_create" ] && [ -n "$SESSION_PATH" ]; then
+    dbg "skipping: session path already set by another plugin ($SESSION_PATH)"
+    echo '{"success": true}'
+    exit 0
+fi
+
 # Worktree base directory: alongside the repo (sibling directory)
 REPO_BASENAME=$(basename "$REPO_PATH")
 WORKTREE_BASE=$(dirname "$REPO_PATH")/.ez/${REPO_BASENAME}

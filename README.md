@@ -82,6 +82,7 @@ ez plugin enable tmux                # tmux session management
 ez plugin enable cursor-mcp-auth     # share Cursor MCP OAuth tokens across worktrees
 ez plugin enable cursor-trusted-workspace  # auto-trust worktree workspaces in Cursor
 ez plugin enable cursor-mcp-approvals      # auto-approve MCP servers in Cursor
+ez plugin enable kv                        # per-session KoalaVim environments
 ```
 
 Custom plugins use a JSON-over-stdio protocol. See the [Plugin Guide](docs/plugin-guide.md).

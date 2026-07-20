@@ -1,0 +1,166 @@
+#!/usr/bin/env bash
+# kv plugin for ez-workspaces
+# Manages KoalaVim (kv) environments per session.
+# Each session gets its own kv env forked from a configurable source (default: main).
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+
+set -euo pipefail
+
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== kv-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_NAME=$(echo "$REQUEST" | jq -r '.repo.path // empty' | xargs basename 2>/dev/null || echo "")
+SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
+SESSION_IS_DEFAULT=$(echo "$REQUEST" | jq -r '.session.is_default // false')
+SOURCE_ENV=$(echo "$REQUEST" | jq -r '.config.user_config.source_env // "main"')
+REPOS=$(echo "$REQUEST" | jq -r '.config.user_config.repos // empty')
+
+KV_ENV_NAME="$SESSION_NAME"
+
+dbg "hook=$HOOK repo=$REPO_NAME session=$SESSION_NAME is_default=$SESSION_IS_DEFAULT source_env=$SOURCE_ENV repos=$REPOS kv_env=$KV_ENV_NAME"
+
+# If repos is configured, only run on matching repos
+if [ -n "$REPOS" ]; then
+    match=false
+    IFS=',' read -ra REPO_LIST <<< "$REPOS"
+    for r in "${REPO_LIST[@]}"; do
+        r=$(echo "$r" | xargs)
+        if [ "$r" = "$REPO_NAME" ]; then
+            match=true
+            break
+        fi
+    done
+    if [ "$match" = "false" ]; then
+        dbg "repo '$REPO_NAME' not in repos list, skipping"
+        echo '{"success": true}'
+        exit 0
+    fi
+fi
+
+if ! command -v kv &>/dev/null; then
+    dbg "kv not found in PATH, skipping"
+    echo '{"success": true}'
+    exit 0
+fi
+
+case "$HOOK" in
+    on_session_create)
+        if [ "$SESSION_IS_DEFAULT" = "true" ]; then
+            dbg "default session, skipping fork"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        if kv env list 2>/dev/null | grep -qx "$KV_ENV_NAME"; then
+            dbg "kv env '$KV_ENV_NAME' already exists, reusing"
+        else
+            dbg "forking kv env: $SOURCE_ENV -> $KV_ENV_NAME"
+            if ! fork_err=$(kv env fork "$SOURCE_ENV" "$KV_ENV_NAME" 2>&1); then
+                dbg "fork failed: $fork_err"
+                jq -n --arg err "kv env fork failed: $fork_err" '{success: false, error: $err}'
+                exit 0
+            fi
+            dbg "fork complete"
+        fi
+
+        KVIM_PATH=$(kv env path "$KV_ENV_NAME" 2>/dev/null || echo "")
+        dbg "kvim path: $KVIM_PATH"
+
+        jq -n \
+            --arg kv_env "$KV_ENV_NAME" \
+            --arg kvim_path "$KVIM_PATH" \
+            '{
+                success: true,
+                session_mutations: ({
+                    env: {
+                        KV_ENV: $kv_env
+                    },
+                    plugin_state: {
+                        kv_env_name: $kv_env
+                    }
+                } + if $kvim_path != "" then { path: $kvim_path } else {} end)
+            }'
+        ;;
+
+    on_session_delete)
+        if [ "$SESSION_IS_DEFAULT" = "true" ]; then
+            dbg "default session, skipping delete"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        dbg "deleting kv env: $KV_ENV_NAME"
+        kv env delete --force "$KV_ENV_NAME" 2>/dev/null || {
+            dbg "kv env delete failed or env not found (non-fatal)"
+        }
+        echo '{"success": true}'
+        ;;
+
+    on_session_enter)
+        if [ "$SESSION_IS_DEFAULT" = "true" ]; then
+            KV_ENV_NAME="$SOURCE_ENV"
+            dbg "default session, using source env: $KV_ENV_NAME"
+        fi
+
+        jq -n \
+            --arg kv_env "$KV_ENV_NAME" \
+            '{
+                success: true,
+                session_mutations: {
+                    env: {
+                        KV_ENV: $kv_env
+                    }
+                }
+            }'
+        ;;
+
+    on_session_rename)
+        OLD_NAME=$(echo "$REQUEST" | jq -r '.rename_context.old_name // empty')
+        NEW_NAME=$(echo "$REQUEST" | jq -r '.rename_context.new_name // empty')
+
+        if [ -z "$OLD_NAME" ] || [ -z "$NEW_NAME" ]; then
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        if [ "$SESSION_IS_DEFAULT" = "true" ]; then
+            dbg "default session, skipping rename"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        dbg "renaming kv env: $OLD_NAME -> $NEW_NAME"
+        kv env rename "$OLD_NAME" "$NEW_NAME" 2>/dev/null || {
+            dbg "kv env rename failed (non-fatal)"
+        }
+
+        jq -n \
+            --arg kv_env "$NEW_NAME" \
+            '{
+                success: true,
+                session_mutations: {
+                    env: {
+                        KV_ENV: $kv_env
+                    },
+                    plugin_state: {
+                        kv_env_name: $kv_env
+                    }
+                }
+            }'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac

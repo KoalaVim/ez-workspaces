@@ -156,6 +156,20 @@ pub(crate) fn write_post_commands(post_cmd_file: Option<&Path>, commands: &[Stri
     Ok(())
 }
 
+/// Generate `export` commands for a session's env map.
+pub(crate) fn session_env_exports(env: &std::collections::HashMap<String, String>) -> Vec<String> {
+    let mut exports: Vec<String> = env
+        .iter()
+        .map(|(k, v)| format!("export {}={}", k, shell_escape(v)))
+        .collect();
+    exports.sort();
+    exports
+}
+
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Returns true if the `on_create` value means "do nothing" (skip navigation after create).
 pub(crate) fn on_create_is_noop(v: &str) -> bool {
     v.is_empty() || v == "none"
@@ -200,8 +214,16 @@ pub(crate) fn accept_session(
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
 ) -> Result<()> {
+    // Propagate session env to the process so child processes (e.g. tmux new-session) inherit them
+    for (k, v) in &selected.env {
+        std::env::set_var(k, v);
+    }
+    let env_exports = session_env_exports(&selected.env);
+
     if on_enter == "cd" {
-        return write_cd_target(cd_file, target_dir);
+        write_cd_target(cd_file, target_dir)?;
+        write_post_commands(post_cmd_file, &env_exports)?;
+        return Ok(());
     }
 
     // Look for a matching session-context plugin bind by label, bind_name, or plugin_name.
@@ -226,21 +248,27 @@ pub(crate) fn accept_session(
                 let has_effect =
                     response.cd_target.is_some() || !response.post_shell_commands.is_empty();
                 if has_effect {
-                    apply_bind_response(&response, cd_file, post_cmd_file)?;
+                    let mut all_commands = response.post_shell_commands.clone();
+                    all_commands.extend(env_exports);
+                    let merged = plugin::protocol::HookResponse {
+                        post_shell_commands: all_commands,
+                        ..response
+                    };
+                    apply_bind_response(&merged, cd_file, post_cmd_file)?;
                     return Ok(());
                 }
-                // Plugin produced no navigation effect — fall through to cd.
             }
             Err(e) => {
                 log::debug!("on_enter bind hook failed, falling back to cd: {e}");
-                // Fall through to cd.
             }
         }
     } else {
         log::debug!("on_enter=\"{on_enter}\": no matching session bind found, falling back to cd");
     }
 
-    write_cd_target(cd_file, target_dir)
+    write_cd_target(cd_file, target_dir)?;
+    write_post_commands(post_cmd_file, &env_exports)?;
+    Ok(())
 }
 
 /// Session selection loop with action keybinds.

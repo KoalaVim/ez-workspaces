@@ -52,6 +52,21 @@ AUTO_ATTACH=$(echo "$REQUEST" | jq -r '.config.user_config.auto_attach // "false
 TMUX_SESSION="${REPO_NAME}/${SESSION_NAME}"
 TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.:' '__')
 
+# Build `-e KEY=VALUE` flags from session.env for tmux new-session.
+# Populates the ENV_FLAGS array.
+build_env_flags() {
+    ENV_FLAGS=()
+    local env_pairs
+    env_pairs=$(echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)=\(.value)"')
+    if [ -n "$env_pairs" ]; then
+        while IFS= read -r pair; do
+            [ -z "$pair" ] && continue
+            ENV_FLAGS+=(-e "$pair")
+        done <<< "$env_pairs"
+    fi
+    dbg "env_flags: ${ENV_FLAGS[*]:-<none>}"
+}
+
 # Mark a tmux session as ez-managed by setting user options.
 # Args: $1 = tmux session name
 mark_ez_managed() {
@@ -79,7 +94,8 @@ case "$HOOK" in
             fi
 
             if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
-                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" >/dev/null || true
+                build_env_flags
+                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" "${ENV_FLAGS[@]}" >/dev/null || true
             else
                 dbg "session already exists, skipping new-session"
             fi
@@ -125,7 +141,12 @@ case "$HOOK" in
             if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
                 COMMANDS+=("$ATTACH")
             else
-                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && ${ATTACH}")
+                ENV_ARGS=""
+                while IFS= read -r pair; do
+                    [ -z "$pair" ] && continue
+                    ENV_ARGS+=" -e '${pair}'"
+                done < <(echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)=\(.value)"')
+                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\"${ENV_ARGS} && ${ATTACH}")
             fi
         fi
 
@@ -177,8 +198,16 @@ case "$HOOK" in
             exit 0
         fi
 
+        build_env_flags
         if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
-            tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
+            tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" "${ENV_FLAGS[@]}" 2>&1 >&2 || true
+        else
+            # Session already exists — push env vars so new panes inherit them
+            echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key val; do
+                [ -z "$key" ] && continue
+                tmux set-environment -t "$TMUX_SESSION" "$key" "$val" 2>/dev/null || true
+                dbg "set-environment -t $TMUX_SESSION $key=$val"
+            done
         fi
         mark_ez_managed "$TMUX_SESSION"
 

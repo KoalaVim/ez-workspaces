@@ -1,0 +1,18 @@
+name = "kv"
+version = "0.1.0"
+description = "Manages KoalaVim (kv) environments per session"
+hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_rename"]
+executable = "kv-plugin"
+mutates_session_path = true
+
+[[config_schema]]
+name = "source_env"
+type = "string"
+default = "main"
+description = "Name of the kv env to fork from when creating a new session"
+
+[[config_schema]]
+name = "repos"
+type = "string"
+default = ""
+description = "Comma-separated list of repo directory names to activate on (empty = skip all repos, must be configured)"

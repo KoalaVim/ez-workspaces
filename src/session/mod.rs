@@ -938,6 +938,12 @@ fn enter_session(
     }
     store::save_sessions(&repo_entry.id, &tree)?;
 
+    // Re-fetch the session from the tree to pick up any mutations from hooks
+    let session = tree
+        .find_by_name(name)
+        .ok_or_else(|| EzError::SessionNotFound(name.into()))?
+        .clone();
+
     let mut repo_meta = repo_meta;
     repo_meta.last_accessed = Some(now);
     repo::store::save_repo_meta(&repo_entry.id, &repo_meta)?;

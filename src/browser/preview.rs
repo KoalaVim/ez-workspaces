@@ -571,10 +571,7 @@ fn preview_keybind_help() {
             "Delete".into(),
         ),
         (
-            fmt_key(&keybinds.edit_labels)
-                .bold()
-                .magenta()
-                .to_string(),
+            fmt_key(&keybinds.edit_labels).bold().magenta().to_string(),
             "Edit labels".into(),
         ),
         (
@@ -611,15 +608,9 @@ fn preview_main_keybind_help() {
     preview_section("Keybinds");
 
     let left: Vec<(String, String)> = vec![
+        ("Enter".bold().green().to_string(), "Open sessions".into()),
         (
-            "Enter".bold().green().to_string(),
-            "Open sessions".into(),
-        ),
-        (
-            fmt_key(&keybinds.edit_labels)
-                .bold()
-                .magenta()
-                .to_string(),
+            fmt_key(&keybinds.edit_labels).bold().magenta().to_string(),
             "Edit labels".into(),
         ),
         (
@@ -655,10 +646,7 @@ fn preview_main_keybind_help() {
         ),
     ];
     for pv in plugin::collect_plugin_views("repo", &config).unwrap_or_default() {
-        right.push((
-            fmt_key(&pv.key).bold().cyan().to_string(),
-            pv.label.clone(),
-        ));
+        right.push((fmt_key(&pv.key).bold().cyan().to_string(), pv.label.clone()));
     }
 
     print_keybind_table("Repo", "Views", &left, &right);
