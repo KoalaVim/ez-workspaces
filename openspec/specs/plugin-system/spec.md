@@ -7,7 +7,7 @@ Provide an extensible plugin architecture that lets external scripts or executab
 ## Requirements
 
 ### Requirement: Plugin manifest
-Each plugin SHALL have a `manifest.toml` in its plugin directory declaring: name, version, description, hooks (list of `HookType`), executable filename, optional binds, optional views, optional config schema, and a `mutates_session_path` flag.
+Each plugin SHALL have a `manifest.toml` in its plugin directory declaring: name, version, description, hooks (list of `HookType`), executable filename, optional binds, optional views, optional config schema, a `mutates_session_path` flag, and an optional `priority` integer (default 0).
 
 #### Scenario: Manifest with hooks and binds
 - **WHEN** a plugin directory contains a `manifest.toml`
@@ -58,11 +58,27 @@ The `HookResponse` SHALL support: `session_mutations` (modify session fields lik
 - **THEN** response includes `post_shell_commands` like `tmux switch-client -t session-name`
 
 ### Requirement: Plugin execution ordering
-Plugins with `mutates_session_path = true` SHALL run before plugins without it for each hook. This ensures that downstream plugins see the resolved session path.
+Plugins with `mutates_session_path = true` SHALL run before plugins without it for each hook. Within the `mutates_session_path` group, plugins with higher `priority` (integer, default 0) SHALL run first. This ensures that path-setting plugins run in the correct order and downstream plugins see the resolved session path.
 
 #### Scenario: Worktree before tmux
 - **WHEN** `OnSessionCreate` fires with both git-worktree and tmux plugins enabled
 - **THEN** git-worktree runs first (sets `session.path`), then tmux runs (sees the resolved path)
+
+#### Scenario: Priority ordering within mutates_session_path
+- **WHEN** two plugins both declare `mutates_session_path = true` with different priorities
+- **THEN** the higher-priority plugin runs first (e.g., kv at priority 10 runs before git-worktree at priority 0)
+
+### Requirement: Session env propagation
+When a plugin sets `session_mutations.env`, the system SHALL propagate those environment variables to the current process via `std::env::set_var` so subsequent plugins inherit them. On session enter, the system SHALL export session env vars via the post-cmd-file (for cd-based flows) and set them in the process environment before running bind hooks (so tmux and other child processes inherit them).
+
+#### Scenario: Env vars inherited by subsequent plugins
+- **WHEN** plugin A sets `KV_ENV=feature` in `session_mutations.env` during `OnSessionCreate`
+- **THEN** plugin B (running after A) inherits `KV_ENV=feature` in its process environment
+- **AND** child processes spawned by plugin B (e.g., `tmux new-session`) also inherit the variable
+
+#### Scenario: Env vars exported on session enter
+- **WHEN** a session with `env.KV_ENV=feature` is entered via cd-based flow
+- **THEN** the post-cmd-file includes `export KV_ENV='feature'` so the user's shell receives it
 
 ### Requirement: Plugin binds
 Plugins SHALL register keybinds via manifest `[[binds]]` entries. Each bind has a `key`, `name`, `label`, optional `description`, and a list of `contexts` (e.g. `["session"]`). When the user presses the keybind in the browser, the system invokes `OnBind` with the bind context.
@@ -88,7 +104,7 @@ Plugins SHALL declare user-facing configuration fields via manifest `[[config_sc
 - **THEN** the tmux plugin receives `auto_attach = true` in its `config.user_config` field in every hook request
 
 ### Requirement: Bundled plugins
-The system SHALL embed bundled plugins (git-worktree, tmux) in the binary. They are auto-extracted to the plugin directory on first use and auto-updated when the bundled version changes.
+The system SHALL embed bundled plugins (git-worktree, tmux, cursor-mcp-auth, cursor-trusted-workspace, cursor-mcp-approvals, kv) in the binary. They are auto-extracted to the plugin directory on first use and auto-updated when the bundled version changes.
 
 #### Scenario: First-run extraction
 - **WHEN** user enables a bundled plugin and it does not exist in the plugin directory

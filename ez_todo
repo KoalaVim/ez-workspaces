@@ -1,6 +1,6 @@
 v2:
 - raycast adapter refinement
+- gui support
 - re-work tmux resurrect to be resurrect on demand
-- inject env vars (e.g KOALA_ENV)
 
 ------------
