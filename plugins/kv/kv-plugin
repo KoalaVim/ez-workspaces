@@ -7,6 +7,16 @@
 
 set -euo pipefail
 
+t_ms() {
+    local out
+    out=$(date +%s%3N)
+    if [[ "$out" =~ ^[0-9]+$ ]]; then
+        echo "$out"
+    else
+        echo $(( $(date +%s) * 1000 ))
+    fi
+}
+
 _dbg_initialized=
 dbg() {
     [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
@@ -64,17 +74,23 @@ case "$HOOK" in
 
         if kv env list 2>/dev/null | grep -qx "$KV_ENV_NAME"; then
             dbg "kv env '$KV_ENV_NAME' already exists, reusing"
+            echo "reusing existing env '$KV_ENV_NAME'" >&2
         else
             dbg "forking kv env: $SOURCE_ENV -> $KV_ENV_NAME"
+            echo "forking env: $SOURCE_ENV → $KV_ENV_NAME..." >&2
+            t0=$(t_ms)
             if ! fork_err=$(kv env fork "$SOURCE_ENV" "$KV_ENV_NAME" 2>&1); then
                 dbg "fork failed: $fork_err"
                 jq -n --arg err "kv env fork failed: $fork_err" '{success: false, error: $err}'
                 exit 0
             fi
+            echo "fork done ($(( $(t_ms) - t0 ))ms)" >&2
             dbg "fork complete"
         fi
 
+        t1=$(t_ms)
         KVIM_PATH=$(kv env path "$KV_ENV_NAME" 2>/dev/null || echo "")
+        echo "env path resolved ($(( $(t_ms) - t1 ))ms)" >&2
         dbg "kvim path: $KVIM_PATH"
 
         jq -n \
@@ -101,9 +117,12 @@ case "$HOOK" in
         fi
 
         dbg "deleting kv env: $KV_ENV_NAME"
+        echo "deleting env '$KV_ENV_NAME'..." >&2
+        td=$(t_ms)
         kv env delete --force "$KV_ENV_NAME" 2>/dev/null || {
             dbg "kv env delete failed or env not found (non-fatal)"
         }
+        echo "delete done ($(( $(t_ms) - td ))ms)" >&2
         echo '{"success": true}'
         ;;
 
@@ -141,9 +160,12 @@ case "$HOOK" in
         fi
 
         dbg "renaming kv env: $OLD_NAME -> $NEW_NAME"
+        echo "renaming env: $OLD_NAME → $NEW_NAME..." >&2
+        tr=$(t_ms)
         kv env rename "$OLD_NAME" "$NEW_NAME" 2>/dev/null || {
             dbg "kv env rename failed (non-fatal)"
         }
+        echo "rename done ($(( $(t_ms) - tr ))ms)" >&2
 
         jq -n \
             --arg kv_env "$NEW_NAME" \

@@ -161,6 +161,8 @@ pub fn run_hooks(
             .collect::<Vec<_>>()
     );
 
+    let hook_start = std::time::Instant::now();
+
     for (plugin_name, manifest) in &plugins {
         let plugin_dir = plugins_dir.join(plugin_name);
 
@@ -186,8 +188,16 @@ pub fn run_hooks(
             config,
         );
 
+        let plugin_start = std::time::Instant::now();
         match runner::execute(manifest, &plugin_dir, &request, config.plugin_timeout) {
             Ok(response) => {
+                let elapsed_ms = plugin_start.elapsed().as_millis();
+                if elapsed_ms >= 100 {
+                    eprintln!(
+                        "{}",
+                        format!("[plugin:{}] done ({}ms)", plugin_name, elapsed_ms).dimmed()
+                    );
+                }
                 log::debug!(
                     "plugin [{}]: response success={} mutations.path={:?}",
                     plugin_name,
@@ -233,6 +243,15 @@ pub fn run_hooks(
                 }
             }
             Err(e) => {
+                eprintln!(
+                    "{}",
+                    format!(
+                        "[plugin:{}] failed ({}ms)",
+                        plugin_name,
+                        plugin_start.elapsed().as_millis()
+                    )
+                    .red()
+                );
                 // For enter/exit hooks, warn but don't abort
                 match hook {
                     HookType::OnSessionEnter | HookType::OnSessionExit => {
@@ -242,6 +261,14 @@ pub fn run_hooks(
                 }
             }
         }
+    }
+
+    let total = hook_start.elapsed();
+    if total.as_millis() >= 500 {
+        eprintln!(
+            "{}",
+            format!("plugins completed in {}ms", total.as_millis()).dimmed()
+        );
     }
 
     Ok(())

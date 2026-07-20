@@ -77,12 +77,31 @@ pub fn execute(
             .map_err(|e| EzError::PluginFailed(manifest.name.clone(), e.to_string()))?;
     }
 
-    // Wait with timeout
+    // Stream stderr in real-time with [plugin:name] prefix
+    let stderr_handle = child.stderr.take();
+    let plugin_name_for_stderr = manifest.name.clone();
+    let stderr_thread = std::thread::spawn(move || {
+        use std::io::BufRead;
+        let mut collected = String::new();
+        if let Some(stderr) = stderr_handle {
+            let reader = std::io::BufReader::new(stderr);
+            for line in reader.lines().map_while(|l| l.ok()) {
+                if !line.is_empty() {
+                    eprintln!("[plugin:{}] {}", plugin_name_for_stderr, line);
+                    collected.push_str(&line);
+                    collected.push('\n');
+                }
+            }
+        }
+        collected
+    });
+
+    // Wait with timeout (only stdout left to capture)
     let output = wait_with_timeout(&mut child, Duration::from_secs(timeout_secs))
         .map_err(|_| EzError::PluginTimeout(manifest.name.clone(), timeout_secs))?;
 
+    let stderr_str = stderr_thread.join().unwrap_or_default();
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    let stderr_str = String::from_utf8_lossy(&output.stderr);
 
     log::debug!(
         "plugin [{}]: exit={} stdout={:?} stderr={:?}",
@@ -91,10 +110,6 @@ pub fn execute(
         stdout_str,
         stderr_str
     );
-
-    if !stderr_str.is_empty() {
-        eprintln!("[plugin:{}] {}", manifest.name, stderr_str.trim());
-    }
 
     if !output.status.success() {
         let mut detail = format!("exited with status {}", output.status);
