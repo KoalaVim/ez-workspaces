@@ -52,6 +52,10 @@ AUTO_ATTACH=$(echo "$REQUEST" | jq -r '.config.user_config.auto_attach // "false
 TMUX_SESSION="${REPO_NAME}/${SESSION_NAME}"
 TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.:' '__')
 
+# Use "=" prefix for exact matching — without it tmux treats the name as a
+# prefix and "foo/bar" would match "foo/bar-baz".
+TMUX_SESSION_TARGET="=${TMUX_SESSION}"
+
 # Build `-e KEY=VALUE` flags from session.env for tmux new-session.
 # Populates the ENV_FLAGS array.
 build_env_flags() {
@@ -93,7 +97,7 @@ case "$HOOK" in
                 dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
             fi
 
-            if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+            if ! tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
                 build_env_flags
                 dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" ${ENV_FLAGS[@]+"${ENV_FLAGS[@]}"} >/dev/null || true
             else
@@ -105,7 +109,7 @@ case "$HOOK" in
                 dbg_tmux list-sessions -F '  #{session_name}' >/dev/null || true
             fi
 
-            mark_ez_managed "$TMUX_SESSION"
+            mark_ez_managed "${TMUX_SESSION_TARGET}"
         fi
 
         jq -n \
@@ -125,10 +129,10 @@ case "$HOOK" in
 
     on_session_delete)
         if command -v tmux &>/dev/null; then
-            if ! tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null; then
+            if ! tmux kill-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
                 dbg "kill-session failed for '${TMUX_SESSION}', retrying in 500ms"
                 sleep 0.5
-                tmux kill-session -t "${TMUX_SESSION}" 2>/dev/null || true
+                tmux kill-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null || true
             fi
         fi
         echo '{"success": true}'
@@ -137,8 +141,8 @@ case "$HOOK" in
     on_session_enter)
         COMMANDS=()
         if command -v tmux &>/dev/null && [ "$AUTO_ATTACH" = "true" ]; then
-            ATTACH="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION}\"; else tmux attach-session -t \"${TMUX_SESSION}\"; fi"
-            if tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+            ATTACH="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION_TARGET}\"; else tmux attach-session -t \"${TMUX_SESSION_TARGET}\"; fi"
+            if tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
                 COMMANDS+=("$ATTACH")
             else
                 ENV_ARGS=""
@@ -176,9 +180,9 @@ case "$HOOK" in
         dbg "on_session_rename: OLD_TMUX='${OLD_TMUX}' NEW_TMUX='${NEW_TMUX}'"
 
         if command -v tmux &>/dev/null; then
-            if tmux has-session -t "${OLD_TMUX}" 2>/dev/null; then
-                dbg_tmux rename-session -t "${OLD_TMUX}" "${NEW_TMUX}" >/dev/null || true
-                mark_ez_managed "$NEW_TMUX"
+            if tmux has-session -t "=${OLD_TMUX}" 2>/dev/null; then
+                dbg_tmux rename-session -t "=${OLD_TMUX}" "${NEW_TMUX}" >/dev/null || true
+                mark_ez_managed "=${NEW_TMUX}"
             else
                 dbg "tmux session '${OLD_TMUX}' not found, skipping rename"
             fi
@@ -199,19 +203,19 @@ case "$HOOK" in
         fi
 
         build_env_flags
-        if ! tmux has-session -t "${TMUX_SESSION}" 2>/dev/null; then
+        if ! tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
             tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" ${ENV_FLAGS[@]+"${ENV_FLAGS[@]}"} 2>&1 >&2 || true
         else
             # Session already exists — push env vars so new panes inherit them
             echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key val; do
                 [ -z "$key" ] && continue
-                tmux set-environment -t "$TMUX_SESSION" "$key" "$val" 2>/dev/null || true
+                tmux set-environment -t "${TMUX_SESSION_TARGET}" "$key" "$val" 2>/dev/null || true
                 dbg "set-environment -t $TMUX_SESSION $key=$val"
             done
         fi
-        mark_ez_managed "$TMUX_SESSION"
+        mark_ez_managed "${TMUX_SESSION_TARGET}"
 
-        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION}\"; else tmux attach-session -t \"${TMUX_SESSION}\"; fi"
+        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION_TARGET}\"; else tmux attach-session -t \"${TMUX_SESSION_TARGET}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
@@ -332,17 +336,17 @@ case "$HOOK" in
         fi
 
         # Create the tmux session if it doesn't exist
-        if ! tmux has-session -t "${TMUX_NAME}" 2>/dev/null; then
+        if ! tmux has-session -t "=${TMUX_NAME}" 2>/dev/null; then
             tmux new-session -d -s "$TMUX_NAME" -c "$SESS_PATH" 2>&1 >&2 || true
         fi
         # Stamp the session path so `ez cd-to-session` can recover it.
-        tmux set-option -t "${TMUX_NAME}" -q @ez_session_path "${SESS_PATH}" 2>/dev/null || true
+        tmux set-option -t "=${TMUX_NAME}" -q @ez_session_path "${SESS_PATH}" 2>/dev/null || true
 
         # If the user's shell is inside tmux ($TMUX set), switch the current
         # client. Otherwise, attach in the current terminal — never call
         # switch-client without $TMUX, since tmux will switch some random
         # other client in another terminal.
-        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_NAME}\"; else tmux attach-session -t \"${TMUX_NAME}\"; fi"
+        CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"=${TMUX_NAME}\"; else tmux attach-session -t \"=${TMUX_NAME}\"; fi"
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
