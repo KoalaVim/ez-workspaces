@@ -53,6 +53,7 @@ pub fn open_note(repo_id: &str, session_id: &str, config: &EzConfig) -> Result<(
     let status = Command::new(cmd)
         .args(args)
         .arg(&readme)
+        .current_dir(&dir)
         .status()
         .map_err(|e| EzError::Config(format!("failed to run '{}': {}", command, e)))?;
 
