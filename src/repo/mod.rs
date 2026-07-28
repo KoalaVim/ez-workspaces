@@ -334,6 +334,14 @@ fn looks_like_path(arg: &str) -> bool {
     arg.contains('/') || arg.starts_with('.') || arg.starts_with('~')
 }
 
+/// Find a repo whose registered path is a parent of the given path.
+fn find_by_ancestor<'a>(
+    index: &'a model::RepoIndex,
+    path: &std::path::Path,
+) -> Option<&'a model::RepoEntry> {
+    index.repos.iter().find(|r| path.starts_with(&r.path))
+}
+
 fn remove_repo(name: &str, purge: bool) -> Result<()> {
     let mut index = store::load_index()?;
 
@@ -347,14 +355,26 @@ fn remove_repo(name: &str, purge: bool) -> Result<()> {
         } else {
             std::path::PathBuf::from(name)
         };
-        let canonical = std::fs::canonicalize(&resolved)
-            .map_err(|_| EzError::Path(format!("cannot resolve path: {}", resolved.display())))?;
-        log::debug!(
-            "remove_repo: resolved path argument to {}",
-            canonical.display()
-        );
-        index
-            .find_by_path(&canonical)
+
+        let found = if let Ok(canonical) = std::fs::canonicalize(&resolved) {
+            log::debug!(
+                "remove_repo: resolved path argument to {}",
+                canonical.display()
+            );
+            index
+                .find_by_path(&canonical)
+                .or_else(|| find_by_ancestor(&index, &canonical))
+        } else {
+            log::debug!(
+                "remove_repo: canonicalize failed for {}, trying raw path",
+                resolved.display()
+            );
+            index
+                .find_by_path(&resolved)
+                .or_else(|| find_by_ancestor(&index, &resolved))
+        };
+
+        found
             .or_else(|| index.find_by_name_or_id(name))
             .ok_or_else(|| EzError::RepoNotFound(name.into()))?
             .clone()
