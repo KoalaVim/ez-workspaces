@@ -240,6 +240,39 @@ ez session from-dirty new-feature
 
 Or press **Alt-s** in the browser. This stashes your uncommitted changes, creates a new session on the same commit, and applies the stash in the new session's worktree.
 
+### Session notes
+
+Each session can have a notes directory with a `README.md` for tracking context, TODOs, or anything else:
+
+```bash
+# Open the session's README.md in $EDITOR
+ez session note open --name feature-auth
+
+# Cd into the notes directory
+ez session note cd --name feature-auth
+
+# Print the notes directory path (for scripting)
+ez session note path --name feature-auth
+
+# Omit --name to use the current session
+ez session note open
+```
+
+In the browser, press **Alt-i** to open a session's note in your editor, or **Alt-I** to cd into its notes directory. Notes are shown in the preview pane when present (rendered via `bat`).
+
+Configure the open command in `config.toml`:
+
+```toml
+note_open_command = "$EDITOR"   # default, resolves from environment
+# note_open_command = "code"    # or use a specific editor
+
+[keybinds]
+note_open = "alt-i"   # default
+note_cd = "alt-I"     # default
+```
+
+Notes are stored in the OS data directory (`~/.local/share/ez/` on Linux, `~/Library/Application Support/ez/` on macOS) and are cleaned up when a session is deleted.
+
 ### 5. Browse interactively
 
 Run bare `ez` to get an fzf-powered browser:

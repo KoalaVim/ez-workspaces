@@ -243,12 +243,51 @@ pub enum SessionCommand {
         command: SessionLabelCommand,
     },
 
+    /// Session notes (open, cd, path)
+    Note {
+        #[command(subcommand)]
+        command: SessionNoteCommand,
+    },
+
     /// Internal: run detached OnSessionDelete hooks for already-removed sessions
     #[command(hide = true)]
     ReapDelete {
         /// Path to temp payload JSON file
         #[arg(long)]
         payload: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SessionNoteCommand {
+    /// Open the session's README.md in the configured editor
+    Open {
+        /// Session name (default: detect current session)
+        #[arg(long, short)]
+        name: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+    },
+
+    /// Cd into the session's notes directory
+    Cd {
+        /// Session name (default: detect current session)
+        #[arg(long, short)]
+        name: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+    },
+
+    /// Print the notes directory path (for scripting)
+    Path {
+        /// Session name (default: detect current session)
+        #[arg(long, short)]
+        name: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
     },
 }
 

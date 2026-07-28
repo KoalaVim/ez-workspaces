@@ -421,6 +421,8 @@ pub(crate) fn session_action_loop(
             keybinds.edit_labels.as_str(),
             keybinds.cd_session.as_str(),
             keybinds.sort_toggle.as_str(),
+            keybinds.note_open.as_str(),
+            keybinds.note_cd.as_str(),
         ];
         for pv in &plugin_views {
             expect_keys.push(pv.key.as_str());
@@ -654,6 +656,32 @@ pub(crate) fn session_action_loop(
                             .unwrap_or_else(|| repo_entry.path.clone());
                         write_cd_target(cd_file, &target_dir)?;
                         return Ok(true);
+                    }
+                    key if key == keybinds.note_open => {
+                        match session::notes::open_note(
+                            &repo_entry.id,
+                            &selected.id,
+                            config,
+                        ) {
+                            Ok(()) => {}
+                            Err(e) => {
+                                eprintln!("{} {}", "Note open failed:".red(), e);
+                            }
+                        }
+                    }
+                    key if key == keybinds.note_cd => {
+                        match session::notes::ensure_notes_dir(
+                            &repo_entry.id,
+                            &selected.id,
+                        ) {
+                            Ok(dir) => {
+                                write_cd_target(cd_file, &dir)?;
+                                return Ok(true);
+                            }
+                            Err(e) => {
+                                eprintln!("{} {}", "Note cd failed:".red(), e);
+                            }
+                        }
                     }
                     key if key == keybinds.sort_toggle => {
                         sort_mode = sort_mode.toggle();

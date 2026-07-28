@@ -3,6 +3,7 @@ pub mod cursor;
 pub mod from_dirty;
 pub mod model;
 pub mod name_builder;
+pub mod notes;
 pub mod store;
 pub mod tree;
 
@@ -15,7 +16,7 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::cli::{SessionCommand, SessionLabelCommand};
+use crate::cli::{SessionCommand, SessionLabelCommand, SessionNoteCommand};
 use crate::error::{EzError, Result};
 use crate::plugin;
 use crate::repo;
@@ -86,6 +87,7 @@ pub fn dispatch(
             on_create,
         ),
         SessionCommand::Label { command } => dispatch_label(command),
+        SessionCommand::Note { command } => dispatch_note(command, cd_file),
         SessionCommand::ReapDelete { payload } => reap_delete(&payload),
     }
 }
@@ -155,6 +157,50 @@ fn dispatch_label(cmd: SessionLabelCommand) -> Result<()> {
                     }
                 }
             }
+            Ok(())
+        }
+    }
+}
+
+fn dispatch_note(cmd: SessionNoteCommand, cd_file: Option<&Path>) -> Result<()> {
+    let config = crate::config::load()?;
+
+    let resolve_session = |name: Option<&str>, repo_arg: Option<&str>| -> Result<(String, String)> {
+        match name {
+            Some(n) => {
+                let repo_entry = repo::resolve_repo(repo_arg)?;
+                let tree = store::load_sessions(&repo_entry.id)?;
+                let session = tree
+                    .find_by_name(n)
+                    .ok_or_else(|| EzError::SessionNotFound(n.into()))?;
+                Ok((repo_entry.id.clone(), session.id.clone()))
+            }
+            None => {
+                let target = current::resolve_current_session(repo_arg)?;
+                Ok((target.repo_entry.id.clone(), target.session.id.clone()))
+            }
+        }
+    };
+
+    match cmd {
+        SessionNoteCommand::Open { name, repo } => {
+            let (repo_id, session_id) = resolve_session(name.as_deref(), repo.as_deref())?;
+            notes::open_note(&repo_id, &session_id, &config)
+        }
+        SessionNoteCommand::Cd { name, repo } => {
+            let (repo_id, session_id) = resolve_session(name.as_deref(), repo.as_deref())?;
+            let dir = notes::ensure_notes_dir(&repo_id, &session_id)?;
+            if let Some(cd_path) = cd_file {
+                std::fs::write(cd_path, dir.display().to_string())?;
+            } else {
+                println!("{}", dir.display());
+            }
+            Ok(())
+        }
+        SessionNoteCommand::Path { name, repo } => {
+            let (repo_id, session_id) = resolve_session(name.as_deref(), repo.as_deref())?;
+            let dir = crate::paths::notes_dir(&repo_id, &session_id)?;
+            println!("{}", dir.display());
             Ok(())
         }
     }
@@ -713,6 +759,13 @@ fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Re
         tree.remove(&s.id)?;
     }
     store::save_sessions(&repo_entry.id, &tree)?;
+
+    for s in &to_reap {
+        if let Err(e) = notes::delete_notes_dir(&repo_entry.id, &s.id) {
+            log::debug!("delete_session: notes cleanup for '{}' failed: {}", s.name, e);
+        }
+    }
+
     println!("{} {}", "Deleted session:".green(), session.name.bold());
 
     // Run plugin teardown (worktree removal, tmux kill, …) in a detached
@@ -1360,6 +1413,12 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
         tree.remove(&s.id)?;
     }
     store::save_sessions(repo_id, &tree)?;
+
+    for s in &to_reap {
+        if let Err(e) = notes::delete_notes_dir(repo_id, &s.id) {
+            log::debug!("delete_session_by_id: notes cleanup for '{}' failed: {}", s.name, e);
+        }
+    }
 
     let non_bare: Vec<Session> = to_reap.into_iter().filter(|s| !s.bare).collect();
     if !non_bare.is_empty() {

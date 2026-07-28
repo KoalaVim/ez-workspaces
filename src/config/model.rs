@@ -87,6 +87,11 @@ pub struct EzConfig {
     /// Whether to copy Cursor IDE conversations when renaming a session.
     #[serde(default)]
     pub copy_cursor_conversations: bool,
+
+    /// Command used to open session note files (default: "$EDITOR").
+    /// "$EDITOR" is resolved from the environment at runtime.
+    #[serde(default = "default_note_open_command")]
+    pub note_open_command: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -201,6 +206,14 @@ pub struct KeybindsConfig {
     /// Clone a repo into the browsed directory (default: "alt-a")
     #[serde(default = "default_bind_clone_repo")]
     pub clone_repo: String,
+
+    /// Open session note README in editor (default: "alt-i")
+    #[serde(default = "default_bind_note_open")]
+    pub note_open: String,
+
+    /// Cd into session notes directory (default: "alt-I" i.e. Alt-Shift-I)
+    #[serde(default = "default_bind_note_cd")]
+    pub note_cd: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -233,6 +246,7 @@ impl Default for EzConfig {
             on_create: default_on_create(),
             default_sort: default_sort(),
             copy_cursor_conversations: false,
+            note_open_command: default_note_open_command(),
         }
     }
 }
@@ -272,6 +286,8 @@ impl Default for KeybindsConfig {
             sort_toggle: default_bind_sort_toggle(),
             session_from_dirty: default_bind_from_dirty(),
             clone_repo: default_bind_clone_repo(),
+            note_open: default_bind_note_open(),
+            note_cd: default_bind_note_cd(),
         }
     }
 }
@@ -338,6 +354,18 @@ fn default_bind_from_dirty() -> String {
 
 fn default_bind_clone_repo() -> String {
     "alt-a".into()
+}
+
+fn default_bind_note_open() -> String {
+    "alt-i".into()
+}
+
+fn default_bind_note_cd() -> String {
+    "alt-I".into()
+}
+
+fn default_note_open_command() -> String {
+    "$EDITOR".into()
 }
 
 fn default_plugin_timeout() -> u64 {
