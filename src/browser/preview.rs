@@ -642,6 +642,10 @@ fn preview_main_keybind_help() {
             "Edit labels".into(),
         ),
         (
+            fmt_key(&keybinds.remove_repo).bold().red().to_string(),
+            "Remove repo".into(),
+        ),
+        (
             fmt_key(&keybinds.sort_toggle).bold().yellow().to_string(),
             "Toggle sort".into(),
         ),

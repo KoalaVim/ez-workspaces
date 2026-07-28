@@ -293,6 +293,12 @@ At any top-level selector, press a keybind to switch views:
 
 Plugin views appear automatically when enabled plugins register them. The tmux plugin adds `Ctrl-a`.
 
+In the repo view:
+
+- **Alt-l** — Edit labels on the selected repo
+- **Alt-d** — Remove the selected repo from ez
+- **Ctrl-s** — Toggle sort (alphabetical / LRU)
+
 ### Jumping back to a session's worktree from tmux
 
 When the tmux plugin creates a session it stamps the session's worktree path on the tmux session as the `@ez_session_path` user option. From any pane inside that tmux session you can return to the worktree with:

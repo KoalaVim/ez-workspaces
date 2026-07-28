@@ -18,15 +18,6 @@ pub(super) fn run(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
 ) -> Result<Outcome> {
-    let index = repo::store::load_index()?;
-    if index.repos.is_empty() {
-        println!(
-            "{}",
-            "No registered repos. Use `ez add` or `ez clone`.".yellow()
-        );
-        return Ok(Outcome::Done);
-    }
-
     let plugin_views = plugin::collect_plugin_views("repo", config).unwrap_or_default();
     let mut sort_mode = SortMode::from_config(&config.default_sort);
 
@@ -34,6 +25,15 @@ pub(super) fn run(
     let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
 
     loop {
+        let index = repo::store::load_index()?;
+        if index.repos.is_empty() {
+            println!(
+                "{}",
+                "No registered repos. Use `ez add` or `ez clone`.".yellow()
+            );
+            return Ok(Outcome::Done);
+        }
+
         let mut repo_entries: Vec<&repo::model::RepoEntry> = index.repos.iter().collect();
 
         if sort_mode == SortMode::Lru {
@@ -80,6 +80,7 @@ pub(super) fn run(
         let keys = {
             let mut k = view_switch_keys(&config.keybinds, &plugin_views);
             k.push(config.keybinds.edit_labels.as_str());
+            k.push(config.keybinds.remove_repo.as_str());
             k.push(config.keybinds.sort_toggle.as_str());
             k
         };
@@ -121,6 +122,17 @@ pub(super) fn run(
                             result.join(", ").magenta().to_string()
                         }
                     );
+                    continue;
+                }
+                if key == config.keybinds.remove_repo {
+                    let entry = repo_entries[idx];
+                    let msg = format!("Remove repo '{}'?", entry.name);
+                    if selector.confirm(&msg, false)? {
+                        let mut idx_mut = repo::store::load_index()?;
+                        idx_mut.remove_by_id(&entry.id);
+                        repo::store::save_index(&idx_mut)?;
+                        eprintln!("{} {}", "Removed:".green(), entry.name.bold());
+                    }
                     continue;
                 }
             }

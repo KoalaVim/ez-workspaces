@@ -34,7 +34,7 @@ docs/               Documentation
 ## Key Modules
 
 ### config/ - Configuration
-- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort`, `note_open_command` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty`, `clone_repo`, `note_open`, `note_cd` keybind fields
+- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort`, `note_open_command` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty`, `clone_repo`, `remove_repo`, `note_open`, `note_cd` keybind fields
 - `mod.rs`: load/save/edit config
 
 ### repo/ - Repository Management

@@ -207,6 +207,10 @@ pub struct KeybindsConfig {
     #[serde(default = "default_bind_clone_repo")]
     pub clone_repo: String,
 
+    /// Remove repo from the repo view (default: "alt-d")
+    #[serde(default = "default_bind_remove_repo")]
+    pub remove_repo: String,
+
     /// Open session note README in editor (default: "alt-i")
     #[serde(default = "default_bind_note_open")]
     pub note_open: String,
@@ -286,6 +290,7 @@ impl Default for KeybindsConfig {
             sort_toggle: default_bind_sort_toggle(),
             session_from_dirty: default_bind_from_dirty(),
             clone_repo: default_bind_clone_repo(),
+            remove_repo: default_bind_remove_repo(),
             note_open: default_bind_note_open(),
             note_cd: default_bind_note_cd(),
         }
@@ -354,6 +359,10 @@ fn default_bind_from_dirty() -> String {
 
 fn default_bind_clone_repo() -> String {
     "alt-a".into()
+}
+
+fn default_bind_remove_repo() -> String {
+    "alt-d".into()
 }
 
 fn default_bind_note_open() -> String {

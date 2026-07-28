@@ -70,6 +70,10 @@ Launch with `ez`. The preview pane shows all available keybinds.
 
 - `Alt-a` clone a repo into the current directory
 
+**Repo view actions:**
+
+- `Alt-l` labels · `Alt-d` remove · `Ctrl-s` sort
+
 **Session actions** — inside a repo's session picker:
 
 - `Enter` enter · `Alt-n` new · `Alt-N` bare · `Alt-s` from dirty · `Alt-r` rename · `Alt-d` delete · `Alt-l` labels · `Ctrl-d` cd · `Ctrl-s` sort · `Alt-i` note · `Alt-I` note cd
