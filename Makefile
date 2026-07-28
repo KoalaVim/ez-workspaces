@@ -16,7 +16,7 @@ install:
 	cargo install --locked --path .
 
 install-debug:
-	cargo install --debug --path .
+	cargo install --locked --debug --path .
 
 clean:
 	cargo clean
@@ -29,5 +29,5 @@ fmt:
 
 check:
 	cargo fmt -- --check
-	cargo clippy -- -D warnings
-	cargo test
+	cargo clippy --locked -- -D warnings
+	cargo test --locked

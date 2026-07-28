@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::plugin;
 use crate::repo;
 use crate::session;
+use crate::session::notes;
 
 use super::{format_last_accessed, format_pr_indicator, get_branch, git_cmd};
 
@@ -141,7 +142,22 @@ fn preview_session(repo_path: &Path, session_id: &str) -> Result<()> {
     println!();
     preview_keybind_help();
 
-    // Recent commits last, after keybinds
+    // Note section (bat-rendered README.md), after keybinds
+    if notes::notes_readme_exists(&entry.id, session_id) {
+        if let Ok(readme_path) = crate::paths::notes_readme(&entry.id, session_id) {
+            if let Some(output) = render_note_with_bat(&readme_path) {
+                if !output.trim().is_empty() {
+                    println!();
+                    preview_section("Note");
+                    for line in output.lines() {
+                        println!("  {line}");
+                    }
+                }
+            }
+        }
+    }
+
+    // Recent commits last
     if let Some(ref worktree_path) = session.path {
         if worktree_path.exists() && entry.is_git {
             println!();
@@ -578,6 +594,14 @@ fn preview_keybind_help() {
             fmt_key(&keybinds.cd_session).bold().yellow().to_string(),
             "Cd into worktree".into(),
         ),
+        (
+            fmt_key(&keybinds.note_open).bold().yellow().to_string(),
+            "Open note".into(),
+        ),
+        (
+            fmt_key(&keybinds.note_cd).bold().yellow().to_string(),
+            "Cd to notes".into(),
+        ),
     ];
     for pb in plugin::collect_plugin_binds("session", &config).unwrap_or_default() {
         let desc = pb.description.as_deref().unwrap_or(&pb.label);
@@ -654,6 +678,22 @@ fn preview_main_keybind_help() {
     }
 
     print_keybind_table("Repo", "Views", &left, &right);
+}
+
+/// Render a README.md via `bat` with syntax highlighting.
+/// Returns None if `bat` is not installed or the command fails.
+fn render_note_with_bat(path: &std::path::Path) -> Option<String> {
+    std::process::Command::new("bat")
+        .args([
+            "--style=plain",
+            "--color=always",
+            "--line-range=:20",
+            &path.display().to_string(),
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
 }
 
 fn preview_section(title: &str) {

@@ -72,7 +72,7 @@ Launch with `ez`. The preview pane shows all available keybinds.
 
 **Session actions** — inside a repo's session picker:
 
-- `Enter` enter · `Alt-n` new · `Alt-N` bare · `Alt-s` from dirty · `Alt-r` rename · `Alt-d` delete · `Alt-l` labels · `Ctrl-d` cd · `Ctrl-s` sort
+- `Enter` enter · `Alt-n` new · `Alt-N` bare · `Alt-s` from dirty · `Alt-r` rename · `Alt-d` delete · `Alt-l` labels · `Ctrl-d` cd · `Ctrl-s` sort · `Alt-i` note · `Alt-I` note cd
 
 All keybinds are [configurable](docs/user-guide.md#keybinds).
 
@@ -90,6 +90,21 @@ ez plugin enable kv                        # per-session KoalaVim environments
 ```
 
 Custom plugins use a JSON-over-stdio protocol. See the [Plugin Guide](docs/plugin-guide.md).
+
+## Suggested Aliases
+
+```bash
+alias del='ez session delete'
+alias new='ez session new'
+alias note='ez session note open'
+alias Note='ez session note cd'
+```
+
+**tmux** — open the current session's note in a popup:
+
+```bash
+bind -T prefix n display-popup -E -w 65% -h 65% "ez session note open"
+```
 
 ## Docs
 

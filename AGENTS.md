@@ -8,6 +8,7 @@ ez-workspaces (`ez`) is a Rust-based workspace and session manager. It manages g
 
 - **Language**: Rust (single crate, modular structure)
 - **Config**: TOML at `~/.config/ez/`
+- **Data**: Notes and session data at `<data_dir>/ez/` (macOS: `~/Library/Application Support/ez/`, Linux: `~/.local/share/ez/`)
 - **Plugins**: External scripts (JSON-over-stdio protocol)
 - **Interactive UI**: fzf via `InteractiveSelector` trait
 
@@ -18,11 +19,12 @@ src/
   main.rs           CLI dispatch
   cli.rs            Clap command definitions
   error.rs          Error types
-  paths.rs          Path resolution
+  paths.rs          Path resolution (config_dir, data_dir, notes paths)
   config/           Global config (TOML)
   repo/             Repo CRUD + git clone
   session/          Session lifecycle + tree hierarchy
     from_dirty.rs   Session creation from dirty changes (stash workflow)
+    notes.rs        Per-session notes directory management
   plugin/           Plugin execution engine
   browser/          Interactive fzf browser
 plugins/            Bundled plugin scripts
@@ -32,7 +34,7 @@ docs/               Documentation
 ## Key Modules
 
 ### config/ - Configuration
-- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty`, `clone_repo` keybind fields
+- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort`, `note_open_command` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty`, `clone_repo`, `note_open`, `note_cd` keybind fields
 - `mod.rs`: load/save/edit config
 
 ### repo/ - Repository Management
@@ -46,8 +48,9 @@ docs/               Documentation
 - `name_builder.rs`: interactive name builder with mode selection (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`)
 - `store.rs`: filesystem persistence
 - `from_dirty.rs`: session creation from dirty changes (stash workflow)
+- `notes.rs`: per-session notes directory (`<data_dir>/ez/repos/<repo-id>/notes/<session-id>/README.md`); `ensure_notes_dir`, `open_note`, `delete_notes_dir`, `notes_readme_exists`
 - `current.rs`: current-session detection from tmux `@ez_session_name` + `@ez_repo_id` (preferred) with fallback to `@ez_session_path` and worktree paths
-- `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session
+- `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session, note dispatch
 
 ### plugin/ - Plugin System
 - `model.rs`: `PluginManifest`, `HookType` enum (14 hook types including `OnBind`, `OnView`, `OnViewSelect`, `OnNameResolve`), `PluginBind`, `PluginView`, `ConfigField`

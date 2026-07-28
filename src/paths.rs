@@ -44,6 +44,25 @@ pub fn plugins_dir() -> Result<PathBuf> {
     Ok(config_dir()?.join("plugins"))
 }
 
+/// Returns the base data directory: <data_dir>/ez/
+/// macOS: ~/Library/Application Support/ez/
+/// Linux: ~/.local/share/ez/
+pub fn data_dir() -> Result<PathBuf> {
+    let base = dirs::data_dir()
+        .ok_or_else(|| EzError::Path("Could not determine data directory".into()))?;
+    Ok(base.join("ez"))
+}
+
+/// Returns the notes directory for a session: <data_dir>/ez/repos/<repo-id>/notes/<session-id>/
+pub fn notes_dir(repo_id: &str, session_id: &str) -> Result<PathBuf> {
+    Ok(data_dir()?.join("repos").join(repo_id).join("notes").join(session_id))
+}
+
+/// Returns the README.md path for a session's notes.
+pub fn notes_readme(repo_id: &str, session_id: &str) -> Result<PathBuf> {
+    Ok(notes_dir(repo_id, session_id)?.join("README.md"))
+}
+
 /// Expand ~ to the user's home directory.
 pub fn expand_tilde(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
