@@ -86,7 +86,7 @@ Plugin views SHALL be provided by enabled plugins via manifest `[[views]]` entri
 - **THEN** on selection, calls `OnViewSelect` which returns `post_shell_commands` to switch tmux client
 
 ### Requirement: Session action loop
-When a repo is selected, the browser SHALL enter a session action loop that repeatedly shows the repo's sessions as a tree with box-drawing tree connectors (`├──`, `└──`, `│`) and handles keybind actions until the user selects a session (Enter) or cancels (Escape). The loop re-renders after each action to show updated state. Sessions SHALL be rendered with tree glyphs matching the indentation style used in the Tree view. The loop SHALL support additional keybinds: `Alt-Shift-N` for bare session creation, `alt-s` for session-from-dirty, and `ctrl-s` for sort toggle.
+When a repo is selected, the browser SHALL enter a session action loop that repeatedly shows the repo's sessions as a tree with box-drawing tree connectors (`├──`, `└──`, `│`) and handles keybind actions until the user selects a session (Enter) or cancels (Escape). The loop re-renders after each action to show updated state. Sessions SHALL be rendered with tree glyphs matching the indentation style used in the Tree view. The loop SHALL support additional keybinds: `Alt-Shift-N` for bare session creation, `alt-s` for session-from-dirty, `ctrl-s` for sort toggle, `alt-i` for opening the session's note in the configured editor, and `alt-I` for cd-ing to the session's notes directory.
 
 #### Scenario: Select session
 - **WHEN** user presses Enter on a session
@@ -116,6 +116,18 @@ When a repo is selected, the browser SHALL enter a session action loop that repe
 - **WHEN** user presses the `cd_session` keybind (default Ctrl-d) on a session
 - **THEN** system writes the session's worktree path to the cd-file regardless of the configured `on_enter` action
 - **THEN** the browser exits and the shell wrapper cd's into that path
+
+#### Scenario: Open note keybind
+- **WHEN** user presses `alt-i` in the session action loop on a session
+- **THEN** system ensures the notes directory and README.md exist
+- **AND** opens the README.md in the configured editor via fzf's `execute(...)` (blocking, hands terminal to editor)
+- **AND** after the editor exits, the session loop re-renders
+
+#### Scenario: Cd to notes keybind
+- **WHEN** user presses `alt-I` in the session action loop on a session
+- **THEN** system ensures the notes directory exists
+- **AND** writes the notes directory path to the cd-file
+- **AND** the browser exits and the shell wrapper cd's into the notes directory
 
 #### Scenario: Cancel returns to view layer
 - **WHEN** user presses Escape in the session action loop
@@ -174,8 +186,13 @@ The browser SHALL show a preview pane (right 50%) in fzf. The preview calls back
 - **AND** shows Metadata (repo name, worktree path, last used as `dd/mm/yyyy HH:MM (X ago)`, labels)
 - **AND** shows Git Info for the session's worktree (branch, dirty status)
 - **AND** shows PR status inline (pr number, state, URL on same line) when `ez_pr_number` is set
-- **AND** shows a two-column Keybinds table (Session actions | Menu actions)
+- **AND** shows a Note section with bat-rendered README.md content (first 20 lines) when the session has notes
+- **AND** shows a two-column Keybinds table (Session actions including note keybinds | Menu actions)
 - **AND** shows Recent Commits as the last section
+
+#### Scenario: Session preview without notes
+- **WHEN** user highlights a session that has no notes directory or README.md
+- **THEN** preview pane does not show a Note section
 
 #### Scenario: Keybind table layout
 - **WHEN** keybinds are displayed in the preview pane
