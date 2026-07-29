@@ -25,7 +25,6 @@ pub struct PrMetadata {
     pub pr_number: u64,
     pub pr_url: String,
     pub head_ref: String,
-    pub base_ref: String,
 }
 
 impl PrMetadata {
@@ -250,13 +249,7 @@ fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) 
     eprint!("{}", "Resolving PR branch...".dimmed());
 
     let output = std::process::Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            url,
-            "--json",
-            "headRefName,baseRefName,number",
-        ])
+        .args(["pr", "view", url, "--json", "headRefName,number"])
         .output();
 
     eprint!("\r{}\r", " ".repeat(30));
@@ -276,11 +269,6 @@ fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) 
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let base_ref = json
-                .get("baseRefName")
-                .and_then(|v| v.as_str())
-                .unwrap_or("main")
-                .to_string();
             let number = json
                 .get("number")
                 .and_then(|v| v.as_u64())
@@ -294,13 +282,12 @@ fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) 
                 return (fallback_name, None);
             }
 
-            log::debug!("resolve_pr_via_gh: PR #{number} head={head_ref} base={base_ref}");
+            log::debug!("resolve_pr_via_gh: PR #{number} head={head_ref}");
 
             let metadata = PrMetadata {
                 pr_number: number,
                 pr_url: url.to_string(),
                 head_ref: head_ref.clone(),
-                base_ref,
             };
 
             (head_ref, Some(metadata))

@@ -55,7 +55,11 @@ pub fn data_dir() -> Result<PathBuf> {
 
 /// Returns the notes directory for a session: <data_dir>/ez/repos/<repo-id>/notes/<session-id>/
 pub fn notes_dir(repo_id: &str, session_id: &str) -> Result<PathBuf> {
-    Ok(data_dir()?.join("repos").join(repo_id).join("notes").join(session_id))
+    Ok(data_dir()?
+        .join("repos")
+        .join(repo_id)
+        .join("notes")
+        .join(session_id))
 }
 
 /// Returns the README.md path for a session's notes.

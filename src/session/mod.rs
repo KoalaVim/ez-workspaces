@@ -165,22 +165,23 @@ fn dispatch_label(cmd: SessionLabelCommand) -> Result<()> {
 fn dispatch_note(cmd: SessionNoteCommand, cd_file: Option<&Path>) -> Result<()> {
     let config = crate::config::load()?;
 
-    let resolve_session = |name: Option<&str>, repo_arg: Option<&str>| -> Result<(String, String)> {
-        match name {
-            Some(n) => {
-                let repo_entry = repo::resolve_repo(repo_arg)?;
-                let tree = store::load_sessions(&repo_entry.id)?;
-                let session = tree
-                    .find_by_name(n)
-                    .ok_or_else(|| EzError::SessionNotFound(n.into()))?;
-                Ok((repo_entry.id.clone(), session.id.clone()))
+    let resolve_session =
+        |name: Option<&str>, repo_arg: Option<&str>| -> Result<(String, String)> {
+            match name {
+                Some(n) => {
+                    let repo_entry = repo::resolve_repo(repo_arg)?;
+                    let tree = store::load_sessions(&repo_entry.id)?;
+                    let session = tree
+                        .find_by_name(n)
+                        .ok_or_else(|| EzError::SessionNotFound(n.into()))?;
+                    Ok((repo_entry.id.clone(), session.id.clone()))
+                }
+                None => {
+                    let target = current::resolve_current_session(repo_arg)?;
+                    Ok((target.repo_entry.id.clone(), target.session.id.clone()))
+                }
             }
-            None => {
-                let target = current::resolve_current_session(repo_arg)?;
-                Ok((target.repo_entry.id.clone(), target.session.id.clone()))
-            }
-        }
-    };
+        };
 
     match cmd {
         SessionNoteCommand::Open { name, repo } => {
@@ -346,12 +347,6 @@ fn new_session(
     store::save_sessions(&repo_entry.id, &tree)?;
 
     let created = tree.find_by_id(&session_id).cloned().unwrap_or(session);
-
-    if let Some(pr) = &pr_metadata {
-        if let Some(path) = &created.path {
-            crate::browser::pr_merge_base_reset(path, &pr.base_ref);
-        }
-    }
 
     if crate::browser::on_create_is_noop(&config.on_create) {
         let suffix = if bare { " (bare)" } else { "" };
@@ -762,7 +757,11 @@ fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Re
 
     for s in &to_reap {
         if let Err(e) = notes::delete_notes_dir(&repo_entry.id, &s.id) {
-            log::debug!("delete_session: notes cleanup for '{}' failed: {}", s.name, e);
+            log::debug!(
+                "delete_session: notes cleanup for '{}' failed: {}",
+                s.name,
+                e
+            );
         }
     }
 
@@ -1416,7 +1415,11 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
 
     for s in &to_reap {
         if let Err(e) = notes::delete_notes_dir(repo_id, &s.id) {
-            log::debug!("delete_session_by_id: notes cleanup for '{}' failed: {}", s.name, e);
+            log::debug!(
+                "delete_session_by_id: notes cleanup for '{}' failed: {}",
+                s.name,
+                e
+            );
         }
     }
 

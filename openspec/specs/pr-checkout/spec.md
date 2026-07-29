@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Enable creating sessions from GitHub PR URLs with full branch resolution, remote tracking, and merge-base reset to present PR changes as dirty files.
+Enable creating sessions from GitHub PR URLs with full branch resolution and remote tracking.
 
 ## Requirements
 
@@ -22,22 +22,6 @@ The "From GitHub PR" name builder mode SHALL use `gh pr view <url> --json headRe
 #### Scenario: gh auth failure
 - **WHEN** `gh pr view` fails due to authentication
 - **THEN** system falls back to extracting `pr<number>` from URL and displays the `gh` error
-
-### Requirement: Reset to merge-base after checkout
-After the worktree is created with the PR's branch, the system SHALL run `git reset --mixed $(git merge-base HEAD origin/<base-branch>)` in the new worktree to unstage all PR commits. This presents the PR's changes as dirty/unstaged files in the worktree.
-
-#### Scenario: PR changes shown as dirty
-- **WHEN** session creation completes for a PR checkout
-- **THEN** system runs `git reset --mixed` to the merge-base in the new worktree
-- **THEN** all files changed by the PR appear as unstaged modifications
-
-#### Scenario: Merge-base resolution
-- **WHEN** system computes the merge-base
-- **THEN** it uses `git merge-base HEAD origin/<baseRefName>` where `baseRefName` is from the `gh pr view` output
-
-#### Scenario: Reset failure
-- **WHEN** `git reset` fails (e.g. merge-base not found)
-- **THEN** system warns the user but keeps the session (worktree has the PR branch checked out normally)
 
 ### Requirement: Start point override for PR branch
 When the PR branch exists on the remote, the git-worktree plugin SHALL use the remote branch as the start point for the worktree creation. The session's `start_point` SHALL be set to `origin/<headRefName>` to ensure the worktree has the full PR branch history.

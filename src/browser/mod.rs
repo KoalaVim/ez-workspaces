@@ -485,11 +485,6 @@ pub(crate) fn session_action_loop(
                                     false,
                                     env,
                                 )?;
-                                if let Some(pr) = &pr_metadata {
-                                    if let Some(path) = &created.path {
-                                        pr_merge_base_reset(path, &pr.base_ref);
-                                    }
-                                }
                                 if on_create_is_noop(&config.on_create) {
                                     eprintln!(
                                         "{} {} → {}",
@@ -658,11 +653,7 @@ pub(crate) fn session_action_loop(
                         return Ok(true);
                     }
                     key if key == keybinds.note_open => {
-                        match session::notes::open_note(
-                            &repo_entry.id,
-                            &selected.id,
-                            config,
-                        ) {
+                        match session::notes::open_note(&repo_entry.id, &selected.id, config) {
                             Ok(()) => {}
                             Err(e) => {
                                 eprintln!("{} {}", "Note open failed:".red(), e);
@@ -670,10 +661,7 @@ pub(crate) fn session_action_loop(
                         }
                     }
                     key if key == keybinds.note_cd => {
-                        match session::notes::ensure_notes_dir(
-                            &repo_entry.id,
-                            &selected.id,
-                        ) {
+                        match session::notes::ensure_notes_dir(&repo_entry.id, &selected.id) {
                             Ok(dir) => {
                                 write_cd_target(cd_file, &dir)?;
                                 return Ok(true);
@@ -898,51 +886,6 @@ pub(crate) fn format_last_accessed(ts: &str) -> String {
         format!("{}h ago", elapsed.num_hours())
     } else {
         format!("{}d ago", elapsed.num_days())
-    }
-}
-
-/// After creating a PR-based session, reset the worktree to the merge-base
-/// so that the PR's changes appear as dirty (unstaged) files.
-pub(crate) fn pr_merge_base_reset(worktree_path: &Path, base_ref: &str) {
-    log::debug!(
-        "pr_merge_base_reset: resetting to merge-base with origin/{base_ref} in {}",
-        worktree_path.display()
-    );
-
-    eprint!("{}", "Fetching base branch...".dimmed());
-    let fetch_ok = git_run(worktree_path, &["fetch", "origin", base_ref]);
-    eprint!("\r{}\r", " ".repeat(30));
-
-    if !fetch_ok {
-        eprintln!(
-            "{}",
-            format!("Warning: failed to fetch origin/{base_ref}").yellow()
-        );
-        return;
-    }
-
-    let base_remote = format!("origin/{base_ref}");
-    let merge_base = match git_cmd(worktree_path, &["merge-base", "HEAD", &base_remote]) {
-        Some(mb) => mb,
-        None => {
-            eprintln!(
-                "{}",
-                "Warning: could not determine merge-base, worktree has PR branch checked out normally"
-                    .yellow()
-            );
-            return;
-        }
-    };
-
-    log::debug!("pr_merge_base_reset: merge-base={merge_base}");
-
-    if git_run(worktree_path, &["reset", "--mixed", &merge_base]) {
-        eprintln!("{}", "PR changes shown as dirty files.".green());
-    } else {
-        eprintln!(
-            "{}",
-            "Warning: git reset failed, worktree has PR branch checked out normally".yellow()
-        );
     }
 }
 
