@@ -603,7 +603,12 @@ pub(crate) fn session_action_loop(
                             )
                         };
                         if selector.confirm(&msg, false)? {
-                            session::delete_session_by_id(&repo_entry.id, &selected.id, true)?;
+                            session::delete_session_by_id(
+                                &repo_entry.id,
+                                &selected.id,
+                                true,
+                                post_cmd_file,
+                            )?;
                             eprintln!("{} {}", "Deleted:".green(), selected.name.bold());
                         }
                     }

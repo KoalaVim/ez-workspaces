@@ -105,6 +105,7 @@ fn disable_plugin(name: &str) -> Result<()> {
 }
 
 /// Run hooks on all enabled plugins for a given event.
+/// Returns any `post_shell_commands` collected from plugin responses.
 pub fn run_hooks(
     hook: HookType,
     repo_entry: &RepoEntry,
@@ -112,7 +113,7 @@ pub fn run_hooks(
     session: Option<&Session>,
     config: &EzConfig,
     tree: &mut SessionTree,
-) -> Result<()> {
+) -> Result<Vec<String>> {
     let plugins_dir = resolve_plugins_dir(config)?;
     bundled::ensure_bundled_plugins(&plugins_dir)?;
 
@@ -162,6 +163,7 @@ pub fn run_hooks(
     );
 
     let hook_start = std::time::Instant::now();
+    let mut collected_post_commands: Vec<String> = Vec::new();
 
     for (plugin_name, manifest) in &plugins {
         let plugin_dir = plugins_dir.join(plugin_name);
@@ -241,6 +243,7 @@ pub fn run_hooks(
                 if !response.shell_commands.is_empty() {
                     runner::run_shell_commands(&response.shell_commands)?;
                 }
+                collected_post_commands.extend(response.post_shell_commands);
             }
             Err(e) => {
                 eprintln!(
@@ -271,7 +274,7 @@ pub fn run_hooks(
         );
     }
 
-    Ok(())
+    Ok(collected_post_commands)
 }
 
 /// Run hooks with a rename context attached to the request.

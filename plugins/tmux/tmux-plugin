@@ -128,14 +128,13 @@ case "$HOOK" in
         ;;
 
     on_session_delete)
-        if command -v tmux &>/dev/null; then
-            if ! tmux kill-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
-                dbg "kill-session failed for '${TMUX_SESSION}', retrying in 500ms"
-                sleep 0.5
-                tmux kill-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null || true
-            fi
+        if command -v tmux &>/dev/null && tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
+            jq -n \
+                --arg cmd "tmux kill-session -t \"${TMUX_SESSION_TARGET}\"" \
+                '{success: true, post_shell_commands: [$cmd]}'
+        else
+            echo '{"success": true}'
         fi
-        echo '{"success": true}'
         ;;
 
     on_session_enter)

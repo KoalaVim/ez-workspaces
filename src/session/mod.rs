@@ -13,7 +13,6 @@ use std::process::{Command, Stdio};
 
 use chrono::Utc;
 use colored::Colorize;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::cli::{SessionCommand, SessionLabelCommand, SessionNoteCommand};
@@ -21,13 +20,6 @@ use crate::error::{EzError, Result};
 use crate::plugin;
 use crate::repo;
 use model::{Session, SessionTree};
-
-/// Payload written to a temp file and consumed by the `reap-delete` subcommand.
-#[derive(Serialize, Deserialize)]
-struct ReapPayload {
-    repo_id: String,
-    sessions: Vec<Session>,
-}
 
 /// Dispatch session subcommands.
 pub fn dispatch(
@@ -67,7 +59,7 @@ pub fn dispatch(
             repo.as_deref(),
         ),
         SessionCommand::Delete { name, repo, force } => {
-            delete_session(name.as_deref(), repo.as_deref(), force)
+            delete_session(name.as_deref(), repo.as_deref(), force, post_cmd_file)
         }
         SessionCommand::Enter { name, repo } => {
             enter_session(&name, repo.as_deref(), cd_file, post_cmd_file, on_enter)
@@ -88,7 +80,6 @@ pub fn dispatch(
         ),
         SessionCommand::Label { command } => dispatch_label(command),
         SessionCommand::Note { command } => dispatch_note(command, cd_file),
-        SessionCommand::ReapDelete { payload } => reap_delete(&payload),
     }
 }
 
@@ -702,7 +693,12 @@ pub fn cascade_dirty(repo_id: &str, session_id: &str) -> Result<Vec<String>> {
     Ok(dirty_worktrees(&to_reap))
 }
 
-fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Result<()> {
+fn delete_session(
+    name: Option<&str>,
+    repo_arg: Option<&str>,
+    force: bool,
+    post_cmd_file: Option<&Path>,
+) -> Result<()> {
     let (repo_entry, session) = match name {
         Some(name) => {
             let repo_entry = repo::resolve_repo(repo_arg)?;
@@ -747,9 +743,6 @@ fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Re
         }
     }
 
-    // Persist the removal synchronously BEFORE running hooks.  A hook (e.g.
-    // tmux kill-session) may destroy the controlling terminal and SIGHUP this
-    // process; the record must already be gone before that can happen.
     for s in &to_reap {
         tree.remove(&s.id)?;
     }
@@ -767,9 +760,34 @@ fn delete_session(name: Option<&str>, repo_arg: Option<&str>, force: bool) -> Re
 
     println!("{} {}", "Deleted session:".green(), session.name.bold());
 
-    // Run plugin teardown (worktree removal, tmux kill, …) in a detached
-    // worker that outlives any terminal teardown triggered by the hooks.
-    spawn_detached_reap(&repo_entry.id, &to_reap)?;
+    let config = crate::config::load()?;
+    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+    let mut hook_tree = SessionTree {
+        sessions: to_reap.clone(),
+    };
+    let mut all_post_commands: Vec<String> = Vec::new();
+
+    for s in &to_reap {
+        if s.bare {
+            continue;
+        }
+        log::debug!("delete_session: running OnSessionDelete for '{}'", s.name);
+        match plugin::run_hooks(
+            plugin::model::HookType::OnSessionDelete,
+            &repo_entry,
+            &repo_meta,
+            Some(s),
+            &config,
+            &mut hook_tree,
+        ) {
+            Ok(post_cmds) => all_post_commands.extend(post_cmds),
+            Err(e) => log::debug!("delete_session: hook error for '{}': {}", s.name, e),
+        }
+    }
+
+    if !all_post_commands.is_empty() {
+        crate::browser::write_post_commands(post_cmd_file, &all_post_commands)?;
+    }
 
     Ok(())
 }
@@ -1365,9 +1383,14 @@ pub(crate) fn handle_branch_conflict(repo_path: &Path, name: &str) -> Result<()>
 }
 
 /// Delete a session by ID (with forced cascade). Used by the browser action menu.
-pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Result<()> {
+pub fn delete_session_by_id(
+    repo_id: &str,
+    session_id: &str,
+    force: bool,
+    post_cmd_file: Option<&Path>,
+) -> Result<()> {
     // Verify the repo exists before doing anything.
-    let _repo_entry = repo::store::load_index()?
+    let repo_entry = repo::store::load_index()?
         .repos
         .iter()
         .find(|r| r.id == repo_id)
@@ -1423,11 +1446,36 @@ pub fn delete_session_by_id(repo_id: &str, session_id: &str, force: bool) -> Res
         }
     }
 
-    let non_bare: Vec<Session> = to_reap.into_iter().filter(|s| !s.bare).collect();
-    if !non_bare.is_empty() {
-        spawn_detached_reap(repo_id, &non_bare)?;
-    } else {
-        log::debug!("delete_session_by_id: all sessions are bare, skipping reap");
+    let config = crate::config::load()?;
+    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
+    let mut hook_tree = SessionTree {
+        sessions: to_reap.clone(),
+    };
+    let mut all_post_commands: Vec<String> = Vec::new();
+
+    for s in &to_reap {
+        if s.bare {
+            continue;
+        }
+        log::debug!(
+            "delete_session_by_id: running OnSessionDelete for '{}'",
+            s.name
+        );
+        match plugin::run_hooks(
+            plugin::model::HookType::OnSessionDelete,
+            &repo_entry,
+            &repo_meta,
+            Some(s),
+            &config,
+            &mut hook_tree,
+        ) {
+            Ok(post_cmds) => all_post_commands.extend(post_cmds),
+            Err(e) => log::debug!("delete_session_by_id: hook error for '{}': {}", s.name, e),
+        }
+    }
+
+    if !all_post_commands.is_empty() {
+        crate::browser::write_post_commands(post_cmd_file, &all_post_commands)?;
     }
 
     Ok(())
@@ -1477,127 +1525,6 @@ pub fn rename_session_by_id(repo_id: &str, session_id: &str, new_name: &str) -> 
         &rename_result,
         &config,
     );
-
-    Ok(())
-}
-
-/// Spawn a detached worker process to run the OnSessionDelete plugin hooks for
-/// sessions that have already been removed from the store.
-///
-/// The worker runs in a new process session (via `setsid`) so it has no
-/// controlling terminal.  When a hook tears down the terminal (e.g.
-/// `tmux kill-session` destroys the pane we're in), the worker is unaffected
-/// and runs to completion.  The foreground `ez` has already persisted the
-/// store and printed its output before this returns, so there is no data race.
-fn spawn_detached_reap(repo_id: &str, sessions: &[Session]) -> Result<()> {
-    let payload = ReapPayload {
-        repo_id: repo_id.to_string(),
-        sessions: sessions.to_vec(),
-    };
-    let json = serde_json::to_string(&payload)
-        .map_err(|e| EzError::Config(format!("reap payload serialize error: {e}")))?;
-
-    // Use the ez pid as part of the name so concurrent deletes don't collide.
-    let tmp_path: PathBuf =
-        std::env::temp_dir().join(format!("ez-reap-{}.json", std::process::id()));
-    std::fs::write(&tmp_path, &json)?;
-
-    let exe = std::env::current_exe()
-        .map_err(|e| EzError::Config(format!("cannot resolve current exe: {e}")))?;
-
-    let mut cmd = Command::new(&exe);
-    cmd.args(["session", "reap-delete", "--payload"])
-        .arg(&tmp_path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .env("TMUX", "");
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // setsid() puts the child in a new session with no controlling terminal,
-        // making it immune to SIGHUP when the current terminal is torn down.
-        unsafe {
-            cmd.pre_exec(|| {
-                libc::setsid();
-                Ok(())
-            });
-        }
-    }
-
-    cmd.spawn()
-        .map_err(|e| EzError::Config(format!("failed to spawn reap worker: {e}")))?;
-    // Intentionally not awaited — returning immediately is the whole point.
-
-    Ok(())
-}
-
-/// Entry point for the hidden `session reap-delete` subcommand.
-///
-/// Reads the session snapshot from the temp payload file, runs the
-/// OnSessionDelete plugin hooks (worktree removal, tmux kill, …), then
-/// deletes the file.  Never writes to `sessions.toml`.
-fn reap_delete(payload_path: &Path) -> Result<()> {
-    let json = std::fs::read_to_string(payload_path)?;
-    // Remove the temp file right away so it doesn't linger on error paths.
-    let _ = std::fs::remove_file(payload_path);
-
-    let payload: ReapPayload = serde_json::from_str(&json)
-        .map_err(|e| EzError::Config(format!("reap payload parse error: {e}")))?;
-
-    let repo_entry = repo::store::load_index()?
-        .repos
-        .into_iter()
-        .find(|r| r.id == payload.repo_id)
-        .ok_or_else(|| EzError::RepoNotFound(payload.repo_id.clone()))?;
-
-    let config = crate::config::load()?;
-    let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
-
-    log::debug!(
-        "reap_delete: processing {} sessions for repo {}",
-        payload.sessions.len(),
-        payload.repo_id
-    );
-
-    let reap_delay_ms: u64 = config
-        .plugin_settings
-        .get("tmux")
-        .and_then(|m| m.get("reap_delay_ms"))
-        .and_then(|v| v.as_integer())
-        .map(|v| v as u64)
-        .unwrap_or(200);
-
-    std::thread::sleep(std::time::Duration::from_millis(reap_delay_ms));
-
-    // Build a throwaway SessionTree from the snapshot so plugin::run_hooks
-    // can resolve parent information.  This tree is never saved to disk.
-    let mut tree = SessionTree {
-        sessions: payload.sessions.clone(),
-    };
-
-    for session in &payload.sessions {
-        log::debug!(
-            "reap_delete: running OnSessionDelete for session '{}'",
-            session.name
-        );
-        // Swallow hook errors — the record is already removed; this is
-        // best-effort external cleanup.
-        let result = plugin::run_hooks(
-            plugin::model::HookType::OnSessionDelete,
-            &repo_entry,
-            &repo_meta,
-            Some(session),
-            &config,
-            &mut tree,
-        );
-        log::debug!(
-            "reap_delete: hook result for '{}': {:?}",
-            session.name,
-            result
-        );
-    }
 
     Ok(())
 }
