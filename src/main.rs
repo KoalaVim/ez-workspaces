@@ -189,9 +189,35 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
     return $ret
 end"#
         }
+        "pwsh" => {
+            r#"function ez {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "ez-cd-$PID-$(Get-Random)"
+    $postCmd = Join-Path ([IO.Path]::GetTempPath()) "ez-post-$PID-$(Get-Random)"
+    $extraArgs = @()
+    while ($true) {
+        & (Get-Command ez -CommandType Application) @args $extraArgs --cd-file="$tmp" --post-cmd-file="$postCmd"
+        $extraArgs = @()
+        if ((Test-Path $postCmd) -and (Get-Item $postCmd).Length -gt 0) {
+            if ((Test-Path $tmp) -and (Get-Item $tmp).Length -gt 0) {
+                $extraArgs = @('--repo', (Get-Content $tmp -Raw).Trim())
+            }
+            . $postCmd
+            [IO.File]::WriteAllText($postCmd, '')
+            [IO.File]::WriteAllText($tmp, '')
+            continue
+        }
+        break
+    }
+    if ((Test-Path $tmp) -and (Get-Item $tmp).Length -gt 0) {
+        $dest = (Get-Content $tmp -Raw).Trim() -replace '^\\\\\?\\', ''
+        if ($dest) { Set-Location $dest }
+    }
+    Remove-Item $tmp, $postCmd -Force -ErrorAction SilentlyContinue
+}"#
+        }
         _ => {
             return Err(error::EzError::Config(format!(
-                "Unsupported shell: {shell}. Supported: bash, zsh, fish"
+                "Unsupported shell: {shell}. Supported: bash, zsh, fish, pwsh"
             )));
         }
     };

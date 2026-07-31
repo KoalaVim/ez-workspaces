@@ -27,6 +27,12 @@ echo 'eval "$(ez init-shell zsh)"' >> ~/.zshrc
 echo 'eval "$(ez init-shell bash)"' >> ~/.bashrc
 ```
 
+For PowerShell, add to your `$PROFILE`:
+
+```powershell
+Invoke-Expression ((& ez init-shell pwsh) -join "`n")
+```
+
 ## Quick Start
 
 ```bash

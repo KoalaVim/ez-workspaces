@@ -63,6 +63,7 @@ fn show() -> Result<()> {
     let path = paths::config_file()?;
     let _ = load()?;
     let contents = fs::read_to_string(&path)?;
+    println!("{} {}", "config:".dimmed(), path.display());
     println!("{contents}");
     Ok(())
 }

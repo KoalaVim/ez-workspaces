@@ -114,7 +114,7 @@ pub enum Command {
 
     /// Initialize shell integration (prints shell function to eval)
     InitShell {
-        /// Shell type: bash, zsh, fish
+        /// Shell type: bash, zsh, fish, pwsh
         #[arg(default_value = "zsh")]
         shell: String,
     },
