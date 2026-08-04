@@ -196,6 +196,20 @@ pub(crate) fn write_post_commands(post_cmd_file: Option<&Path>, commands: &[Stri
     Ok(())
 }
 
+/// Append the `#EZ_RELAUNCH` marker to post_cmd_file, signaling the shell
+/// wrapper to re-invoke `ez` after sourcing.
+pub(crate) fn write_relaunch_marker(post_cmd_file: Option<&Path>) -> Result<()> {
+    if let Some(path) = post_cmd_file {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)?;
+        writeln!(f, "\n#EZ_RELAUNCH")?;
+    }
+    Ok(())
+}
+
 /// Generate `export` commands for a session's env map.
 pub(crate) fn session_env_exports(env: &std::collections::HashMap<String, String>) -> Vec<String> {
     let mut exports: Vec<String> = env
@@ -701,6 +715,7 @@ pub(crate) fn session_action_loop(
                                 if response.cd_target.is_some()
                                     || !response.post_shell_commands.is_empty()
                                 {
+                                    write_relaunch_marker(post_cmd_file)?;
                                     return Ok(true);
                                 }
                                 handled = true;
