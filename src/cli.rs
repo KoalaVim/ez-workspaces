@@ -107,9 +107,10 @@ pub enum Command {
         command: Option<ConfigCommand>,
     },
 
-    /// Cd to the path of the current tmux session's ez session.
-    /// Reads the @ez_session_path tmux user option from the current tmux
-    /// session and writes it to --cd-file (or prints it).
+    /// Cd to the path of the current session's worktree.
+    /// Resolves the current session from tmux user options, the zellij session
+    /// name, or the working directory, then writes its path to --cd-file
+    /// (or prints it).
     CdToSession,
 
     /// Initialize shell integration (prints shell function to eval)
@@ -172,6 +173,10 @@ pub enum SessionCommand {
         /// Output as JSON array
         #[arg(long)]
         json: bool,
+        /// List sessions for every registered repo (cannot be combined with --repo).
+        /// With --json, emits one object per repo: {id, name, path, sessions}.
+        #[arg(long)]
+        all: bool,
     },
 
     /// Register an existing git worktree as a session

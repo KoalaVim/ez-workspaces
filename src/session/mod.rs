@@ -46,7 +46,12 @@ pub fn dispatch(
             interactive,
             bare,
         ),
-        SessionCommand::List { repo, flat, json } => list_sessions(repo.as_deref(), flat, json),
+        SessionCommand::List {
+            repo,
+            flat,
+            json,
+            all,
+        } => list_sessions(repo.as_deref(), flat, json, all),
         SessionCommand::Register {
             path,
             name,
@@ -570,7 +575,16 @@ pub(crate) fn git_output(path: &Path, args: &[&str]) -> Result<String> {
     )))
 }
 
-fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool) -> Result<()> {
+fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool, all: bool) -> Result<()> {
+    if all {
+        if repo_arg.is_some() {
+            return Err(EzError::Config(
+                "--all and --repo are mutually exclusive: --all lists every registered repo".into(),
+            ));
+        }
+        return list_all_sessions(flat, json);
+    }
+
     let repo_entry = repo::resolve_repo(repo_arg)?;
     let tree = store::load_sessions(&repo_entry.id)?;
 
@@ -591,20 +605,34 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool) -> Result<()> {
     }
 
     if json {
-        let items: Vec<serde_json::Value> = tree
-            .sessions
+        let items = sessions_json(&tree.sessions);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&items).unwrap_or_else(|_| "[]".into())
+        );
+        return Ok(());
+    }
+
+    print_sessions(&tree, flat);
+    Ok(())
+}
+
+/// `ez session list --all`: every registered repo in one pass.
+fn list_all_sessions(flat: bool, json: bool) -> Result<()> {
+    let repos = repo::store::load_index()?.repos;
+
+    if json {
+        let items: Vec<serde_json::Value> = repos
             .iter()
-            .map(|s| {
+            .map(|repo_entry| {
+                let sessions = store::load_sessions(&repo_entry.id)
+                    .map(|t| t.sessions)
+                    .unwrap_or_default();
                 serde_json::json!({
-                    "id": s.id,
-                    "name": s.name,
-                    "parent_id": s.parent_id,
-                    "path": s.path.as_ref().map(|p| p.display().to_string()),
-                    "bare": s.bare,
-                    "labels": s.labels,
-                    "last_accessed": s.last_accessed,
-                    "env": s.env,
-                    "is_default": s.is_default,
+                    "id": repo_entry.id,
+                    "name": repo_entry.name,
+                    "path": repo_entry.path.display().to_string(),
+                    "sessions": sessions_json(&sessions),
                 })
             })
             .collect();
@@ -615,6 +643,53 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool) -> Result<()> {
         return Ok(());
     }
 
+    if repos.is_empty() {
+        println!(
+            "{}",
+            "No repos registered. Use `ez add` to register one.".yellow()
+        );
+        return Ok(());
+    }
+
+    for repo_entry in &repos {
+        let tree = store::load_sessions(&repo_entry.id)?;
+        println!(
+            "{} {}",
+            repo_entry.name.bold().cyan(),
+            format!("({})", repo_entry.path.display()).dimmed()
+        );
+        if tree.sessions.is_empty() {
+            println!("  {}", "no sessions".dimmed());
+        } else {
+            print_sessions(&tree, flat);
+        }
+        println!();
+    }
+    Ok(())
+}
+
+/// JSON shape shared by `session list --json` and `session list --all --json`.
+fn sessions_json(sessions: &[model::Session]) -> Vec<serde_json::Value> {
+    sessions
+        .iter()
+        .map(|s| {
+            serde_json::json!({
+                "id": s.id,
+                "name": s.name,
+                "parent_id": s.parent_id,
+                "path": s.path.as_ref().map(|p| p.display().to_string()),
+                "bare": s.bare,
+                "labels": s.labels,
+                "last_accessed": s.last_accessed,
+                "env": s.env,
+                "is_default": s.is_default,
+            })
+        })
+        .collect()
+}
+
+/// Render one repo's sessions as a flat list or an indented tree.
+fn print_sessions(tree: &SessionTree, flat: bool) {
     if flat {
         for session in &tree.sessions {
             let default_marker = if session.is_default {
@@ -664,7 +739,6 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool) -> Result<()> {
             );
         }
     }
-    Ok(())
 }
 
 /// Returns the names of sessions in `to_reap` whose worktree has uncommitted changes.

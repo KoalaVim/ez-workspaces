@@ -42,7 +42,7 @@ All metadata lives in `~/.config/ez/`:
 
 Sessions are metadata-only by default. Plugins give them physical meaning:
 - git-worktree plugin sets `session.path` to a worktree directory
-- tmux plugin creates a tmux session
+- tmux plugin creates a tmux session; the zellij plugin does the same for zellij
 
 This keeps the core simple and makes ez usable without git.
 

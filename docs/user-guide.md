@@ -290,8 +290,9 @@ At any top-level selector, press a keybind to switch views:
 - **Ctrl-o** — Owner view: repos grouped by GitHub-style owner (parsed from remote URL)
 - **Ctrl-g** — Label view: items grouped by user-defined labels
 - **Ctrl-a** — Tmux view (plugin): ez-managed tmux sessions — select to attach/switch
+- **Ctrl-z** — Zellij view (plugin): all ez sessions with their zellij state — select to attach/switch
 
-Plugin views appear automatically when enabled plugins register them. The tmux plugin adds `Ctrl-a`.
+Plugin views appear automatically when enabled plugins register them. The tmux plugin adds `Ctrl-a`, the zellij plugin adds `Ctrl-z`.
 
 In the repo view:
 
@@ -299,17 +300,17 @@ In the repo view:
 - **Alt-d** — Remove the selected repo from ez
 - **Ctrl-s** — Toggle sort (alphabetical / LRU)
 
-### Jumping back to a session's worktree from tmux
+### Jumping back to a session's worktree
 
-When the tmux plugin creates a session it stamps the session's worktree path on the tmux session as the `@ez_session_path` user option. From any pane inside that tmux session you can return to the worktree with:
+From any pane inside a multiplexer session created by the tmux or zellij plugin, return to the session's worktree with:
 
 ```bash
 ez cd-to-session
 ```
 
-This reads `@ez_session_path` from the current tmux session and `cd`s your shell to it (via the shell wrapper installed by `ez init-shell`). Useful after navigating elsewhere or when opening a new pane that didn't inherit the cwd.
+This resolves the current session — from the tmux `@ez_session_path` user option, from the zellij session name, or from the working directory — and `cd`s your shell to its worktree (via the shell wrapper installed by `ez init-shell`). Useful after navigating elsewhere or when opening a new pane that didn't inherit the cwd.
 
-> The option is only set when the tmux session is created by the plugin (on `session new`, the `Ctrl-a` bind, or the tmux view). Pre-existing sessions created before this feature won't have it — recreate them or trigger `Ctrl-a` from the picker to stamp it.
+> Under tmux, the option is only set when the tmux session is created by the plugin (on `session new`, the `Ctrl-a` bind, or the tmux view). Pre-existing sessions created before this feature won't have it — recreate them or trigger `Ctrl-a` from the picker to stamp it. Under zellij nothing is stamped: identification comes from the session's name, so any session the plugin created is recognized.
 
 Inside the session picker:
 
@@ -318,6 +319,8 @@ Inside the session picker:
 - **Alt-s** — Session from dirty (move uncommitted changes to new session)
 - **Alt-r** — Rename session
 - **Alt-d** — Delete session
+- **Alt-a** — Attach to the session's tmux session (plugin)
+- **Alt-z** — Attach to the session's zellij session (plugin)
 - **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
 - **Ctrl-d** — Cd into session worktree (bypasses on_enter action like tmux)
 - **Ctrl-s** — Toggle sort (alphabetical / LRU)
@@ -370,6 +373,61 @@ ez --on-create tmux session new my-feature
 In the interactive picker, when `on_create` is set, **Alt-n** creates the session, performs the action, and exits (just like pressing Enter on an existing session). With `"none"` (default) it stays in the picker as it does today.
 
 If the named bind is unavailable (plugin disabled, tmux not installed), ez silently falls back to `cd`.
+
+### Zellij Plugin
+
+The `zellij` plugin is the zellij counterpart of the tmux plugin: every ez session gets a zellij session named `<repo>__<session>` (shortened when zellij's socket path can't hold it, see below), created detached at the session's worktree.
+
+```bash
+ez plugin enable zellij
+```
+
+Requires `zellij` **0.40 or newer** on your `PATH` (for `attach --create-background` and `action switch-session`). If zellij is missing, lifecycle hooks silently no-op — session creation is never blocked.
+
+- **Alt-z** in the session picker — create if needed, then attach (or switch, when you're already inside zellij)
+- **Ctrl-z** in any other view — list every ez session with `●` (zellij session running) or `○` (not running); selecting one attaches to it
+- **Rename** propagates to the zellij session; **delete** kills it (and by default removes zellij's serialized copy so dead names don't linger)
+
+**Configuration:**
+
+```toml
+[plugin_settings.zellij]
+auto_attach = false     # attach/switch automatically when entering a session
+force_delete = true     # also delete zellij's resurrectable copy on session delete
+socket_dir = ""         # ZELLIJ_SOCKET_DIR for ez's zellij sessions (see "name length")
+reap_delay_ms = 200     # delay before delete hooks run in the detached reaper
+```
+
+Set `on_enter = "zellij"` (or `on_create = "zellij"`) to make Enter attach instead of `cd`.
+
+**Naming:** unlike tmux, zellij has no per-session option store, so a session is identified purely by its name. Every byte outside `[A-Za-z0-9_-]` becomes `_`, and the two parts are joined with `__` — repo `my.repo` + session `feat/ABC-1` becomes `my_repo__feat_ABC-1`. `ez cd-to-session` and current-session auto-detection (e.g. `ez session delete` with no name) work off that name, so nothing goes stale after a crash or a manual `zellij delete-session`.
+
+**Session name length (handled automatically):** tmux multiplexes every session over one server socket, so tmux session names have no length limit. zellij instead creates one socket *per session*, named after the session, under `$ZELLIJ_SOCKET_DIR/contract_version_N/` (default `$TMPDIR/zellij-$UID`). A unix socket path can be at most 103 bytes, and macOS's `$TMPDIR` is a ~46-character `/var/folders/...` path, leaving only about **24 bytes** for the name — not enough for `acme-widgets__refactor-auth-flow`.
+
+Names that don't fit are shortened: the repo prefix is replaced by a 4-hex digest of the full name, and the session name is truncated if it is still too long.
+
+```
+acme-widgets + main               → acme-widgets__main            (fits, kept as-is)
+acme-widgets + refactor-auth-flow → refactor-auth-flow_7239
+acme-widgets + feat-ABC-123-add-dark-mode-toggle → feat-ABC-123-add-da_eb18
+```
+
+The readable part is the ez session name, which is what you pick from in zellij's own session list; the digest covers the repo *and* the untruncated name, so two repos sharing a branch name — and two long branch names sharing a prefix — stay distinct. `ez cd-to-session` and current-session detection understand both forms, so nothing depends on knowing which one a session got.
+
+Shortening happens because *reachability* depends on it, not for tidiness: every zellij process builds the socket path from its own environment — a plain `zellij attach`, the built-in session manager, the server hosting the session you're currently in. A name that only fits some shorter path yields a session ez can reach and nothing else can: missing from `zellij list-sessions`, shown as dead by the session manager, impossible to attach to or delete.
+
+To keep full-length names, give zellij a short socket directory, either for ez's sessions only:
+
+```toml
+[plugin_settings.zellij]
+socket_dir = "/tmp/zellij-1000"   # your uid
+```
+
+or globally, in your shell rc (`export ZELLIJ_SOCKET_DIR=/tmp/zellij-$(id -u)`), which ez respects and which every other zellij client picks up too. Either way the budget grows and names are left verbatim. Note that a `socket_dir` different from zellij's default puts ez's sessions in a **separate namespace** from sessions started by a plain `zellij` — that is the trade-off for keeping the names.
+
+**Limitation:** zellij has no equivalent of `tmux set-environment`, so session env vars are applied only when the zellij session is created. If a session's env changes later, recreate its zellij session to pick up the new values.
+
+Both multiplexer plugins can be enabled at once — their keys don't overlap (`Alt-a`/`Ctrl-a` for tmux, `Alt-z`/`Ctrl-z` for zellij) — but each session then gets both a tmux and a zellij session, so most people enable just one.
 
 ### KoalaVim (kv) Plugin
 
@@ -430,9 +488,9 @@ main *                    # auto-created default
 
 The default "main" session is auto-created when you first access a repo. It points to the repo's working directory. Box-drawing connectors (tree glyphs) show parent-child relationships in `ez session list` and in the session picker.
 
-### Return-to-ez after tmux detach
+### Return-to-ez after multiplexer detach
 
-When `on_enter` is set to `tmux`, the shell wrapper automatically re-enters the ez browser after detaching from a tmux session (`Ctrl-b d` or `tmux detach`). This creates a seamless workflow loop: browse → attach → work → detach → browse again. No additional config needed.
+When `on_enter` is set to `tmux` or `zellij`, the shell wrapper automatically re-enters the ez browser after you detach from the multiplexer session (`Ctrl-b d` in tmux, `Ctrl-o d` in zellij). This creates a seamless workflow loop: browse → attach → work → detach → browse again. No additional config needed — the loop is driven by the attach command returning control, so it works the same for either multiplexer.
 
 ## Non-git Sessions
 

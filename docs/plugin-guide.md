@@ -220,6 +220,24 @@ custom_path = "/usr/local/bin/my-tool"
 
 The plugin receives these values in `config.user_config` on every hook invocation.
 
+## Plugin Environment
+
+ez sets these variables in the plugin process:
+
+| Variable | Value |
+|---|---|
+| `EZ_CONFIG_DIR` | Config directory (repos, sessions, plugins live here) |
+| `EZ_BIN` | Absolute path of the running `ez` binary |
+| `EZ_DEBUG` | Set when ez runs with `--debug` |
+| `EZ_PLUGIN_DEBUG_LOG` | Per-invocation log file, only set under `--debug` |
+
+Use `"$EZ_BIN"` rather than `ez` when shelling out — in an interactive shell `ez` is the wrapper *function* from `ez init-shell`, which plugins (running under a non-interactive shell) cannot see:
+
+```bash
+"$EZ_BIN" session list --all --json    # every repo's sessions in one call
+"$EZ_BIN" repo list --json
+```
+
 ### Error Handling
 
 - For `on_session_enter`/`on_session_exit`: plugin errors are warnings (non-fatal)

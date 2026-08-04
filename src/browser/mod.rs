@@ -221,6 +221,13 @@ fn apply_bind_response(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
 ) -> Result<()> {
+    // A plugin that reports failure used to be silently ignored, leaving the
+    // keybind looking dead. Surface it instead.
+    if !response.success {
+        let reason = response.error.as_deref().unwrap_or("no reason given");
+        eprintln!("{} {}", "plugin bind failed:".red(), reason);
+        log::debug!("bind response reported failure: {reason}");
+    }
     if let Some(ref cd) = response.cd_target {
         write_cd_target(cd_file, cd)?;
     }

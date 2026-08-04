@@ -1,0 +1,493 @@
+#!/usr/bin/env bash
+# zellij plugin for ez-workspaces
+# Creates/attaches/detaches zellij sessions for workspace sessions.
+# Provides a "zellij" view listing ez sessions and their zellij state.
+#
+# Protocol: reads JSON request from stdin, writes JSON response to stdout.
+#
+# Unlike tmux, zellij has no per-session option store, so a session's identity
+# is derived from its name: "<repo-basename>__<session-name>" with every byte
+# outside [A-Za-z0-9_-] replaced by "_". encode() below must stay in sync with
+# encode_mux_name() in src/session/current.rs.
+#
+# Socket paths: tmux multiplexes every session over one server socket, but zellij
+# creates one socket per session named after the session, under
+# "$ZELLIJ_SOCKET_DIR/contract_version_N/<name>" (default "$TMPDIR/zellij-$UID").
+# A unix socket path caps at 103 bytes, so on macOS — where $TMPDIR is a ~46-char
+# /var/folders path — only ~24 bytes are left for the name, which is not enough
+# for "<repo>__<branch>". Since every zellij process builds that path from its
+# own environment, a name is only usable if it fits; fit_name() shortens the ones
+# that don't.
+
+set -euo pipefail
+
+# Debug logger: ez sets EZ_PLUGIN_DEBUG_LOG to a per-invocation path when
+# invoked with --debug. Without that env var, dbg() is a no-op so production
+# runs stay silent. Initialize the file with a header on first call.
+_dbg_initialized=
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    if [ -z "$_dbg_initialized" ]; then
+        _dbg_initialized=1
+        printf '=== zellij-plugin debug log (pid=%s hook=%s) ===\n' "$$" "${HOOK:-?}" >> "$EZ_PLUGIN_DEBUG_LOG"
+    fi
+    printf '%s\n' "$*" >> "$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# Run a zellij command and log argv + rc + combined output. Echoes the output
+# to stdout so callers can still capture it.
+dbg_zellij() {
+    if [ -z "${EZ_PLUGIN_DEBUG_LOG:-}" ]; then
+        zellij "$@" </dev/null
+        return $?
+    fi
+    local out rc
+    out=$(zellij "$@" </dev/null 2>&1) || rc=$?
+    rc=${rc:-0}
+    dbg "zellij $* -> rc=$rc out='$out'"
+    [ -n "$out" ] && printf '%s\n' "$out"
+    return $rc
+}
+
+REQUEST=$(cat)
+
+HOOK=$(echo "$REQUEST" | jq -r '.hook')
+REPO_PATH=$(echo "$REQUEST" | jq -r '.repo.path // empty')
+REPO_NAME=$(basename "${REPO_PATH:-}" 2>/dev/null || echo "")
+SESSION_NAME=$(echo "$REQUEST" | jq -r '.session.name // empty')
+SESSION_PATH=$(echo "$REQUEST" | jq -r '.session.path // .repo.path')
+AUTO_ATTACH=$(echo "$REQUEST" | jq -r '.config.user_config.auto_attach // "false"')
+FORCE_DELETE=$(echo "$REQUEST" | jq -r '.config.user_config.force_delete // "true"')
+SOCKET_DIR=$(echo "$REQUEST" | jq -r '.config.user_config.socket_dir // empty')
+
+# zellij's default socket directory, mirroring its own rule: Rust's
+# env::temp_dir() (which is $TMPDIR, or /tmp when unset) plus "zellij-<uid>".
+zellij_default_socket_dir() {
+    local tmp="${TMPDIR:-/tmp}"
+    printf '%s/zellij-%s' "${tmp%/}" "$(id -u)"
+}
+
+# The socket directory ez's zellij commands operate in. An explicit choice always
+# wins — the `socket_dir` setting first, then a ZELLIJ_SOCKET_DIR the user already
+# exported — and is exported so every zellij invocation below (and the attach
+# command handed to the user's shell, see attach_cmd) targets the same directory.
+# Otherwise nothing is set and zellij's own default applies, which is what keeps
+# ez's sessions in the same namespace a plain `zellij ls` looks at.
+if [ -n "$SOCKET_DIR" ]; then
+    export ZELLIJ_SOCKET_DIR="$SOCKET_DIR"
+fi
+dbg "socket dir: ${ZELLIJ_SOCKET_DIR:-<zellij default>}"
+
+# Replace every byte outside [A-Za-z0-9_-] with "_". LC_ALL=C makes this
+# byte-wise, matching the Rust side exactly for non-ASCII input.
+encode() {
+    printf '%s' "$1" | LC_ALL=C tr -c 'A-Za-z0-9_-' '_'
+}
+
+# A unix socket path is at most 103 bytes on the platforms zellij supports.
+SOCKET_PATH_MAX=103
+
+# Name of the contract-version directory zellij namespaces its sockets with.
+# Read from disk when zellij has created it already, since the number changes
+# with zellij releases; when it doesn't exist yet, assume the widest two-digit
+# form so the guess is never an underestimate (a budget that is one byte too
+# generous is what produces a session zellij cannot reach).
+contract_dir_name() {
+    local found
+    # "|| true": the directory does not exist until zellij first runs, and
+    # pipefail would turn that into a fatal error for the whole plugin.
+    found=$({ ls -1 "$1" 2>/dev/null || true; } | awk '
+        /^contract_version_[0-9]+$/ { if (length($0) > n) { n = length($0); s = $0 } }
+        END { if (s != "") print s }
+    ')
+    printf '%s' "${found:-contract_version_00}"
+}
+
+# Bytes available for a session name: zellij binds
+# "<socket-dir>/<contract-dir>/<name>", so the name gets whatever the 103-byte
+# limit leaves after the two directories and the two slashes. Computed once —
+# every name in a single invocation is bound under the same directory.
+name_budget() {
+    local dir contract
+    dir="${ZELLIJ_SOCKET_DIR:-$(zellij_default_socket_dir)}"
+    dir="${dir%/}"
+    contract=$(contract_dir_name "$dir")
+    printf '%s' "$(( SOCKET_PATH_MAX - ${#dir} - ${#contract} - 2 ))"
+}
+NAME_BUDGET=$(name_budget)
+
+# First 4 hex digits of the md5 of $1. macOS ships `md5`, Linux `md5sum`; the
+# tools differ, the digest does not. Prints nothing when none is available.
+md5_hex4() {
+    local out=""
+    if command -v md5sum >/dev/null 2>&1; then
+        out=$(printf '%s' "$1" | md5sum 2>/dev/null | awk '{print $1}')
+    elif command -v md5 >/dev/null 2>&1; then
+        out=$(printf '%s' "$1" | md5 -q 2>/dev/null)
+    elif command -v openssl >/dev/null 2>&1; then
+        out=$(printf '%s' "$1" | openssl md5 2>/dev/null | awk '{print $NF}')
+    fi
+    printf '%s' "${out:0:4}"
+}
+
+# fit_name writes its result to FIT_NAME (and its reason for failing to
+# FIT_ERROR) rather than stdout, so callers can read the error without the
+# command substitution that would discard it.
+FIT_NAME=""
+FIT_ERROR=""
+
+# The zellij session name for an ez session: "<repo>__<session>" when the socket
+# path can hold it, otherwise "<session-prefix>_<4 hex of md5 of the full name>".
+#
+# Shortening is not cosmetic. Everything that talks to zellij — a plain shell, the
+# built-in session manager, the server hosting some other session — rebuilds the
+# socket path from its own environment, so a name that only fits a shorter path
+# than the one in effect here yields a session that ez can reach and nothing else
+# can: invisible to `zellij ls`, listed as dead by the session manager, and
+# impossible to attach to or delete. Making the name fit is what keeps one
+# namespace for every client.
+#
+# The shortened form spends its bytes on the ez session name, which is the part
+# the user recognises in zellij's session list, and gets uniqueness from a digest
+# of the *full* name — so two repos sharing a branch name, and two long branch
+# names sharing a prefix, still differ. mux_name_matches() in
+# src/session/current.rs reverses this to resolve the current session.
+fit_name() {
+    local repo="$1" session="$2" full visible hash keep
+    FIT_NAME=""
+    FIT_ERROR=""
+    full="$(encode "$repo")__$(encode "$session")"
+
+    if [ "$NAME_BUDGET" -ge "${#full}" ]; then
+        FIT_NAME="$full"
+        return 0
+    fi
+
+    # 5 bytes go to "_" plus the digest; the rest is the readable prefix.
+    keep=$(( NAME_BUDGET - 5 ))
+    if [ "$keep" -lt 1 ]; then
+        FIT_ERROR="zellij's socket directory ($(printf '%s' "${ZELLIJ_SOCKET_DIR:-$(zellij_default_socket_dir)}")) leaves no room for a session name. Set a shorter one:
+    [plugin_settings.zellij]
+    socket_dir = \"/tmp/zellij-$(id -u)\""
+        return 1
+    fi
+
+    hash=$(md5_hex4 "$full")
+    if [ -z "$hash" ]; then
+        FIT_ERROR="'$full' is ${#full} bytes, more than the $NAME_BUDGET zellij's socket path allows, and no md5 tool (md5sum, md5 or openssl) is available to shorten it."
+        return 1
+    fi
+
+    visible="$(encode "$session")"
+    FIT_NAME="${visible:0:$keep}_$hash"
+    return 0
+}
+
+fit_name "$REPO_NAME" "$SESSION_NAME" || true
+ZELLIJ_SESSION="$FIT_NAME"
+ZELLIJ_SESSION_ERROR="$FIT_ERROR"
+dbg "name budget: $NAME_BUDGET session: '${ZELLIJ_SESSION:-<unavailable: $ZELLIJ_SESSION_ERROR>}'"
+
+zellij_available() {
+    command -v zellij >/dev/null 2>&1
+}
+
+# Names of zellij sessions that are actually running. "-n" (no formatting) is
+# used instead of "-s" so resurrectable ("EXITED") entries can be filtered out:
+# a dead session must not be reported as running.
+running_sessions() {
+    zellij list-sessions -n 2>/dev/null | { grep -v 'EXITED' || true; } | awk '{print $1}'
+}
+
+session_running() {
+    running_sessions | grep -Fxq "$1"
+}
+
+# Turn a failed zellij invocation into the message ez shows the user.
+#
+# "socket path is too long" means fit_name's budget was wrong — zellij computed a
+# longer path than the "<socket-dir>/<contract-dir>/<name>" this plugin assumes —
+# so zellij's own advice (a shorter socket directory) is the right advice, plus
+# the config key that makes it stick for ez.
+zellij_error() {
+    local msg="$1"
+    case "$msg" in
+        *"socket path is too long"*)
+            # Leading blank line: zellij's message has no trailing newline.
+            printf '%s\n\n' "$msg"
+            cat <<EOF
+ez shortens session names to fit this path (budget: $NAME_BUDGET bytes), so
+reaching this means the path is longer than expected. Set a shorter socket
+directory for ez's sessions in config.toml:
+    [plugin_settings.zellij]
+    socket_dir = "/tmp/zellij-$(id -u)"
+EOF
+            ;;
+        *) printf '%s' "$msg" ;;
+    esac
+}
+
+# Set by ensure_session when it fails, so callers can report why.
+ENSURE_ERROR=""
+
+# Create the zellij session detached, rooted at $2, with the ez session's env
+# exported into the zellij server (and therefore into its panes). No-op when the
+# session is already running. Returns non-zero and sets ENSURE_ERROR on failure:
+# emitting an attach command for a session that was never created is what turns a
+# create failure into an unexplained error in the user's terminal.
+ensure_session() {
+    local name="$1" path="$2"
+    ENSURE_ERROR=""
+    if [ -z "$name" ]; then
+        # fit_name could not produce a name that zellij can bind a socket for.
+        ENSURE_ERROR="${ZELLIJ_SESSION_ERROR:-no zellij session name}"
+        return 1
+    fi
+    if session_running "$name"; then
+        dbg "session '$name' already running"
+        return 0
+    fi
+
+    local -a env_args=()
+    local pair
+    while IFS= read -r pair; do
+        [ -z "$pair" ] && continue
+        env_args+=("$pair")
+    done < <(echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)=\(.value)"')
+    dbg "creating session '$name' at '$path' env=${env_args[*]:-<none>}"
+
+    # The session's working directory is the cwd of the process that creates it.
+    local out rc=0
+    out=$(
+        cd "$path" 2>/dev/null || cd "$HOME" || exit 0
+        env ${env_args[@]+"${env_args[@]}"} zellij attach --create-background "$name" </dev/null 2>&1
+    ) || rc=$?
+    dbg "attach --create-background '$name' -> rc=$rc out='$out'"
+
+    if [ "$rc" -ne 0 ]; then
+        ENSURE_ERROR=$(zellij_error "${out:-zellij could not create session '$name' (exit $rc)}")
+        return 1
+    fi
+    return 0
+}
+
+# Shell-quote for the post_shell_commands string.
+shq() {
+    printf "'%s'" "${1//\'/\'\\\'\'}"
+}
+
+# Command for the user's shell (sourced after ez exits): switch the current
+# client when already inside zellij, attach otherwise. zellij refuses to attach
+# from inside a session, so the branch is required. The session is always
+# created beforehand, so neither branch depends on create-on-attach semantics.
+attach_cmd() {
+    local name="$1" prefix=""
+    # Only set when a socket directory was configured for ez (or already exported):
+    # the user's shell would otherwise look for the session in zellij's default
+    # directory, which is a different one.
+    if [ -n "${ZELLIJ_SOCKET_DIR:-}" ]; then
+        prefix="ZELLIJ_SOCKET_DIR=$(shq "$ZELLIJ_SOCKET_DIR") "
+    fi
+    printf 'if [ -n "$ZELLIJ" ]; then %szellij action switch-session %s; else %szellij attach %s; fi' \
+        "$prefix" "$(shq "$name")" "$prefix" "$(shq "$name")"
+}
+
+case "$HOOK" in
+    on_session_create)
+        if zellij_available; then
+            dbg "target session: '${ZELLIJ_SESSION}' path: '${SESSION_PATH}'"
+            # A multiplexer failure must not abort creation of the ez session, so
+            # this warns on stderr (which ez logs) and still reports success.
+            if ! ensure_session "$ZELLIJ_SESSION" "$SESSION_PATH"; then
+                printf 'zellij: %s\n' "$ENSURE_ERROR" >&2
+            fi
+        else
+            dbg "zellij not installed, skipping create"
+        fi
+
+        # No name means no zellij session was created, so recording one would
+        # point EZ_ZELLIJ_SESSION and the plugin state at something nonexistent.
+        if [ -z "$ZELLIJ_SESSION" ]; then
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        jq -n \
+            --arg zellij_session "$ZELLIJ_SESSION" \
+            '{
+                success: true,
+                session_mutations: {
+                    env: {
+                        EZ_ZELLIJ_SESSION: $zellij_session
+                    },
+                    plugin_state: {
+                        zellij_session: $zellij_session
+                    }
+                }
+            }'
+        ;;
+
+    on_session_delete)
+        if zellij_available && [ -n "$ZELLIJ_SESSION" ]; then
+            if [ "$FORCE_DELETE" = "true" ]; then
+                # Kills the session if running, then removes zellij's serialized
+                # copy so the name doesn't linger in `zellij list-sessions`.
+                dbg_zellij delete-session --force "$ZELLIJ_SESSION" >/dev/null 2>&1 || true
+            else
+                dbg_zellij kill-session "$ZELLIJ_SESSION" >/dev/null 2>&1 || true
+            fi
+        fi
+        echo '{"success": true}'
+        ;;
+
+    on_session_enter)
+        if zellij_available && [ "$AUTO_ATTACH" = "true" ]; then
+            if ensure_session "$ZELLIJ_SESSION" "$SESSION_PATH"; then
+                jq -n --arg cmd "$(attach_cmd "$ZELLIJ_SESSION")" \
+                    '{success: true, post_shell_commands: [$cmd]}'
+            else
+                # Entering a session must still succeed; just don't hand the shell
+                # an attach command for a session that does not exist.
+                printf 'zellij: %s\n' "$ENSURE_ERROR" >&2
+                echo '{"success": true}'
+            fi
+        else
+            echo '{"success": true}'
+        fi
+        ;;
+
+    on_session_exit)
+        echo '{"success": true}'
+        ;;
+
+    on_session_rename)
+        OLD_NAME=$(echo "$REQUEST" | jq -r '.rename_context.old_name // empty')
+        NEW_NAME=$(echo "$REQUEST" | jq -r '.rename_context.new_name // empty')
+
+        if [ -z "$OLD_NAME" ] || [ -z "$NEW_NAME" ] || ! zellij_available; then
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        # Both names are shortened the same way, so a rename that changes the
+        # readable prefix also changes the digest — the running session is renamed
+        # to whatever the new ez name maps to.
+        fit_name "$REPO_NAME" "$OLD_NAME" || true
+        OLD_ZELLIJ="$FIT_NAME"
+        fit_name "$REPO_NAME" "$NEW_NAME" || NEW_ERROR="$FIT_ERROR"
+        NEW_ZELLIJ="$FIT_NAME"
+        dbg "on_session_rename: '${OLD_ZELLIJ}' -> '${NEW_ZELLIJ}'"
+
+        if [ -z "$OLD_ZELLIJ" ] || [ -z "$NEW_ZELLIJ" ]; then
+            dbg "on_session_rename: no usable zellij name (${NEW_ERROR:-}), skipping"
+            echo '{"success": true}'
+            exit 0
+        fi
+
+        if session_running "$OLD_ZELLIJ"; then
+            dbg_zellij --session "$OLD_ZELLIJ" action rename-session "$NEW_ZELLIJ" >/dev/null 2>&1 || true
+        else
+            dbg "zellij session '${OLD_ZELLIJ}' not running, skipping rename"
+        fi
+
+        echo '{"success": true}'
+        ;;
+
+    on_bind)
+        # alt-z in session picker: create the zellij session if needed, then attach
+        if ! zellij_available; then
+            echo '{"success": false, "error": "zellij not installed"}'
+            exit 0
+        fi
+
+        if ! ensure_session "$ZELLIJ_SESSION" "$SESSION_PATH"; then
+            jq -n --arg err "$ENSURE_ERROR" '{success: false, error: $err}'
+            exit 0
+        fi
+        jq -n --arg cmd "$(attach_cmd "$ZELLIJ_SESSION")" \
+            '{success: true, post_shell_commands: [$cmd]}'
+        ;;
+
+    on_view)
+        # List every ez session across all repos, marking the ones whose zellij
+        # session is currently running. on_view_select creates-then-attaches for
+        # any session whose zellij counterpart is missing.
+        if ! zellij_available; then
+            echo '{"success": true, "view_items": [], "view_prompt": "zellij (not installed)"}'
+            exit 0
+        fi
+
+        EZ_BIN="${EZ_BIN:-ez}"
+        RUNNING=$(running_sessions || true)
+
+        # repo_basename \t session_name \t session_path, one per session.
+        SESSIONS=$("$EZ_BIN" session list --all --json 2>/dev/null | jq -r '
+            .[] as $repo
+            | ($repo.path | split("/") | last) as $base
+            | $repo.sessions[]
+            | [$base, .name, (.path // $repo.path)]
+            | @tsv
+        ' || true)
+
+        ITEMS=$(printf '%s\n' "$SESSIONS" \
+            | grep -v '^$' \
+            | while IFS=$'\t' read -r repo_base session_name session_path; do
+                [ -z "$repo_base" ] && continue
+                fit_name "$repo_base" "$session_name" || continue
+                zname="$FIT_NAME"
+                marker="○"
+                if printf '%s\n' "$RUNNING" | grep -Fxq "$zname"; then
+                    marker="●"
+                fi
+                display="  ${marker} ${repo_base}/${session_name}"
+                # Stash the session path in the value so on_view_select can
+                # create the zellij session in the right directory.
+                value="${zname}|${session_path}"
+                jq -n --arg d "$display" --arg v "$value" '{display: $d, value: $v}'
+            done \
+            | jq -s '.')
+
+        if [ -z "$ITEMS" ] || [ "$ITEMS" = "null" ]; then
+            ITEMS="[]"
+        fi
+
+        jq -n --argjson items "$ITEMS" \
+            '{
+                success: true,
+                view_items: $items,
+                view_prompt: "zellij"
+            }'
+        ;;
+
+    on_view_select)
+        SELECTED=$(echo "$REQUEST" | jq -r '.view_context.selected_value // empty')
+
+        if [ -z "$SELECTED" ]; then
+            echo '{"success": false, "error": "no selection"}'
+            exit 0
+        fi
+
+        if ! zellij_available; then
+            echo '{"success": false, "error": "zellij not installed"}'
+            exit 0
+        fi
+
+        # Value format: "<zellij-session>|<session-path>" (from on_view)
+        ZNAME="${SELECTED%%|*}"
+        ZPATH="${SELECTED#*|}"
+        if [ "$ZPATH" = "$SELECTED" ] || [ -z "$ZPATH" ]; then
+            ZPATH="$HOME"
+        fi
+
+        if ! ensure_session "$ZNAME" "$ZPATH"; then
+            jq -n --arg err "$ENSURE_ERROR" '{success: false, error: $err}'
+            exit 0
+        fi
+        jq -n --arg cmd "$(attach_cmd "$ZNAME")" \
+            '{success: true, post_shell_commands: [$cmd]}'
+        ;;
+
+    *)
+        echo '{"success": true}'
+        ;;
+esac

@@ -17,6 +17,7 @@ pub(crate) struct CurrentSessionTarget {
 
 enum CurrentSessionSource {
     Tmux(PathBuf),
+    Zellij(PathBuf),
     Worktree(PathBuf),
 }
 
@@ -24,15 +25,83 @@ impl CurrentSessionSource {
     fn label(&self) -> &'static str {
         match self {
             Self::Tmux(_) => "tmux @ez_session_path",
+            Self::Zellij(_) => "zellij session name",
             Self::Worktree(_) => "current directory",
         }
     }
 
     fn path(&self) -> &Path {
         match self {
-            Self::Tmux(path) | Self::Worktree(path) => path,
+            Self::Tmux(path) | Self::Zellij(path) | Self::Worktree(path) => path,
         }
     }
+}
+
+/// Encode a repo/session pair into a multiplexer session name.
+///
+/// Every byte outside `[A-Za-z0-9_-]` becomes `_`, and the two parts are joined
+/// with `__`. The encoding is deterministic so the zellij plugin (which has no
+/// per-session metadata store, unlike tmux user options) and this module can
+/// agree on a session's identity without any persisted state. The bash side in
+/// `plugins/zellij/zellij-plugin` mirrors this with `LC_ALL=C tr`, which is why
+/// this substitutes per byte rather than per char: a multi-byte character maps
+/// to one `_` per byte on both sides.
+pub(crate) fn encode_mux_name(repo_basename: &str, session_name: &str) -> String {
+    format!(
+        "{}__{}",
+        encode_mux_part(repo_basename),
+        encode_mux_part(session_name)
+    )
+}
+
+fn encode_mux_part(part: &str) -> String {
+    part.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' {
+                b as char
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+/// Number of hex digits of the digest the zellij plugin appends to a shortened
+/// session name. Must match `md5_hex4` in `plugins/zellij/zellij-plugin`.
+const MUX_DIGEST_LEN: usize = 4;
+
+/// Does `mux_name` name the zellij session belonging to this repo/session pair?
+///
+/// zellij binds one socket per session named after the session, so a name that
+/// does not fit the 103-byte socket path cannot be used at all. The plugin
+/// shortens those to `<encoded-session-prefix>_<digest>`, where the digest is the
+/// first [`MUX_DIGEST_LEN`] hex digits of the md5 of the *full* encoded name (see
+/// `fit_name` in `plugins/zellij/zellij-plugin`).
+///
+/// The byte budget that decided how much of the name survived is deliberately not
+/// re-derived here: it depends on `$TMPDIR`, `$ZELLIJ_SOCKET_DIR` and zellij's
+/// contract-version directory, none of which this process can know were the same
+/// when the session was created. Accepting *any* prefix of the encoded session
+/// name that carries the right digest matches every budget without tracking one.
+fn mux_name_matches(repo_basename: &str, session_name: &str, mux_name: &str) -> bool {
+    let full = encode_mux_name(repo_basename, session_name);
+    if mux_name == full {
+        return true;
+    }
+
+    let Some((visible, digest)) = mux_name.rsplit_once('_') else {
+        return false;
+    };
+    if digest.len() != MUX_DIGEST_LEN {
+        return false;
+    }
+    // The visible part is what is left of the session name; the repo is only
+    // represented in the digest, which is why both are checked.
+    if !encode_mux_part(session_name).starts_with(visible) {
+        return false;
+    }
+    let expected = format!("{:x}", md5::compute(full.as_bytes()));
+    digest == &expected[..MUX_DIGEST_LEN]
 }
 
 pub(crate) fn resolve_current_session(repo_arg: Option<&str>) -> Result<CurrentSessionTarget> {
@@ -83,6 +152,24 @@ pub(crate) fn resolve_current_session(repo_arg: Option<&str>) -> Result<CurrentS
         );
     }
 
+    // Zellij has no per-session option store, so identity is derived from the
+    // session name the plugin encoded when it created the zellij session.
+    if let Some(zellij_name) = zellij_session_name() {
+        log::debug!("resolving current session from zellij session name: {zellij_name}");
+        if let Some((repo_entry, session)) = find_session_by_mux_name(&repos, &zellij_name)? {
+            let path = session
+                .path
+                .clone()
+                .unwrap_or_else(|| repo_entry.path.clone());
+            return Ok(CurrentSessionTarget {
+                repo_entry,
+                session,
+                source: CurrentSessionSource::Zellij(path),
+            });
+        }
+        log::debug!("zellij session name did not match any registered session: {zellij_name}");
+    }
+
     let cwd = std::env::current_dir()?;
     log::debug!(
         "resolving current session from current directory: {}",
@@ -97,7 +184,7 @@ pub(crate) fn resolve_current_session(repo_arg: Option<&str>) -> Result<CurrentS
     }
 
     Err(EzError::SessionNotFound(
-        "current session (tmux @ez_session_path and current directory did not match any registered session)".into(),
+        "current session (tmux user options, zellij session name, and current directory did not match any registered session)".into(),
     ))
 }
 
@@ -164,6 +251,39 @@ fn tmux_user_option(option: &str) -> Option<String> {
     }
 }
 
+fn zellij_session_name() -> Option<String> {
+    let name = std::env::var("ZELLIJ_SESSION_NAME").ok()?;
+    let name = name.trim().to_string();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+/// Find the session whose multiplexer name is `mux_name`, in either the full or
+/// the shortened encoding (see `mux_name_matches`).
+///
+/// Encoding is lossy (see `encode_mux_name`), so two repo/session pairs can in
+/// principle collide; the first match in registry order wins.
+fn find_session_by_mux_name(
+    repos: &[RepoEntry],
+    mux_name: &str,
+) -> Result<Option<(RepoEntry, Session)>> {
+    for repo_entry in repos {
+        let repo_basename = repo_basename(&repo_entry.path);
+        let tree = store::load_sessions(&repo_entry.id)?;
+        for session in tree.sessions {
+            if mux_name_matches(&repo_basename, &session.name, mux_name) {
+                return Ok(Some((repo_entry.clone(), session)));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn repo_basename(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 fn find_session_by_name(
     repos: &[RepoEntry],
     repo_id: &str,
@@ -225,8 +345,137 @@ fn path_matches_current(current_path: &Path, session_path: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::path_matches_current;
+    use super::{encode_mux_name, mux_name_matches, path_matches_current};
     use std::path::Path;
+
+    // The shortened names below were produced by `fit_name` in
+    // plugins/zellij/zellij-plugin under a 24-byte budget (macOS default
+    // $TMPDIR). They are golden values: if the two implementations of the
+    // digest ever drift, these fail rather than "current session not found".
+
+    #[test]
+    fn mux_name_matches_full_encoding() {
+        assert!(mux_name_matches("my-repo", "main", "my-repo__main"));
+        assert!(!mux_name_matches("my-repo", "main", "other__main"));
+    }
+
+    #[test]
+    fn mux_name_matches_shortened_encoding() {
+        // Session name intact, repo replaced by the digest of the full name.
+        assert!(mux_name_matches(
+            "acme-widgets",
+            "refactor-auth-flow",
+            "refactor-auth-flow_7239"
+        ));
+    }
+
+    #[test]
+    fn mux_name_matches_shortened_and_truncated_encoding() {
+        // Too long even without the repo prefix, so the session name is cut too.
+        assert!(mux_name_matches(
+            "acme-widgets",
+            "feat-ABC-123-add-dark-mode-toggle",
+            "feat-ABC-123-add-da_eb18"
+        ));
+    }
+
+    #[test]
+    fn shortened_encoding_distinguishes_repos() {
+        // Same session name in two repos: only the digest tells them apart.
+        assert!(mux_name_matches(
+            "shared-component-library",
+            "refactor-auth-flow",
+            "refactor-auth-flow_6f3e"
+        ));
+        assert!(!mux_name_matches(
+            "shared-component-library",
+            "refactor-auth-flow",
+            "refactor-auth-flow_7239"
+        ));
+    }
+
+    #[test]
+    fn shortened_encoding_distinguishes_names_truncated_alike() {
+        // Both truncate to "feat-ABC-123-add-da"; the digest covers the full name.
+        assert!(mux_name_matches(
+            "acme-widgets",
+            "feat-ABC-123-add-dark-mode",
+            "feat-ABC-123-add-da_9fe7"
+        ));
+        assert!(!mux_name_matches(
+            "acme-widgets",
+            "feat-ABC-123-add-dark-theme",
+            "feat-ABC-123-add-da_9fe7"
+        ));
+    }
+
+    #[test]
+    fn shortened_encoding_agrees_on_non_ascii() {
+        // 'é' is two bytes, so it becomes two underscores on both sides before
+        // the digest is taken — the case where a char-wise bash `tr` or a
+        // char-wise Rust map would diverge.
+        assert!(mux_name_matches(
+            "acme-widgets",
+            "feat/ABC-1 café",
+            "feat_ABC-1_caf___fda6"
+        ));
+    }
+
+    #[test]
+    fn mux_name_rejects_mismatched_digest_and_prefix() {
+        // Right prefix, wrong digest.
+        assert!(!mux_name_matches(
+            "acme-widgets",
+            "refactor-auth-flow",
+            "refactor-auth-flow_0000"
+        ));
+        // Right digest length, prefix not from this session's name.
+        assert!(!mux_name_matches(
+            "acme-widgets",
+            "refactor-auth-flow",
+            "some-other-name_7239"
+        ));
+        // Digest of the wrong length is not a shortened name at all.
+        assert!(!mux_name_matches(
+            "acme-widgets",
+            "refactor-auth-flow",
+            "refactor-auth-flow_723"
+        ));
+    }
+
+    #[test]
+    fn encode_joins_parts_with_double_underscore() {
+        assert_eq!(encode_mux_name("my-repo", "main"), "my-repo__main");
+    }
+
+    #[test]
+    fn encode_replaces_separators_and_punctuation() {
+        assert_eq!(
+            encode_mux_name("my.repo", "feat/ABC-1"),
+            "my_repo__feat_ABC-1"
+        );
+        assert_eq!(encode_mux_name("a:b", "c d"), "a_b__c_d");
+        assert_eq!(encode_mux_name(".dotfiles", "wip"), "_dotfiles__wip");
+    }
+
+    #[test]
+    fn encode_never_emits_a_slash() {
+        // zellij rejects session names containing '/'
+        assert!(!encode_mux_name("owner/repo", "a/b/c").contains('/'));
+    }
+
+    #[test]
+    fn encode_replaces_non_ascii_per_byte() {
+        // Must match `LC_ALL=C tr -c 'A-Za-z0-9_-' '_'` in the zellij plugin:
+        // 'é' is two UTF-8 bytes, so it becomes two underscores.
+        assert_eq!(encode_mux_name("repo", "café"), "repo__caf__");
+    }
+
+    #[test]
+    fn encode_is_lossy_and_can_collide() {
+        // Documents the first-match-wins rule in find_session_by_mux_name.
+        assert_eq!(encode_mux_name("a.b", "c"), encode_mux_name("a:b", "c"));
+    }
 
     #[test]
     fn path_match_accepts_session_root() {

@@ -38,6 +38,7 @@ Invoke-Expression ((& ez init-shell pwsh) -join "`n")
 ```bash
 ez plugin enable git-worktree    # worktree-backed sessions
 ez plugin enable tmux            # tmux integration (optional)
+ez plugin enable zellij          # zellij integration (optional)
 ez config add-root ~/workspace   # register a workspace directory
 ez add ~/workspace/my-project    # register a repo
 ez                               # launch the interactive browser
@@ -51,6 +52,7 @@ Sessions are tree-structured metadata. Plugins give them physical meaning:
 
 - **git-worktree** — creates/deletes worktrees on session create/delete
 - **tmux** — creates tmux sessions, auto-attach on enter, `Ctrl-a` to browse tmux sessions
+- **zellij** — same for zellij: a session per workspace session, `Ctrl-z` to browse them
 
 Worktrees live as siblings of the repo in a `.ez/` directory:
 
@@ -93,6 +95,7 @@ Bundled plugins — just enable:
 ```bash
 ez plugin enable git-worktree        # worktree lifecycle
 ez plugin enable tmux                # tmux session management
+ez plugin enable zellij              # zellij session management
 ez plugin enable cursor-mcp-auth     # share Cursor MCP OAuth tokens across worktrees
 ez plugin enable cursor-trusted-workspace  # auto-trust worktree workspaces in Cursor
 ez plugin enable cursor-mcp-approvals      # auto-approve MCP servers in Cursor
@@ -129,7 +132,7 @@ bind -T prefix n display-popup -E -w 65% -h 65% "ez session note open"
 - [fzf](https://github.com/junegunn/fzf)
 - git
 - jq (for bundled plugins)
-- tmux (optional)
+- tmux or zellij 0.40+ (optional)
 
 ## License
 

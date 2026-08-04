@@ -1,0 +1,50 @@
+name = "zellij"
+version = "0.1.0"
+description = "Manages zellij sessions for workspaces"
+hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_session_rename", "on_bind", "on_view", "on_view_select"]
+executable = "zellij-plugin"
+
+# In the session picker: alt-z creates/attaches to the zellij session for the
+# selected session. Distinct from the tmux plugin's alt-a so both can be enabled.
+[[binds]]
+key = "alt-z"
+name = "zellij_attach"
+label = "zellij"
+description = "Attach to zellij session"
+contexts = ["session"]
+
+# In other views: ctrl-z shows a list of all ez sessions with their zellij state
+[[views]]
+name = "zellij"
+key = "ctrl-z"
+label = "zellij"
+contexts = ["repo", "owner", "workspace", "tree", "label"]
+
+[[config_schema]]
+name = "auto_attach"
+type = "bool"
+default = false
+description = "Automatically attach/switch to the zellij session when entering a session"
+
+[[config_schema]]
+name = "force_delete"
+type = "bool"
+default = true
+description = "Also delete zellij's serialized copy of the session so dead names don't linger"
+
+# zellij names one socket per session after the session itself, so a long $TMPDIR
+# (macOS: /var/folders/...) can leave too few of the 103 allowed bytes for the
+# name. Left empty, zellij's own default directory is used and names that do not
+# fit are shortened; a shorter directory here keeps names verbatim but puts ez's
+# sessions in a different namespace than a plain `zellij`.
+[[config_schema]]
+name = "socket_dir"
+type = "string"
+default = ""
+description = "Override ZELLIJ_SOCKET_DIR; empty uses zellij's default and shortens long names"
+
+[[config_schema]]
+name = "reap_delay_ms"
+type = "int"
+default = 200
+description = "Milliseconds to wait before running delete hooks in the reap worker"
