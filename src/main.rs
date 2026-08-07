@@ -97,33 +97,15 @@ fn main() {
 }
 
 fn cd_to_session(cd_file: Option<&std::path::Path>) -> error::Result<()> {
-    // Must be inside tmux: $TMUX is set by the server when a client is attached.
-    if std::env::var_os("TMUX").is_none() {
-        return Err(error::EzError::Config(
-            "ez cd-to-session must be run from inside a tmux session".into(),
-        ));
-    }
-
-    // Ask tmux for the @ez_session_path user option on the current session.
-    // -v prints the value only; -q stays quiet if the option is unset.
-    let output = std::process::Command::new("tmux")
-        .args(["show-options", "-v", "-q", "@ez_session_path"])
-        .output()
-        .map_err(|e| error::EzError::Config(format!("failed to run tmux: {e}")))?;
-
-    if !output.status.success() {
-        return Err(error::EzError::Config(format!(
-            "tmux show-options failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if path.is_empty() {
-        return Err(error::EzError::Config(
-            "current tmux session has no @ez_session_path (not an ez-managed session, or session was created before this feature)".into(),
-        ));
-    }
+    // Multiplexer-agnostic: tmux user options, then the zellij session name,
+    // then the working directory (see session::current::resolve_current_session).
+    let target = session::current::resolve_current_session(None)?;
+    let path = target
+        .session
+        .path
+        .clone()
+        .unwrap_or_else(|| target.repo_entry.path.clone());
+    let path = path.display().to_string();
 
     if let Some(cd_path) = cd_file {
         std::fs::write(cd_path, path.as_bytes())?;

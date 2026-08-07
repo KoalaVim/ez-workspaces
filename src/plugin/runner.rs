@@ -43,6 +43,13 @@ pub fn execute(
         cmd.env("EZ_CONFIG_DIR", config_dir);
     }
 
+    // Expose the running binary so plugins can shell out to ez. `ez` in PATH is
+    // not reliable: in an interactive shell it resolves to the wrapper function,
+    // and plugins run under a non-interactive shell.
+    if let Ok(exe) = std::env::current_exe() {
+        cmd.env("EZ_BIN", exe);
+    }
+
     // In --debug mode, give each plugin invocation its own log file so the
     // plugin can write rich diagnostics without polluting stderr/stdout.
     // Plugins should append to $EZ_PLUGIN_DEBUG_LOG only when it's set.

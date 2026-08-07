@@ -22,6 +22,15 @@ enabled = [
 
 [plugin_settings]
 
+# [plugin_settings.zellij]
+# auto_attach = false     # attach/switch automatically when entering a session
+# force_delete = true     # also delete zellij's resurrectable copy on session delete
+# socket_dir = ""         # override ZELLIJ_SOCKET_DIR; empty uses zellij's default,
+#                         # and names too long for the 103-byte socket path limit are
+#                         # shortened. A short dir keeps names verbatim, at the cost
+#                         # of a namespace separate from a plain `zellij`
+# reap_delay_ms = 200     # delay before delete hooks run in the detached reaper
+
 [[session_name_stages]]
 name = "prefix"
 kind = "choice"

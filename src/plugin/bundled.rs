@@ -27,6 +27,12 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
         executable: include_str!("../../plugins/tmux/tmux-plugin"),
     },
     BundledPlugin {
+        name: "zellij",
+        manifest: include_str!("../../plugins/zellij/manifest.toml"),
+        executable_name: "zellij-plugin",
+        executable: include_str!("../../plugins/zellij/zellij-plugin"),
+    },
+    BundledPlugin {
         name: "cursor-mcp-auth",
         manifest: include_str!("../../plugins/cursor-mcp-auth/manifest.toml"),
         executable_name: "cursor-mcp-auth-plugin",
