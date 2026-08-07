@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use colored::Colorize;
 
 use crate::config;
-use crate::error::Result;
+use crate::error::{EzError, Result};
 use crate::plugin;
 use crate::repo;
 use crate::session;
@@ -135,10 +135,12 @@ pub(crate) fn browse_repo(
     } else {
         repo::add_repo(Some(repo_path))?;
         let index = repo::store::load_index()?;
-        index
-            .find_by_path(repo_path)
-            .cloned()
-            .expect("just registered")
+        index.find_by_path(repo_path).cloned().ok_or_else(|| {
+            EzError::Path(format!(
+                "registered {} but could not find it in the index",
+                repo_path.display()
+            ))
+        })?
     };
 
     session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config)
