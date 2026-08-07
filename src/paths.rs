@@ -77,6 +77,27 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+/// Resolve a path to its canonical form, following symlinks.
+///
+/// Registered repo paths are always canonical — registration resolves symlinks
+/// before writing the index — so any path obtained from a filesystem scan must
+/// be normalized before it can be compared against them.
+///
+/// Falls back to the input path when resolution fails (broken symlink, deleted
+/// directory, unreadable parent). Never fails.
+pub fn normalize(path: &std::path::Path) -> PathBuf {
+    match std::fs::canonicalize(path) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            log::debug!(
+                "normalize: canonicalize failed for {}: {e}, using path as-is",
+                path.display()
+            );
+            path.to_path_buf()
+        }
+    }
+}
+
 /// Collapse the home directory prefix back to ~/
 pub fn collapse_tilde(path: &str) -> String {
     if let Some(home) = dirs::home_dir() {
@@ -126,5 +147,42 @@ mod tests {
     fn test_expand_tilde_no_tilde() {
         let result = expand_tilde("/absolute/path");
         assert_eq!(result, PathBuf::from("/absolute/path"));
+    }
+
+    /// Temp dirs live under a symlinked prefix on macOS (`/var` -> `/private/var`),
+    /// so expectations must be built from an already-canonical base.
+    fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let base = std::fs::canonicalize(tmp.path()).expect("canonicalize tempdir");
+        (tmp, base)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_normalize_resolves_symlink() {
+        let (_tmp, base) = canonical_tempdir();
+        let target = base.join("target");
+        std::fs::create_dir(&target).expect("create target");
+        let link = base.join("link");
+        std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+
+        assert_eq!(normalize(&link), target);
+    }
+
+    #[test]
+    fn test_normalize_direct_path_unchanged() {
+        let (_tmp, base) = canonical_tempdir();
+        let dir = base.join("plain");
+        std::fs::create_dir(&dir).expect("create dir");
+
+        assert_eq!(normalize(&dir), dir);
+    }
+
+    #[test]
+    fn test_normalize_missing_path_returns_input() {
+        let (_tmp, base) = canonical_tempdir();
+        let missing = base.join("does-not-exist");
+
+        assert_eq!(normalize(&missing), missing);
     }
 }

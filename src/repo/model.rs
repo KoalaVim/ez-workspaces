@@ -100,8 +100,18 @@ fn owner_from_path(path: &str) -> Option<String> {
 }
 
 impl RepoIndex {
+    /// Find a repo by path, resolving symlinks.
+    ///
+    /// Registered paths are canonical, but callers frequently pass a path
+    /// straight from a filesystem scan, which leaves symlinks unresolved. The
+    /// query is normalized once (registered paths need no normalization), and
+    /// the path as given is still matched so entries whose directory has since
+    /// been deleted remain addressable.
     pub fn find_by_path(&self, path: &std::path::Path) -> Option<&RepoEntry> {
-        self.repos.iter().find(|r| r.path == path)
+        let canonical = crate::paths::normalize(path);
+        self.repos
+            .iter()
+            .find(|r| r.path == path || r.path == canonical)
     }
 
     pub fn find_by_name_or_id(&self, query: &str) -> Option<&RepoEntry> {
@@ -168,6 +178,86 @@ mod tests {
         // Missing repo segment
         assert_eq!(parse_owner("https://github.com/owner"), None);
         assert_eq!(parse_owner("git@github.com:"), None);
+    }
+
+    fn index_with(path: &std::path::Path) -> RepoIndex {
+        RepoIndex {
+            repos: vec![RepoEntry {
+                id: "test-repo".into(),
+                path: path.to_path_buf(),
+                name: "repo".into(),
+                registered_at: Utc::now(),
+                is_git: true,
+            }],
+        }
+    }
+
+    /// Temp dirs live under a symlinked prefix on macOS (`/var` -> `/private/var`),
+    /// so the registered path must be built from an already-canonical base.
+    fn canonical_tempdir() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("create tempdir");
+        let base = std::fs::canonicalize(tmp.path()).expect("canonicalize tempdir");
+        (tmp, base)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn find_by_path_matches_symlink_to_registered_repo() {
+        let (_tmp, base) = canonical_tempdir();
+        let target = base.join("repo");
+        std::fs::create_dir(&target).expect("create repo dir");
+        let link = base.join("link-to-repo");
+        std::os::unix::fs::symlink(&target, &link).expect("create symlink");
+
+        let index = index_with(&target);
+
+        assert_eq!(
+            index.find_by_path(&link).map(|r| r.id.as_str()),
+            Some("test-repo"),
+            "a repo reached through a symlink must resolve to its entry"
+        );
+    }
+
+    #[test]
+    fn find_by_path_matches_canonical_path() {
+        let (_tmp, base) = canonical_tempdir();
+        let target = base.join("repo");
+        std::fs::create_dir(&target).expect("create repo dir");
+
+        let index = index_with(&target);
+
+        assert_eq!(
+            index.find_by_path(&target).map(|r| r.id.as_str()),
+            Some("test-repo")
+        );
+    }
+
+    #[test]
+    fn find_by_path_matches_deleted_registered_path() {
+        // A repo whose directory is gone cannot be canonicalized; exact match
+        // keeps it addressable so `ez repo remove` still works.
+        let (_tmp, base) = canonical_tempdir();
+        let gone = base.join("deleted-repo");
+
+        let index = index_with(&gone);
+
+        assert_eq!(
+            index.find_by_path(&gone).map(|r| r.id.as_str()),
+            Some("test-repo")
+        );
+    }
+
+    #[test]
+    fn find_by_path_misses_unrelated_path() {
+        let (_tmp, base) = canonical_tempdir();
+        let target = base.join("repo");
+        std::fs::create_dir(&target).expect("create repo dir");
+        let other = base.join("other");
+        std::fs::create_dir(&other).expect("create other dir");
+
+        let index = index_with(&target);
+
+        assert!(index.find_by_path(&other).is_none());
     }
 
     #[test]
