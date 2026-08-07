@@ -145,13 +145,17 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
         local ret=$?
         extra_args=()
         if [ -s "$post_cmd" ]; then
-            if [ -s "$tmp" ]; then
-                extra_args=(--repo "$(cat "$tmp")")
-            fi
+            local relaunch=0
+            grep -q '^#EZ_RELAUNCH$' "$post_cmd" && relaunch=1
             source "$post_cmd"
             : > "$post_cmd"
-            : > "$tmp"
-            continue
+            if [ "$relaunch" -eq 1 ]; then
+                if [ -s "$tmp" ]; then
+                    extra_args=(--repo "$(cat "$tmp")")
+                fi
+                : > "$tmp"
+                continue
+            fi
         fi
         break
     done
@@ -172,13 +176,17 @@ fn print_shell_init(shell: &str) -> error::Result<()> {
         set ret $status
         set extra_args
         if test -s "$post_cmd"
-            if test -s "$tmp"
-                set extra_args --repo (cat "$tmp")
-            end
+            set relaunch 0
+            grep -q '^#EZ_RELAUNCH$' "$post_cmd"; and set relaunch 1
             source "$post_cmd"
             echo -n > "$post_cmd"
-            echo -n > "$tmp"
-            continue
+            if test "$relaunch" -eq 1
+                if test -s "$tmp"
+                    set extra_args --repo (cat "$tmp")
+                end
+                echo -n > "$tmp"
+                continue
+            end
         end
         break
     end
@@ -198,13 +206,16 @@ end"#
         & (Get-Command ez -CommandType Application) @args $extraArgs --cd-file="$tmp" --post-cmd-file="$postCmd"
         $extraArgs = @()
         if ((Test-Path $postCmd) -and (Get-Item $postCmd).Length -gt 0) {
-            if ((Test-Path $tmp) -and (Get-Item $tmp).Length -gt 0) {
-                $extraArgs = @('--repo', (Get-Content $tmp -Raw).Trim())
-            }
+            $relaunch = (Select-String -Path $postCmd -Pattern '^#EZ_RELAUNCH$' -Quiet) -eq $true
             . $postCmd
             [IO.File]::WriteAllText($postCmd, '')
-            [IO.File]::WriteAllText($tmp, '')
-            continue
+            if ($relaunch) {
+                if ((Test-Path $tmp) -and (Get-Item $tmp).Length -gt 0) {
+                    $extraArgs = @('--repo', (Get-Content $tmp -Raw).Trim())
+                }
+                [IO.File]::WriteAllText($tmp, '')
+                continue
+            }
         }
         break
     }
