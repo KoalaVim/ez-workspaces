@@ -37,7 +37,7 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
         )));
     }
 
-    let canonical = std::fs::canonicalize(&target)?;
+    let canonical = paths::normalize(&target);
     register_repo(&canonical, true)?;
 
     // Detect remote URL and default branch
@@ -51,10 +51,15 @@ pub fn clone_repo(url: &str, path: Option<&Path>) -> Result<()> {
 
 /// Register an existing repo or directory (default: current directory).
 pub fn add_repo(path: Option<&Path>) -> Result<()> {
+    // Registered paths are canonical, so a symlinked argument registers its
+    // target. `normalize` cannot report a missing path, so check separately.
     let target = if let Some(p) = path {
-        std::fs::canonicalize(p)?
+        if !p.exists() {
+            return Err(EzError::Path(format!("{} does not exist", p.display())));
+        }
+        paths::normalize(p)
     } else {
-        std::env::current_dir()?
+        paths::normalize(&std::env::current_dir()?)
     };
 
     let is_git = target.join(".git").exists() || target.join(".git").is_file();
@@ -356,23 +361,14 @@ fn remove_repo(name: &str, purge: bool) -> Result<()> {
             std::path::PathBuf::from(name)
         };
 
-        let found = if let Ok(canonical) = std::fs::canonicalize(&resolved) {
-            log::debug!(
-                "remove_repo: resolved path argument to {}",
-                canonical.display()
-            );
-            index
-                .find_by_path(&canonical)
-                .or_else(|| find_by_ancestor(&index, &canonical))
-        } else {
-            log::debug!(
-                "remove_repo: canonicalize failed for {}, trying raw path",
-                resolved.display()
-            );
-            index
-                .find_by_path(&resolved)
-                .or_else(|| find_by_ancestor(&index, &resolved))
-        };
+        let normalized = paths::normalize(&resolved);
+        log::debug!(
+            "remove_repo: resolved path argument to {}",
+            normalized.display()
+        );
+        let found = index
+            .find_by_path(&normalized)
+            .or_else(|| find_by_ancestor(&index, &normalized));
 
         found
             .or_else(|| index.find_by_name_or_id(name))

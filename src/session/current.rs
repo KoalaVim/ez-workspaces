@@ -254,7 +254,11 @@ fn tmux_user_option(option: &str) -> Option<String> {
 fn zellij_session_name() -> Option<String> {
     let name = std::env::var("ZELLIJ_SESSION_NAME").ok()?;
     let name = name.trim().to_string();
-    if name.is_empty() { None } else { Some(name) }
+    if name.is_empty() {
+        None
+    } else {
+        Some(name)
+    }
 }
 
 /// Find the session whose multiplexer name is `mux_name`, in either the full or
