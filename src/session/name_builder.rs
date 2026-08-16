@@ -10,6 +10,7 @@
 //! joined name must be non-empty.
 
 use std::collections::HashMap;
+use std::path::Path;
 
 use crate::browser::selector::{InteractiveSelector, SelectItem, StageOutcome};
 use crate::config::model::{EzConfig, NameBuilderMode, StageKind};
@@ -70,7 +71,7 @@ fn select_mode(
                     "Build from parts (prefix → ticket → name)",
                     "build_from_parts",
                 ),
-                NameBuilderMode::GitHubPr => ("From GitHub PR (paste PR URL)", "github_pr"),
+                NameBuilderMode::GitHubPr => ("From GitHub PR (PR URL or number)", "github_pr"),
                 NameBuilderMode::JiraUrl => ("From Jira URL (paste Jira link)", "jira_url"),
             };
             SelectItem {
@@ -91,9 +92,14 @@ fn select_mode(
 /// Run the configured mode selection, then dispatch to the appropriate name
 /// builder. The default ("main") session bypasses this entirely — callers
 /// handle that separately.
+///
+/// `repo_dir` is the root of the repo the session is being created in. It lets
+/// the GitHub PR mode resolve a bare PR number against that repo's remote;
+/// `None` means no repo context, in which case only full PR URLs are accepted.
 pub fn prompt_session_name(
     selector: &dyn InteractiveSelector,
     config: &EzConfig,
+    repo_dir: Option<&Path>,
 ) -> Result<NamePromptResult> {
     let modes = &config.name_builder_modes;
 
@@ -111,7 +117,7 @@ pub fn prompt_session_name(
     match mode {
         NameBuilderMode::FullName => prompt_full_name(selector),
         NameBuilderMode::BuildFromParts => prompt_staged(selector, config),
-        NameBuilderMode::GitHubPr => prompt_github_pr(selector),
+        NameBuilderMode::GitHubPr => prompt_github_pr(selector, repo_dir),
         NameBuilderMode::JiraUrl => prompt_jira_url(selector),
     }
 }
@@ -205,37 +211,95 @@ fn prompt_staged(
     }
 }
 
-/// `GitHubPr` mode: paste a GitHub PR URL, resolve branch name via `gh` CLI.
-/// Falls back to `pr<number>` if `gh` is unavailable or fails.
-fn prompt_github_pr(selector: &dyn InteractiveSelector) -> Result<NamePromptResult> {
-    let re = regex::Regex::new(r"github\.com/[^/]+/[^/]+/pull/(\d+)").unwrap();
+/// A PR reference as typed at the `GitHubPr` prompt.
+#[derive(Debug, PartialEq, Eq)]
+enum PrRef {
+    /// Full PR URL — self-contained, resolvable without repo context.
+    Url { url: String, number: u64 },
+    /// Bare PR number (`42` or `#42`) — needs a repo to resolve the remote.
+    Number(u64),
+    /// Neither form matched.
+    Invalid,
+}
 
+/// Parse the raw prompt input into a [`PrRef`]. Accepts a GitHub PR URL or a
+/// bare PR number, optionally prefixed with `#`.
+fn parse_pr_ref(input: &str) -> PrRef {
+    let input = input.trim();
+
+    let url_re = regex::Regex::new(r"github\.com/[^/]+/[^/]+/pull/(\d+)").unwrap();
+    if let Some(caps) = url_re.captures(input) {
+        return match caps[1].parse::<u64>() {
+            Ok(number) => PrRef::Url {
+                url: input.to_string(),
+                number,
+            },
+            Err(_) => PrRef::Invalid,
+        };
+    }
+
+    let num_re = regex::Regex::new(r"^#?(\d+)$").unwrap();
+    if let Some(caps) = num_re.captures(input) {
+        return match caps[1].parse::<u64>() {
+            Ok(number) => PrRef::Number(number),
+            Err(_) => PrRef::Invalid,
+        };
+    }
+
+    PrRef::Invalid
+}
+
+/// `GitHubPr` mode: enter a GitHub PR URL or a bare PR number, resolve the
+/// branch name via the `gh` CLI. A bare number is resolved against the remote
+/// of `repo_dir`, so it requires repo context. Falls back to `pr<number>` if
+/// `gh` is unavailable or fails.
+fn prompt_github_pr(
+    selector: &dyn InteractiveSelector,
+    repo_dir: Option<&Path>,
+) -> Result<NamePromptResult> {
     loop {
-        match selector.input_with_back("GitHub PR URL", None, false, None)? {
-            StageOutcome::Picked(url) => {
-                let url = url.trim();
-                if let Some(caps) = re.captures(url) {
-                    let pr_number: u64 = caps[1].parse().unwrap_or(0);
-                    let (name, pr_metadata) = resolve_pr_via_gh(url, pr_number);
+        match selector.input_with_back("GitHub PR URL or number", None, false, None)? {
+            StageOutcome::Picked(input) => match parse_pr_ref(&input) {
+                PrRef::Url { url, number } => {
+                    let (name, pr_metadata) = resolve_pr_via_gh(&url, number, repo_dir);
                     return Ok(NamePromptResult::Done { name, pr_metadata });
-                } else {
+                }
+                PrRef::Number(number) => {
+                    if repo_dir.is_none() {
+                        eprintln!(
+                            "{}",
+                            "No repo context here — paste the full PR URL instead.".yellow()
+                        );
+                        continue;
+                    }
+                    let (name, pr_metadata) =
+                        resolve_pr_via_gh(&number.to_string(), number, repo_dir);
+                    return Ok(NamePromptResult::Done { name, pr_metadata });
+                }
+                PrRef::Invalid => {
                     eprintln!(
                         "{}",
-                        "Could not extract PR number. Expected: https://github.com/<owner>/<repo>/pull/<number>"
+                        "Could not extract PR number. Expected https://github.com/<owner>/<repo>/pull/<number> or a PR number (e.g. 42)"
                             .yellow()
                     );
                     continue;
                 }
-            }
+            },
             StageOutcome::Cancel | StageOutcome::Back => return Ok(NamePromptResult::Cancelled),
         }
     }
 }
 
 /// Attempt to resolve PR branch name and metadata via the `gh` CLI.
+/// `pr_ref` is either a full PR URL or a bare PR number; when `repo_dir` is
+/// set, `gh` runs there so it resolves the PR against that repo's remote.
 /// Returns `(session_name, Option<PrMetadata>)`. Falls back to `pr<number>`
 /// if `gh` is unavailable or the command fails.
-fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) {
+fn resolve_pr_via_gh(
+    pr_ref: &str,
+    pr_number: u64,
+    repo_dir: Option<&Path>,
+) -> (String, Option<PrMetadata>) {
     let fallback_name = format!("pr{pr_number}");
 
     if which::which("gh").is_err() {
@@ -248,9 +312,12 @@ fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) 
 
     eprint!("{}", "Resolving PR branch...".dimmed());
 
-    let output = std::process::Command::new("gh")
-        .args(["pr", "view", url, "--json", "headRefName,number"])
-        .output();
+    let mut cmd = std::process::Command::new("gh");
+    cmd.args(["pr", "view", pr_ref, "--json", "headRefName,number,url"]);
+    if let Some(dir) = repo_dir {
+        cmd.current_dir(dir);
+    }
+    let output = cmd.output();
 
     eprint!("\r{}\r", " ".repeat(30));
 
@@ -273,6 +340,15 @@ fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) 
                 .get("number")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(pr_number);
+            // Prefer the canonical URL from `gh`: it is the only source when the
+            // input was a bare number, and it normalizes pasted URLs (anchors,
+            // `/files` suffixes) when it was not.
+            let url = json
+                .get("url")
+                .and_then(|v| v.as_str())
+                .filter(|u| !u.is_empty())
+                .unwrap_or(pr_ref)
+                .to_string();
 
             if head_ref.is_empty() {
                 eprintln!(
@@ -286,7 +362,7 @@ fn resolve_pr_via_gh(url: &str, pr_number: u64) -> (String, Option<PrMetadata>) 
 
             let metadata = PrMetadata {
                 pr_number: number,
-                pr_url: url.to_string(),
+                pr_url: url,
                 head_ref: head_ref.clone(),
             };
 
@@ -405,11 +481,170 @@ fn join_parts(parts: &[Option<String>]) -> String {
 
 /// Convenience: build a default fzf selector and run the prompt. Returns
 /// `Err(EzError::Cancelled)` on cancel so callers can propagate quietly.
-pub fn prompt_session_name_default(config: &EzConfig) -> Result<NameResult> {
+pub fn prompt_session_name_default(
+    config: &EzConfig,
+    repo_dir: Option<&Path>,
+) -> Result<NameResult> {
     use crate::browser::selector::FzfSelector;
     let selector = FzfSelector::new(&config.fzf)?;
-    match prompt_session_name(&selector, config)? {
+    match prompt_session_name(&selector, config, repo_dir)? {
         NamePromptResult::Done { name, pr_metadata } => Ok(NameResult { name, pr_metadata }),
         NamePromptResult::Cancelled => Err(EzError::Cancelled),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::browser::selector::ActionResult;
+    use std::cell::RefCell;
+
+    #[test]
+    fn parses_pr_url() {
+        assert_eq!(
+            parse_pr_ref("https://github.com/org/repo/pull/42"),
+            PrRef::Url {
+                url: "https://github.com/org/repo/pull/42".into(),
+                number: 42,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_pr_url_with_suffix() {
+        assert_eq!(
+            parse_pr_ref("  https://github.com/org/repo/pull/7/files  "),
+            PrRef::Url {
+                url: "https://github.com/org/repo/pull/7/files".into(),
+                number: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn parses_bare_number() {
+        assert_eq!(parse_pr_ref("42"), PrRef::Number(42));
+        assert_eq!(parse_pr_ref(" 42 "), PrRef::Number(42));
+    }
+
+    #[test]
+    fn parses_hash_prefixed_number() {
+        assert_eq!(parse_pr_ref("#42"), PrRef::Number(42));
+    }
+
+    #[test]
+    fn rejects_invalid_input() {
+        assert_eq!(parse_pr_ref(""), PrRef::Invalid);
+        assert_eq!(parse_pr_ref("not-a-pr"), PrRef::Invalid);
+        assert_eq!(parse_pr_ref("42abc"), PrRef::Invalid);
+        assert_eq!(parse_pr_ref("#"), PrRef::Invalid);
+        // Overflows u64 — no valid PR number is this big.
+        assert_eq!(parse_pr_ref("99999999999999999999999"), PrRef::Invalid);
+        // A GitHub URL that is not a pull request.
+        assert_eq!(parse_pr_ref("https://github.com/org/repo"), PrRef::Invalid);
+    }
+
+    /// Selector that replays a queued script of `input_with_back` answers and
+    /// cancels once the script runs dry.
+    struct ScriptedSelector {
+        inputs: RefCell<Vec<String>>,
+        consumed: RefCell<usize>,
+    }
+
+    impl ScriptedSelector {
+        fn new(inputs: &[&str]) -> Self {
+            Self {
+                inputs: RefCell::new(inputs.iter().rev().map(|s| s.to_string()).collect()),
+                consumed: RefCell::new(0),
+            }
+        }
+    }
+
+    impl InteractiveSelector for ScriptedSelector {
+        fn select_one(
+            &self,
+            _items: &[SelectItem],
+            _prompt: &str,
+            _preview_cmd: Option<&str>,
+        ) -> Result<Option<usize>> {
+            unimplemented!()
+        }
+
+        fn select_many(&self, _items: &[SelectItem], _prompt: &str) -> Result<Vec<usize>> {
+            unimplemented!()
+        }
+
+        fn input(&self, _prompt: &str, _default: Option<&str>) -> Result<String> {
+            unimplemented!()
+        }
+
+        fn confirm(&self, _prompt: &str, _default: bool) -> Result<bool> {
+            unimplemented!()
+        }
+
+        fn select_with_back(
+            &self,
+            _prompt: &str,
+            _items: &[SelectItem],
+            _allow_back: bool,
+            _context: Option<&str>,
+        ) -> Result<StageOutcome> {
+            unimplemented!()
+        }
+
+        fn input_with_back(
+            &self,
+            _prompt: &str,
+            _default: Option<&str>,
+            _allow_back: bool,
+            _context: Option<&str>,
+        ) -> Result<StageOutcome> {
+            match self.inputs.borrow_mut().pop() {
+                Some(v) => {
+                    *self.consumed.borrow_mut() += 1;
+                    Ok(StageOutcome::Picked(v))
+                }
+                None => Ok(StageOutcome::Cancel),
+            }
+        }
+
+        fn select_with_actions(
+            &self,
+            _items: &[SelectItem],
+            _prompt: &str,
+            _preview_cmd: Option<&str>,
+            _expect_keys: &[&str],
+            _header: Option<&str>,
+        ) -> Result<ActionResult> {
+            unimplemented!()
+        }
+    }
+
+    #[test]
+    fn bare_number_without_repo_context_reprompts() {
+        // No repo context: a bare number cannot be resolved, so the prompt must
+        // re-ask rather than resolve (which would shell out to `gh`).
+        let selector = ScriptedSelector::new(&["42"]);
+        let result = prompt_github_pr(&selector, None).unwrap();
+        assert!(matches!(result, NamePromptResult::Cancelled));
+        // One scripted answer consumed, then the empty script cancelled the
+        // re-prompt — proving the number was rejected, not resolved.
+        assert_eq!(*selector.consumed.borrow(), 1);
+    }
+
+    #[test]
+    fn invalid_input_reprompts() {
+        let selector = ScriptedSelector::new(&["not-a-pr", "still-not-a-pr"]);
+        let result = prompt_github_pr(&selector, Some(Path::new("/tmp"))).unwrap();
+        assert!(matches!(result, NamePromptResult::Cancelled));
+        assert_eq!(*selector.consumed.borrow(), 2);
+    }
+
+    #[test]
+    fn cancel_at_pr_prompt() {
+        let selector = ScriptedSelector::new(&[]);
+        let result = prompt_github_pr(&selector, Some(Path::new("/tmp"))).unwrap();
+        assert!(matches!(result, NamePromptResult::Cancelled));
+        assert_eq!(*selector.consumed.borrow(), 0);
     }
 }

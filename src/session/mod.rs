@@ -274,7 +274,7 @@ fn new_session(
             name: s.to_string(),
             pr_metadata: None,
         },
-        _ => name_builder::prompt_session_name_default(&config)?,
+        _ => name_builder::prompt_session_name_default(&config, Some(&repo_entry.path))?,
     };
     let session_name = name_result.name;
     let pr_metadata = name_result.pr_metadata;
