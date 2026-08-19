@@ -512,4 +512,26 @@ In interactive menus (browsing directories, config wizard), pressing **Escape** 
 
 ## Environment Variables
 
-Sessions can carry environment variables (set by plugins). When you enter a session, these are available in your shell.
+Sessions can carry environment variables. Plugins may set them (for example PR metadata), and you can manage them directly with `ez session env`:
+
+```bash
+# Set (or overwrite) a variable on the current session
+ez session env set AWS_PROFILE staging
+
+# Target a specific session / repo
+ez session env set AWS_PROFILE staging --session feature-x
+ez session env set AWS_PROFILE staging --session feature-x --repo my-repo
+
+# List as KEY=VALUE lines (omit --session to use the current session)
+ez session env list
+ez session env list --session feature-x --json
+
+# Remove a variable (succeeds silently if it was not set)
+ez session env unset AWS_PROFILE --session feature-x
+```
+
+If no current session can be detected, pass `--session <name>`. Env vars set this way are stored on the session (same map plugins write to) and exported when you enter the session.
+
+Keys prefixed with `ez_` are typically managed by ez itself (for example `ez_pr_number`). You can override them, but they may be rewritten later.
+
+**Limitation:** zellij applies session env only when the zellij session is created. After changing env vars, recreate that zellij session to pick up the new values. For tmux, re-enter the session.

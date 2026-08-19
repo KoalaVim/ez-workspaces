@@ -1,5 +1,6 @@
 pub mod current;
 pub mod cursor;
+mod env;
 pub mod from_dirty;
 pub mod model;
 pub mod name_builder;
@@ -85,6 +86,7 @@ pub fn dispatch(
         ),
         SessionCommand::Label { command } => dispatch_label(command),
         SessionCommand::Note { command } => dispatch_note(command, cd_file),
+        SessionCommand::Env { command } => env::dispatch_env(command),
     }
 }
 

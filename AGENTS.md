@@ -25,6 +25,7 @@ src/
   session/          Session lifecycle + tree hierarchy
     from_dirty.rs   Session creation from dirty changes (stash workflow)
     notes.rs        Per-session notes directory management
+    env.rs          Session env CLI (set/list/unset)
   plugin/           Plugin execution engine
   browser/          Interactive fzf browser
 plugins/            Bundled plugin scripts
@@ -50,7 +51,8 @@ docs/               Documentation
 - `from_dirty.rs`: session creation from dirty changes (stash workflow)
 - `notes.rs`: per-session notes directory (`<data_dir>/ez/repos/<repo-id>/notes/<session-id>/README.md`); `ensure_notes_dir`, `open_note`, `delete_notes_dir`, `notes_readme_exists`
 - `current.rs`: current-session detection from tmux `@ez_session_name` + `@ez_repo_id` (preferred) with fallback to `@ez_session_path` and worktree paths
-- `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session, note dispatch
+- `env.rs`: `ez session env {set|list|unset}` — set, list, and unset environment variables on a session
+- `mod.rs`: new, register existing worktree, delete, enter, exit, rename, ensure_default_session, note dispatch, env dispatch
 
 ### plugin/ - Plugin System
 - `model.rs`: `PluginManifest`, `HookType` enum (14 hook types including `OnBind`, `OnView`, `OnViewSelect`, `OnNameResolve`), `PluginBind`, `PluginView`, `ConfigField`

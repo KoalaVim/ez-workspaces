@@ -253,6 +253,12 @@ pub enum SessionCommand {
         #[command(subcommand)]
         command: SessionNoteCommand,
     },
+
+    /// Manage environment variables on a session
+    Env {
+        #[command(subcommand)]
+        command: SessionEnvCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -344,6 +350,48 @@ pub enum LabelCommand {
     List {
         /// Optional repo name or path — omit to list all labels across repos
         target: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum SessionEnvCommand {
+    /// Set an environment variable on a session
+    Set {
+        /// Environment variable name
+        key: String,
+        /// Environment variable value
+        value: String,
+        /// Session name (default: detect current session)
+        #[arg(long, short)]
+        session: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+    },
+
+    /// List environment variables on a session
+    List {
+        /// Session name (default: detect current session)
+        #[arg(long, short)]
+        session: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
+        /// Output as JSON object
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Remove an environment variable from a session
+    Unset {
+        /// Environment variable name
+        key: String,
+        /// Session name (default: detect current session)
+        #[arg(long, short)]
+        session: Option<String>,
+        /// Repository name or path (default: current repo)
+        #[arg(long, short)]
+        repo: Option<String>,
     },
 }
 

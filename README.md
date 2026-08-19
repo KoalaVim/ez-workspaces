@@ -104,6 +104,18 @@ ez plugin enable kv                        # per-session KoalaVim environments
 
 Custom plugins use a JSON-over-stdio protocol. See the [Plugin Guide](docs/plugin-guide.md).
 
+## Session environment
+
+Set, list, or unset per-session environment variables (exported when you enter a session):
+
+```bash
+ez session env set AWS_PROFILE staging          # current session
+ez session env set AWS_PROFILE staging --session feature-x
+ez session env list
+ez session env list --json
+ez session env unset AWS_PROFILE
+```
+
 ## Suggested Aliases
 
 ```bash
