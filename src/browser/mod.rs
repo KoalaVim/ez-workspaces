@@ -557,7 +557,11 @@ pub(crate) fn session_action_loop(
                 let selected = rendered[idx].session;
                 match key.as_str() {
                     key if key == keybinds.new_session => {
-                        match session::name_builder::prompt_session_name(selector, config)? {
+                        match session::name_builder::prompt_session_name(
+                            selector,
+                            config,
+                            Some(&repo_entry.path),
+                        )? {
                             session::name_builder::NamePromptResult::Done { name, pr_metadata } => {
                                 let env = pr_metadata
                                     .as_ref()
@@ -599,7 +603,11 @@ pub(crate) fn session_action_loop(
                         }
                     }
                     key if key == keybinds.new_bare_session => {
-                        match session::name_builder::prompt_session_name(selector, config)? {
+                        match session::name_builder::prompt_session_name(
+                            selector,
+                            config,
+                            Some(&repo_entry.path),
+                        )? {
                             session::name_builder::NamePromptResult::Done { name, .. } => {
                                 let created = session::create_child_session(
                                     &repo_entry.id,
@@ -638,7 +646,11 @@ pub(crate) fn session_action_loop(
                         }
                     }
                     key if key == keybinds.session_from_dirty => {
-                        match session::name_builder::prompt_session_name(selector, config)? {
+                        match session::name_builder::prompt_session_name(
+                            selector,
+                            config,
+                            Some(&repo_entry.path),
+                        )? {
                             session::name_builder::NamePromptResult::Done { name, .. } => {
                                 match session::from_dirty::session_from_dirty_inner(
                                     &name, None, None,

@@ -1,10 +1,4 @@
-# PR Checkout
-
-## Purpose
-
-Enable creating sessions from GitHub PR URLs with full branch resolution and remote tracking.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: PR branch resolution via gh CLI
 The "From GitHub PR" name builder mode SHALL use `gh pr view <ref> --json headRefName,number,url` to resolve the PR's actual branch name, number, and canonical URL, where `<ref>` is either the pasted PR URL or the entered PR number. The command SHALL run with the repo root as its working directory when repo context is available, so that a bare PR number resolves against the repo's own GitHub remote. The session name SHALL be set to the PR's branch name (not `pr<number>`). The PR number and URL SHALL be stored in `session.env` as `ez_pr_number` and `ez_pr_url`; when the input was a bare number, `ez_pr_url` SHALL be the `url` reported by `gh`.
