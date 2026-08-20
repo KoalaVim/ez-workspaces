@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+#
+# ez-workspaces plugin: maps an ez session onto a herdr workspace.
+#
+# Division of labour, and the reason this plugin is thin: ez owns worktrees —
+# creation, the feat/fix/chore name stages, labels, LRU, from-dirty — and herdr
+# owns what runs inside one. herdr discovers ez's worktrees on its own, because
+# they are plain git worktrees, so nothing here has to teach herdr about them.
+# All this does is open and focus.
+#
+# Nothing creates a worktree here on purpose. `new_worktree` is unbound in
+# ../../herdr/config.toml for the same reason: herdr's own worktree creation
+# puts checkouts under ~/.herdr/worktrees, which ez would never list.
+#
+# Modelled on the bundled zellij plugin, minus its ~100 lines of socket-name
+# budgeting — herdr addresses workspaces by id, so there is no name length
+# limit to work around.
+set -euo pipefail
+
+REQUEST=$(cat)
+
+HOOK=$(jq -r '.hook' <<<"$REQUEST")
+REPO_PATH=$(jq -r '.repo.path // empty' <<<"$REQUEST")
+SESSION_NAME=$(jq -r '.session.name // empty' <<<"$REQUEST")
+SESSION_PATH=$(jq -r '.session.path // .repo.path' <<<"$REQUEST")
+AUTO_OPEN=$(jq -r '.config.user_config.auto_open // "false"' <<<"$REQUEST")
+CLOSE_ON_DELETE=$(jq -r '.config.user_config.close_workspace_on_delete // "true"' <<<"$REQUEST")
+
+ok() { echo '{"success": true}'; }
+
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    printf '[herdr] %s\n' "$*" >>"$EZ_PLUGIN_DEBUG_LOG"
+}
+
+herdr_available() { command -v herdr >/dev/null 2>&1; }
+
+# Deliberately not `herdr status | grep -q`. Under `set -o pipefail` that is a
+# trap: grep -q exits at the first match, the closed pipe kills `herdr status`
+# with SIGPIPE, and pipefail reports 141 for a pipeline that actually matched.
+# The check then fails exactly when the server *is* running.
+server_running() {
+    local out
+    out=$(herdr status 2>/dev/null) || return 1
+    case $out in
+    *"status: running"*) return 0 ;;
+    *) return 1 ;;
+    esac
+}
+
+# The workspace id herdr has open for a checkout path, empty if none.
+#
+# `worktree list` is the authoritative mapping — it reports open_workspace_id
+# per checkout — and it is asked from the repo root because herdr resolves the
+# worktree set relative to a repo, not to a linked checkout.
+workspace_for_path() {
+    local path="$1"
+    herdr worktree list --cwd "$REPO_PATH" 2>/dev/null |
+        jq -r --arg p "$path" '
+            (.result.worktrees // [])
+            | map(select(.path == $p))
+            | .[0].open_workspace_id // empty
+        ' 2>/dev/null || true
+}
+
+# Fallback for when the worktree directory is already gone (the git-worktree
+# plugin runs before herdr and removes it): the workspace is still open, so
+# `workspace list` reports it with the original checkout_path.
+workspace_by_checkout() {
+    local path="$1"
+    herdr workspace list 2>/dev/null |
+        jq -r --arg p "$path" '
+            (.result.workspaces // [])
+            | map(select(.worktree.checkout_path == $p))
+            | .[0].workspace_id // empty
+        ' 2>/dev/null || true
+}
+
+# Open-or-focus, in one call.
+#
+# `herdr worktree open` is idempotent: it reports already_open=false the first
+# time and already_open=true afterwards, without creating a second workspace.
+# It also covers the default (non-worktree) session, where session.path is the
+# repo root and --cwd and --path are the same directory.
+#
+# --cwd must be the repo root. Passing a linked worktree as the source fails
+# with linked_worktree_source: "New and open worktree actions start from the
+# repo parent workspace."
+open_cmd() {
+    printf 'herdr worktree open --cwd %q --path %q --focus >/dev/null 2>&1' \
+        "$REPO_PATH" "$SESSION_PATH"
+}
+
+# A multiplexer that is not installed, or not running, must never be the reason
+# an ez session fails to be created. The bundled plugins take the same line.
+guard() {
+    if ! herdr_available; then
+        dbg "herdr not on PATH, skipping"
+        return 1
+    fi
+    if ! server_running; then
+        dbg "no herdr server running, skipping"
+        return 1
+    fi
+    return 0
+}
+
+case "$HOOK" in
+on_session_create)
+    # Deliberately does not open anything. A new ez session is usually created
+    # from the picker and entered immediately afterwards, and on_session_enter
+    # is where opening belongs — otherwise every `ez session new` would steal
+    # focus in a herdr session the user is working in.
+    jq -n --arg p "$SESSION_PATH" \
+        '{success: true, session_mutations: {plugin_state: {herdr_path: $p}}}'
+    ;;
+
+on_session_enter)
+    # post_shell_commands, not shell_commands: this changes what the user's
+    # terminal is looking at, so it has to run in their shell after ez exits.
+    if [ "$AUTO_OPEN" = "true" ] && guard; then
+        jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd]}'
+    else
+        ok
+    fi
+    ;;
+
+on_bind)
+    # alt-h in the picker, and `on_enter = "herdr"` in config, both land here.
+    if guard; then
+        jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd]}'
+    else
+        # Reached only when herdr is absent or stopped; ez falls back to cd.
+        ok
+    fi
+    ;;
+
+on_session_delete)
+    if [ "$CLOSE_ON_DELETE" = "true" ] && guard; then
+        ws=$(workspace_for_path "$SESSION_PATH")
+        [ -n "$ws" ] || ws=$(workspace_by_checkout "$SESSION_PATH")
+        if [ -n "$ws" ]; then
+            dbg "closing herdr workspace $ws for $SESSION_PATH"
+            herdr workspace close "$ws" >/dev/null 2>&1 || true
+        else
+            dbg "no open herdr workspace for $SESSION_PATH"
+        fi
+    fi
+    ok
+    ;;
+
+on_session_rename)
+    # herdr labels a worktree workspace from the checkout directory, which ez
+    # does not move on rename, so the label is relabelled explicitly.
+    if guard; then
+        new_name=$(jq -r '.rename_context.new_name // empty' <<<"$REQUEST")
+        # Look the workspace up by old_path: the git-worktree plugin declares
+        # mutates_session_path, so a rename can move the checkout and
+        # session.path may already be the new one.
+        old_path=$(jq -r '.rename_context.old_path // empty' <<<"$REQUEST")
+        ws=$(workspace_for_path "${old_path:-$SESSION_PATH}")
+        [ -n "$ws" ] || ws=$(workspace_for_path "$SESSION_PATH")
+        if [ -n "$ws" ] && [ -n "$new_name" ]; then
+            dbg "renaming herdr workspace $ws -> $new_name"
+            herdr workspace rename "$ws" "$new_name" >/dev/null 2>&1 || true
+        fi
+    fi
+    ok
+    ;;
+
+on_session_exit)
+    # Leaving an ez session should not tear down the workspace: the whole point
+    # of herdr is that panes and agents keep running while you look elsewhere.
+    ok
+    ;;
+
+*)
+    ok
+    ;;
+esac

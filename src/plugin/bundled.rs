@@ -58,6 +58,12 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
         executable_name: "kv-plugin",
         executable: include_str!("../../plugins/kv/kv-plugin"),
     },
+    BundledPlugin {
+        name: "herdr",
+        manifest: include_str!("../../plugins/herdr/manifest.toml"),
+        executable_name: "herdr-plugin",
+        executable: include_str!("../../plugins/herdr/herdr-plugin"),
+    },
 ];
 
 /// Ensure all bundled plugins are extracted to the plugins directory.
