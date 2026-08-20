@@ -22,6 +22,12 @@ pub fn preview(path: &Path, show_session_actions: bool, session_id: Option<&str>
 
     if show_session_actions {
         if let Some(sid) = session_id {
+            if sid == "__header__" {
+                return Ok(());
+            }
+            if let Some(wt_path_str) = sid.strip_prefix("__unmanaged__:") {
+                return preview_unmanaged_worktree(std::path::Path::new(wt_path_str));
+            }
             return preview_session(path, sid);
         }
     }
@@ -175,6 +181,66 @@ fn preview_session(repo_path: &Path, session_id: &str) -> Result<()> {
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+fn preview_unmanaged_worktree(path: &Path) -> Result<()> {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    println!(
+        "{} {} {}",
+        "■".dimmed(),
+        name.bold(),
+        "(not registered)".dimmed()
+    );
+    println!("{}", path.display().to_string().dimmed());
+    println!();
+
+    if path.exists() {
+        preview_section("Git Info");
+        let branch = get_branch(path).unwrap_or_else(|| "detached".into());
+        println!("  {} {}", "branch:".bold(), branch.cyan());
+
+        let dirty_count = git_cmd(path, &["status", "--porcelain"])
+            .map(|s| s.lines().count())
+            .unwrap_or(0);
+        if dirty_count > 0 {
+            println!(
+                "  {} {}",
+                "status:".bold(),
+                format!("{dirty_count} modified file(s)").yellow()
+            );
+        } else {
+            println!("  {} {}", "status:".bold(), "clean".green());
+        }
+
+        println!();
+        println!(
+            "  {}",
+            "Press Enter to register as a session".bold().green()
+        );
+
+        println!();
+        preview_section("Recent Commits");
+        if let Some(log) = git_cmd(
+            path,
+            &["log", "--oneline", "--decorate", "--no-color", "-8"],
+        ) {
+            for line in log.lines() {
+                if let Some((hash, msg)) = line.split_once(' ') {
+                    println!("  {} {}", hash.yellow(), msg);
+                } else {
+                    println!("  {line}");
+                }
+            }
+        }
+    } else {
+        println!("  {}", "Worktree path does not exist".red());
     }
 
     Ok(())

@@ -1628,3 +1628,295 @@ pub fn ensure_default_session(repo_id: &str, repo_path: &Path) -> Result<Session
     }
     Ok(tree)
 }
+
+/// A git worktree that exists on disk but is not tracked as an ez session.
+#[derive(Debug, Clone)]
+pub struct UnmanagedWorktree {
+    pub path: PathBuf,
+    pub branch: Option<String>,
+}
+
+/// Detect git worktrees not tracked as ez sessions.
+///
+/// Runs `git worktree list --porcelain`, subtracts the main repo path and
+/// any path already used by a session. Skips non-git repos.
+pub fn list_unmanaged_worktrees(
+    repo_entry: &repo::model::RepoEntry,
+    tree: &SessionTree,
+) -> Vec<UnmanagedWorktree> {
+    if !repo_entry.is_git {
+        return Vec::new();
+    }
+
+    let output = match Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(&repo_entry.path)
+        .output()
+    {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            log::debug!("list_unmanaged_worktrees: git worktree list failed: {stderr}");
+            return Vec::new();
+        }
+        Err(e) => {
+            log::debug!("list_unmanaged_worktrees: failed to run git: {e}");
+            return Vec::new();
+        }
+    };
+
+    let worktrees = parse_worktree_list_porcelain(&output);
+
+    let repo_canonical = repo_entry.path.canonicalize().ok();
+
+    // Also exclude the git-common-dir (handles submodules where the bare repo
+    // at .git/modules/<name> appears as a worktree entry).
+    let git_common_canonical = git_output(&repo_entry.path, &["rev-parse", "--git-common-dir"])
+        .ok()
+        .map(|d| {
+            let p = PathBuf::from(&d);
+            if p.is_absolute() {
+                p
+            } else {
+                repo_entry.path.join(p)
+            }
+        })
+        .and_then(|p| p.canonicalize().ok());
+
+    let managed_paths: Vec<PathBuf> = tree
+        .sessions
+        .iter()
+        .filter_map(|s| s.path.as_ref())
+        .filter_map(|p| p.canonicalize().ok())
+        .collect();
+
+    worktrees
+        .into_iter()
+        .filter(|wt| {
+            let canonical = match wt.path.canonicalize() {
+                Ok(c) => c,
+                Err(_) => {
+                    log::debug!(
+                        "list_unmanaged_worktrees: prunable (path gone): {}",
+                        wt.path.display()
+                    );
+                    return false;
+                }
+            };
+            if repo_canonical.as_ref() == Some(&canonical) {
+                return false;
+            }
+            if git_common_canonical.as_ref() == Some(&canonical) {
+                log::debug!(
+                    "list_unmanaged_worktrees: skipping git-common-dir: {}",
+                    wt.path.display()
+                );
+                return false;
+            }
+            if managed_paths.contains(&canonical) {
+                return false;
+            }
+            true
+        })
+        .collect()
+}
+
+/// Parse `git worktree list --porcelain` output into worktree entries.
+///
+/// Each block is separated by a blank line and contains lines like:
+///   worktree /path/to/wt
+///   HEAD abc123...
+///   branch refs/heads/feature
+/// or:
+///   worktree /path/to/wt
+///   HEAD abc123...
+///   detached
+fn parse_worktree_list_porcelain(output: &str) -> Vec<UnmanagedWorktree> {
+    let mut result = Vec::new();
+    let mut current_path: Option<PathBuf> = None;
+    let mut current_branch: Option<String> = None;
+    let mut is_detached = false;
+    let mut head_sha: Option<String> = None;
+
+    for line in output.lines() {
+        if line.is_empty() {
+            if let Some(path) = current_path.take() {
+                let branch = if is_detached {
+                    head_sha.as_ref().map(|sha| {
+                        if sha.len() > 7 {
+                            sha[..7].to_string()
+                        } else {
+                            sha.clone()
+                        }
+                    })
+                } else {
+                    current_branch.take()
+                };
+                result.push(UnmanagedWorktree { path, branch });
+            }
+            current_branch = None;
+            is_detached = false;
+            head_sha = None;
+            continue;
+        }
+
+        if let Some(rest) = line.strip_prefix("worktree ") {
+            current_path = Some(PathBuf::from(rest));
+        } else if let Some(rest) = line.strip_prefix("HEAD ") {
+            head_sha = Some(rest.to_string());
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            current_branch = rest.strip_prefix("refs/heads/").map(|s| s.to_string());
+        } else if line == "detached" {
+            is_detached = true;
+        }
+    }
+
+    // Handle last block (porcelain output may not end with a blank line)
+    if let Some(path) = current_path.take() {
+        let branch = if is_detached {
+            head_sha.as_ref().map(|sha| {
+                if sha.len() > 7 {
+                    sha[..7].to_string()
+                } else {
+                    sha.clone()
+                }
+            })
+        } else {
+            current_branch.take()
+        };
+        result.push(UnmanagedWorktree { path, branch });
+    }
+
+    result
+}
+
+/// Register a worktree as a session inline (from the browser), without running
+/// OnSessionCreate hooks. Returns the created session.
+pub fn register_worktree_inline(
+    repo_id: &str,
+    worktree_path: &Path,
+    branch: Option<&str>,
+) -> Result<Session> {
+    let mut tree = store::load_sessions(repo_id)?;
+
+    let base_name = branch
+        .map(|b| b.to_string())
+        .or_else(|| {
+            worktree_path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| "worktree".to_string());
+
+    let session_name = if tree.find_by_name(&base_name).is_some() {
+        let mut suffix = 2;
+        loop {
+            let candidate = format!("{base_name}-{suffix}");
+            if tree.find_by_name(&candidate).is_none() {
+                break candidate;
+            }
+            suffix += 1;
+        }
+    } else {
+        base_name.clone()
+    };
+
+    let parent_id = tree.find_default().map(|s| s.id.clone());
+
+    let mut plugin_state = HashMap::new();
+    plugin_state.insert(
+        "worktree_path".to_string(),
+        toml::Value::String(worktree_path.display().to_string()),
+    );
+    if let Some(b) = branch {
+        plugin_state.insert("branch".to_string(), toml::Value::String(b.to_string()));
+    }
+
+    let session = Session {
+        id: Uuid::new_v4().to_string(),
+        name: session_name,
+        parent_id,
+        path: Some(worktree_path.to_path_buf()),
+        env: HashMap::new(),
+        plugin_state,
+        labels: Vec::new(),
+        created_at: Utc::now(),
+        is_default: false,
+        bare: false,
+        last_accessed: None,
+    };
+
+    tree.add(session.clone())?;
+    store::save_sessions(repo_id, &tree)?;
+
+    log::debug!(
+        "register_worktree_inline: registered '{}' -> {}",
+        session.name,
+        worktree_path.display()
+    );
+
+    Ok(session)
+}
+
+#[cfg(test)]
+mod worktree_tests {
+    use super::*;
+
+    #[test]
+    fn parse_porcelain_multiple_worktrees() {
+        let output = "\
+worktree /Users/me/repo
+HEAD abc1234567890
+branch refs/heads/main
+
+worktree /Users/me/.ez/repo/feature
+HEAD def4567890123
+branch refs/heads/feature
+
+worktree /Users/me/.ez/repo/experiment
+HEAD 9876543210abc
+branch refs/heads/experiment
+";
+        let result = parse_worktree_list_porcelain(output);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].path, PathBuf::from("/Users/me/repo"));
+        assert_eq!(result[0].branch.as_deref(), Some("main"));
+        assert_eq!(result[1].path, PathBuf::from("/Users/me/.ez/repo/feature"));
+        assert_eq!(result[1].branch.as_deref(), Some("feature"));
+        assert_eq!(
+            result[2].path,
+            PathBuf::from("/Users/me/.ez/repo/experiment")
+        );
+        assert_eq!(result[2].branch.as_deref(), Some("experiment"));
+    }
+
+    #[test]
+    fn parse_porcelain_detached_head() {
+        let output = "\
+worktree /Users/me/repo
+HEAD abc1234567890
+branch refs/heads/main
+
+worktree /Users/me/.ez/repo/detached
+HEAD deadbeef12345
+detached
+";
+        let result = parse_worktree_list_porcelain(output);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[1].branch.as_deref(), Some("deadbee"));
+    }
+
+    #[test]
+    fn parse_porcelain_no_trailing_newline() {
+        let output = "worktree /Users/me/repo\nHEAD abc1234567890\nbranch refs/heads/main";
+        let result = parse_worktree_list_porcelain(output);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn parse_porcelain_empty() {
+        let result = parse_worktree_list_porcelain("");
+        assert!(result.is_empty());
+    }
+}
