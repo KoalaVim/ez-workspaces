@@ -88,6 +88,26 @@ Plugin views SHALL be provided by enabled plugins via manifest `[[views]]` entri
 ### Requirement: Session action loop
 When a repo is selected, the browser SHALL enter a session action loop that repeatedly shows the repo's sessions as a tree with box-drawing tree connectors (`├──`, `└──`, `│`) and handles keybind actions until the user selects a session (Enter) or cancels (Escape). The loop re-renders after each action to show updated state. Sessions SHALL be rendered with tree glyphs matching the indentation style used in the Tree view. The loop SHALL support additional keybinds: `Alt-Shift-N` for bare session creation, `alt-s` for session-from-dirty, `ctrl-s` for sort toggle, `alt-i` for opening the session's note in the configured editor, and `alt-I` for cd-ing to the session's notes directory.
 
+After the managed session items, the picker SHALL append a "Not Registered" section showing non-managed git worktrees detected via `git worktree list`. These items SHALL appear below a non-interactive header line reading "Not Registered". Each non-managed worktree SHALL display the branch name (dimmed) and worktree path (dimmed). Selecting a non-managed worktree SHALL register it as a session under the default (main) session and enter it using the configured `on_enter` action. The "Not Registered" section SHALL only appear when there are non-managed worktrees to show.
+
+#### Scenario: Non-managed worktrees shown below sessions
+- **WHEN** a repo has git worktrees not tracked as sessions
+- **THEN** the session picker shows them below managed sessions under a "Not Registered" header
+- **AND** each item displays the branch name and path, visually dimmed
+
+#### Scenario: Select non-managed worktree registers and enters
+- **WHEN** user selects a non-managed worktree in the picker
+- **THEN** system registers it as a session (child of default session) and enters it via `on_enter`
+- **AND** on the next render, the worktree appears as a normal managed session
+
+#### Scenario: No non-managed worktrees hides section
+- **WHEN** all git worktrees are tracked as sessions
+- **THEN** the "Not Registered" section does not appear in the picker
+
+#### Scenario: Non-interactive header line
+- **WHEN** user selects the "Not Registered" header line
+- **THEN** nothing happens (the loop re-renders)
+
 #### Scenario: Select session
 - **WHEN** user presses Enter on a session
 - **THEN** system runs the `on_enter` action (default: cd into session path)
