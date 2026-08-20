@@ -56,19 +56,23 @@ TMUX_SESSION=$(echo "$TMUX_SESSION" | tr '.:' '__')
 # prefix and "foo/bar" would match "foo/bar-baz".
 TMUX_SESSION_TARGET="=${TMUX_SESSION}"
 
-# Build `-e KEY=VALUE` flags from session.env for tmux new-session.
-# Populates the ENV_FLAGS array.
-build_env_flags() {
-    ENV_FLAGS=()
-    local env_pairs
-    env_pairs=$(echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)=\(.value)"')
-    if [ -n "$env_pairs" ]; then
-        while IFS= read -r pair; do
-            [ -z "$pair" ] && continue
-            ENV_FLAGS+=(-e "$pair")
-        done <<< "$env_pairs"
+# Set session-scoped environment variables via `tmux set-environment -t`.
+# This avoids the global env pollution caused by `new-session -e`.
+# Args: $1 = tmux session target (with or without "=" prefix)
+apply_session_env() {
+    local sess="${1#=}"
+    local sid
+    sid=$(tmux list-sessions -F '#{session_id}' -f "#{==:#{session_name},${sess}}" 2>/dev/null)
+    if [ -z "$sid" ]; then
+        dbg "apply_session_env: session '${sess}' not found, skipping"
+        return 0
     fi
-    dbg "env_flags: ${ENV_FLAGS[*]:-<none>}"
+    dbg "apply_session_env: resolved '${sess}' -> '${sid}'"
+    echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key val; do
+        [ -z "$key" ] && continue
+        tmux set-environment -t "$sid" "$key" "$val" 2>/dev/null || true
+        dbg "set-environment -t $sid $key=$val"
+    done
 }
 
 # Mark a tmux session as ez-managed by setting user options.
@@ -110,8 +114,8 @@ case "$HOOK" in
             fi
 
             if ! tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
-                build_env_flags
-                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" ${ENV_FLAGS[@]+"${ENV_FLAGS[@]}"} >/dev/null || true
+                dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" >/dev/null || true
+                apply_session_env "${TMUX_SESSION_TARGET}"
             else
                 dbg "session already exists, skipping new-session"
             fi
@@ -155,13 +159,10 @@ case "$HOOK" in
             ATTACH="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION_TARGET}\"; else tmux attach-session -t \"${TMUX_SESSION_TARGET}\"; fi"
             if tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
                 COMMANDS+=("$ATTACH")
+                # Push session-scoped env vars so new panes inherit them
+                apply_session_env "${TMUX_SESSION_TARGET}"
             else
-                ENV_ARGS=""
-                while IFS= read -r pair; do
-                    [ -z "$pair" ] && continue
-                    ENV_ARGS+=" -e '${pair}'"
-                done < <(echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)=\(.value)"')
-                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\"${ENV_ARGS} && ${ATTACH}")
+                COMMANDS+=("tmux new-session -d -s \"${TMUX_SESSION}\" -c \"${SESSION_PATH}\" && ${ATTACH}")
             fi
         fi
 
@@ -213,17 +214,10 @@ case "$HOOK" in
             exit 0
         fi
 
-        build_env_flags
         if ! tmux has-session -t "${TMUX_SESSION_TARGET}" 2>/dev/null; then
-            tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" ${ENV_FLAGS[@]+"${ENV_FLAGS[@]}"} 2>&1 >&2 || true
-        else
-            # Session already exists — push env vars so new panes inherit them
-            echo "$REQUEST" | jq -r '.session.env // {} | to_entries[] | "\(.key)\t\(.value)"' | while IFS=$'\t' read -r key val; do
-                [ -z "$key" ] && continue
-                tmux set-environment -t "${TMUX_SESSION_TARGET}" "$key" "$val" 2>/dev/null || true
-                dbg "set-environment -t $TMUX_SESSION $key=$val"
-            done
+            dbg_tmux new-session -d -s "$TMUX_SESSION" -c "$SESSION_PATH" 2>&1 >&2 || true
         fi
+        apply_session_env "${TMUX_SESSION_TARGET}"
         mark_ez_managed "${TMUX_SESSION_TARGET}"
 
         CMD="if [ -n \"\$TMUX\" ]; then tmux switch-client -t \"${TMUX_SESSION_TARGET}\"; else tmux attach-session -t \"${TMUX_SESSION_TARGET}\"; fi"
