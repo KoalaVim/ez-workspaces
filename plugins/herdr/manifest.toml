@@ -1,0 +1,39 @@
+name = "herdr"
+version = "0.1.0"
+description = "Manages herdr workspaces for ez sessions"
+hooks = [
+    "on_session_create",
+    "on_session_delete",
+    "on_session_enter",
+    "on_session_exit",
+    "on_session_rename",
+    "on_bind",
+]
+executable = "herdr-plugin"
+
+# In the session picker: alt-h opens the selected session's worktree as a herdr
+# workspace. Distinct from the tmux plugin's alt-a and the zellij plugin's
+# alt-z, so all three can be enabled at once.
+#
+# ez silently drops a bind whose key collides with a core keybind, and does no
+# cross-plugin collision detection. Taken at time of writing: core ctrl-t/w/e/o/g,
+# ctrl-s, ctrl-d, alt-n, alt-N, alt-d, alt-r, alt-l, alt-s, alt-a; plugins
+# alt-a/ctrl-a (tmux) and alt-z/ctrl-z (zellij).
+[[binds]]
+key = "alt-h"
+name = "herdr_open"
+label = "herdr"
+description = "Open this session as a herdr workspace"
+contexts = ["session"]
+
+[[config_schema]]
+name = "auto_open"
+type = "bool"
+default = false
+description = "Automatically open/focus the herdr workspace when entering a session"
+
+[[config_schema]]
+name = "close_workspace_on_delete"
+type = "bool"
+default = true
+description = "Close the herdr workspace when the ez session is deleted"
