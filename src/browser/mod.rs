@@ -367,8 +367,9 @@ pub(crate) fn session_action_loop(
             SortMode::Lru => tree.render_tree_lru(),
             SortMode::Alpha => tree.render_tree(),
         };
+        let num_managed = rendered.len();
 
-        let session_items: Vec<SelectItem> = rendered
+        let mut all_items: Vec<SelectItem> = rendered
             .iter()
             .map(|node| {
                 let prefix = format_session_tree_line(node).dimmed().to_string();
@@ -423,6 +424,25 @@ pub(crate) fn session_action_loop(
             })
             .collect();
 
+        let unmanaged = session::list_unmanaged_worktrees(repo_entry, &tree);
+        if !unmanaged.is_empty() {
+            all_items.push(SelectItem {
+                display: format!("{}", "── Not Registered ──────────────────────".dimmed()),
+                value: "__header__".to_string(),
+            });
+            for wt in &unmanaged {
+                let name = wt.branch.as_deref().unwrap_or("(detached)");
+                all_items.push(SelectItem {
+                    display: format!(
+                        "  {} {}",
+                        name.dimmed(),
+                        format!("→ {}", wt.path.display()).dimmed()
+                    ),
+                    value: format!("__unmanaged__:{}", wt.path.display()),
+                });
+            }
+        }
+
         let ez_bin = std::env::current_exe().ok();
         let repo_path_str = repo_entry.path.to_string_lossy();
         let preview_cmd = ez_bin.map(|bin| {
@@ -455,7 +475,7 @@ pub(crate) fn session_action_loop(
         }
 
         let action = selector.select_with_actions(
-            &session_items,
+            &all_items,
             &repo_entry.name,
             preview_cmd.as_deref(),
             &expect_keys,
@@ -472,6 +492,40 @@ pub(crate) fn session_action_loop(
         );
 
         match action {
+            ActionResult::Select(idx) if idx >= num_managed => {
+                // Header or unmanaged worktree
+                let item_value = &all_items[idx].value;
+                if item_value == "__header__" {
+                    continue;
+                }
+                if let Some(wt_path_str) = item_value.strip_prefix("__unmanaged__:") {
+                    let wt_path = PathBuf::from(wt_path_str);
+                    let branch = unmanaged
+                        .iter()
+                        .find(|w| w.path == wt_path)
+                        .and_then(|w| w.branch.as_deref());
+                    match session::register_worktree_inline(&repo_entry.id, &wt_path, branch) {
+                        Ok(created) => {
+                            eprintln!("{} {}", "Registered:".green(), created.name.bold());
+                            update_last_accessed(repo_entry, &created.id);
+                            accept_session(
+                                &config.on_enter,
+                                repo_entry,
+                                &created,
+                                &wt_path,
+                                cd_file,
+                                post_cmd_file,
+                                config,
+                            )?;
+                            return Ok(true);
+                        }
+                        Err(e) => {
+                            eprintln!("{} {}", "Register failed:".red(), e);
+                        }
+                    }
+                }
+                continue;
+            }
             ActionResult::Select(idx) => {
                 let selected = rendered[idx].session;
                 update_last_accessed(repo_entry, &selected.id);
@@ -490,6 +544,14 @@ pub(crate) fn session_action_loop(
                     config,
                 )?;
                 return Ok(true);
+            }
+            ActionResult::Action(key, idx) if idx >= num_managed => {
+                // Keybind actions on header/unmanaged items: ignore session-specific actions
+                if key == keybinds.sort_toggle {
+                    sort_mode = sort_mode.toggle();
+                    log::debug!("session_action_loop: sort toggled to {:?}", sort_mode);
+                }
+                continue;
             }
             ActionResult::Action(key, idx) => {
                 let selected = rendered[idx].session;

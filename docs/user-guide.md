@@ -126,6 +126,24 @@ ez session delete
 
 If `ez session new <name>` finds that the branch is already checked out in another git worktree, the git-worktree plugin reports the existing path and suggests `ez session register <path> --name <name>`. Registered worktrees are treated as session worktrees, so deleting that session runs the normal worktree cleanup hook.
 
+#### Unmanaged worktrees ("Not Registered")
+
+The session picker automatically detects git worktrees that exist on disk but aren't tracked as ez sessions. These appear below your managed sessions under a **Not Registered** header:
+
+```
+main ★
+├── feature-auth
+└── fix-typo
+
+Not Registered
+  old-experiment → /path/to/old-experiment
+  stale-branch   → /path/to/stale-branch
+```
+
+Selecting a non-registered worktree **registers it as a session** (under `main`) and enters it in one step. On the next render, it appears as a normal managed session.
+
+This is useful for discovering worktrees created outside of ez (e.g. via `git worktree add`), orphaned worktrees from failed cleanups, or worktrees created by other tools.
+
 #### Interactive session naming
 
 When you create a new session *without* passing a name (`ez session new` with no
