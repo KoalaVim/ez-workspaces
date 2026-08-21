@@ -125,9 +125,18 @@ The system SHALL support enabling and disabling plugins via CLI commands. Enable
 - **WHEN** user runs `ez plugin disable tmux`
 - **THEN** system removes `tmux` from the enabled list and runs `OnPluginDeinit`
 
-#### Scenario: List plugins
+#### Scenario: List plugins as table
 - **WHEN** user runs `ez plugin list`
-- **THEN** system shows all available plugins with their enabled/disabled status
+- **THEN** system SHALL display all available plugins in a table with columns: Name, Status, Description
+- **AND** the table SHALL include a header row with column names
+- **AND** the table SHALL include a separator line between the header and data rows
+- **AND** column widths SHALL adapt to the longest value in each column
+- **AND** the Name column SHALL be colored cyan
+- **AND** the Status column SHALL display "enabled" in green or "disabled" in dimmed text
+
+#### Scenario: No plugins found
+- **WHEN** user runs `ez plugin list` and no plugins exist in the plugins directory
+- **THEN** system SHALL display a warning message with the plugins directory path
 
 ### Requirement: GitHub PR branch resolution hook
 The system SHALL support an `OnPRResolve` hook type that plugins can declare to resolve a GitHub PR URL into a branch name. The hook request SHALL include the PR URL. The hook response SHALL include an optional `branch_name` field. This hook is invoked during the "From GitHub PR" name builder mode to determine which branch the worktree should track.
