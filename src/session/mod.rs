@@ -868,9 +868,41 @@ fn delete_session(
     Ok(())
 }
 
+/// Get the currently authenticated GitHub CLI user's login name, if any.
+pub(crate) fn get_current_gh_user() -> Option<String> {
+    if which::which("gh").is_err() {
+        return None;
+    }
+
+    let output = Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .stderr(Stdio::null())
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let login = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if login.is_empty() {
+                None
+            } else {
+                Some(login)
+            }
+        }
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            log::debug!("get_current_gh_user: gh api user failed: {stderr}");
+            None
+        }
+        Err(e) => {
+            log::debug!("get_current_gh_user: failed to run gh: {e}");
+            None
+        }
+    }
+}
+
 /// Refresh the PR status for a session if it has PR metadata and the status
 /// is stale (older than 5 minutes). Updates the session env in-place.
-fn refresh_pr_status(tree: &mut SessionTree, session_id: &str) {
+pub(crate) fn refresh_pr_status(tree: &mut SessionTree, session_id: &str) {
     let (pr_number, pr_url, needs_refresh) = {
         let session = match tree.sessions.iter().find(|s| s.id == session_id) {
             Some(s) => s,
@@ -1026,6 +1058,9 @@ pub(crate) fn detect_pr_for_session(
                     s.env.insert("ez_pr_status".into(), state.to_lowercase());
                     s.env
                         .insert("ez_pr_status_updated".into(), Utc::now().to_rfc3339());
+                    if let Some(gh_user) = get_current_gh_user() {
+                        s.env.insert("ez_pr_gh_user".into(), gh_user);
+                    }
                 }
                 return true;
             }
@@ -1073,10 +1108,7 @@ fn enter_session(
         &mut tree,
     )?;
 
-    let detected = detect_pr_for_session(&mut tree, &session.id, &repo_entry);
-    if !detected {
-        refresh_pr_status(&mut tree, &session.id);
-    }
+    detect_pr_for_session(&mut tree, &session.id, &repo_entry);
 
     let now = Utc::now().to_rfc3339();
     if let Some(s) = tree.sessions.iter_mut().find(|s| s.id == session.id) {

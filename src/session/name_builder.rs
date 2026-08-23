@@ -35,6 +35,9 @@ impl PrMetadata {
         env.insert("ez_pr_url".into(), self.pr_url.clone());
         env.insert("ez_pr_status".into(), "open".into());
         env.insert("ez_start_point".into(), format!("origin/{}", self.head_ref));
+        if let Some(gh_user) = super::get_current_gh_user() {
+            env.insert("ez_pr_gh_user".into(), gh_user);
+        }
         env
     }
 }

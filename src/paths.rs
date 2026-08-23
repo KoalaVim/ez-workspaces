@@ -44,6 +44,16 @@ pub fn plugins_dir() -> Result<PathBuf> {
     Ok(config_dir()?.join("plugins"))
 }
 
+/// Returns the daemon PID file: ~/.config/ez/daemon.pid
+pub fn daemon_pid_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("daemon.pid"))
+}
+
+/// Returns the daemon log file: ~/.config/ez/daemon.log
+pub fn daemon_log_file() -> Result<PathBuf> {
+    Ok(config_dir()?.join("daemon.log"))
+}
+
 /// Returns the base data directory: <data_dir>/ez/
 /// macOS: ~/Library/Application Support/ez/
 /// Linux: ~/.local/share/ez/

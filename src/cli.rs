@@ -138,6 +138,28 @@ pub enum Command {
         #[arg(long, hide = true)]
         session_id: Option<String>,
     },
+
+    /// Manage the background daemon (PR status updates, etc.)
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCommand {
+    /// Start the daemon in the background
+    Start,
+
+    /// Stop the running daemon
+    Stop,
+
+    /// Show whether the daemon is running
+    Status,
+
+    /// Run the daemon loop in the foreground (internal, used by `start`)
+    #[command(hide = true)]
+    Run,
 }
 
 #[derive(Subcommand)]

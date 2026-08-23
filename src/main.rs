@@ -4,6 +4,7 @@ use colored::Colorize;
 mod browser;
 mod cli;
 mod config;
+mod daemon;
 mod error;
 mod paths;
 mod plugin;
@@ -15,7 +16,17 @@ use cli::{Cli, Command};
 fn main() {
     let cli = Cli::parse();
 
-    let debug_log_path = if cli.debug {
+    let debug_log_path = if matches!(
+        &cli.command,
+        Some(Command::Daemon {
+            command: cli::DaemonCommand::Run
+        })
+    ) {
+        // `ez daemon run` configures its own logger, writing to the daemon
+        // log file instead of stderr; skip the default logger init here so
+        // the daemon doesn't try (and fail) to install a second one.
+        None
+    } else if cli.debug {
         let path = std::env::temp_dir().join(format!("ez-debug-{}.log", std::process::id()));
         let file = std::fs::File::create(&path).expect("failed to create debug log file");
         env_logger::Builder::new()
@@ -36,6 +47,12 @@ fn main() {
 
     if cli.no_color {
         colored::control::set_override(false);
+    }
+
+    // Auto-start the background daemon if it's not running.
+    // Skip when the user is explicitly managing the daemon.
+    if !matches!(cli.command, Some(Command::Daemon { .. })) {
+        daemon::ensure_daemon_running();
     }
 
     let result = match cli.command {
@@ -81,6 +98,7 @@ fn main() {
             }
             browser::preview(&path, session_actions, session_id.as_deref())
         }
+        Some(Command::Daemon { command }) => daemon::dispatch(command),
     };
 
     if let Some(ref log_path) = debug_log_path {
