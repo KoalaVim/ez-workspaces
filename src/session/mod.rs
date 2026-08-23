@@ -762,6 +762,29 @@ pub fn cascade_dirty(repo_id: &str, session_id: &str) -> Result<Vec<String>> {
     Ok(dirty_worktrees(&to_reap))
 }
 
+/// Returns the names of sessions (target + descendants) that have unchecked TODOs in notes.
+/// Used by the TUI to warn the user before performing a forced delete.
+pub fn cascade_unchecked_todos(repo_id: &str, session_id: &str) -> Result<Vec<String>> {
+    let tree = store::load_sessions(repo_id)?;
+    let sid = session_id.to_string();
+    let session = tree
+        .find_by_id(&sid)
+        .ok_or_else(|| EzError::SessionNotFound(session_id.into()))?;
+    let mut to_check: Vec<&model::Session> = tree.descendants(&session.id).into_iter().collect();
+    to_check.push(session);
+    Ok(to_check
+        .iter()
+        .filter_map(|s| {
+            let todos = notes::unchecked_todos(repo_id, &s.id);
+            if todos.is_empty() {
+                None
+            } else {
+                Some(s.name.clone())
+            }
+        })
+        .collect())
+}
+
 fn delete_session(
     name: Option<&str>,
     repo_arg: Option<&str>,
@@ -809,6 +832,23 @@ fn delete_session(
         let dirty = dirty_worktrees(&to_reap);
         if !dirty.is_empty() {
             return Err(EzError::SessionWorktreeDirty { dirty });
+        }
+    }
+
+    if !force {
+        let todos: Vec<String> = to_reap
+            .iter()
+            .filter_map(|s| {
+                let todos = notes::unchecked_todos(&repo_entry.id, &s.id);
+                if todos.is_empty() {
+                    None
+                } else {
+                    Some(s.name.clone())
+                }
+            })
+            .collect();
+        if !todos.is_empty() {
+            return Err(EzError::SessionHasUncheckedTodos { sessions: todos });
         }
     }
 
@@ -1528,6 +1568,23 @@ pub fn delete_session_by_id(
         let dirty = dirty_worktrees(&to_reap);
         if !dirty.is_empty() {
             return Err(EzError::SessionWorktreeDirty { dirty });
+        }
+    }
+
+    if !force {
+        let todos: Vec<String> = to_reap
+            .iter()
+            .filter_map(|s| {
+                let todos = notes::unchecked_todos(repo_id, &s.id);
+                if todos.is_empty() {
+                    None
+                } else {
+                    Some(s.name.clone())
+                }
+            })
+            .collect();
+        if !todos.is_empty() {
+            return Err(EzError::SessionHasUncheckedTodos { sessions: todos });
         }
     }
 

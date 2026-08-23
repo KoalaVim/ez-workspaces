@@ -728,13 +728,26 @@ pub(crate) fn session_action_loop(
                     }
                     key if key == keybinds.delete_session => {
                         let dirty = session::cascade_dirty(&repo_entry.id, &selected.id)?;
-                        let msg = if dirty.is_empty() {
+                        let unchecked =
+                            session::cascade_unchecked_todos(&repo_entry.id, &selected.id)?;
+                        let mut warnings: Vec<String> = Vec::new();
+                        if !dirty.is_empty() {
+                            warnings.push(format!(
+                                "Worktree(s) {:?} have uncommitted changes",
+                                dirty
+                            ));
+                        }
+                        if !unchecked.is_empty() {
+                            warnings.push(format!(
+                                "Session(s) {:?} have {}",
+                                unchecked,
+                                "unchecked TODOs in notes".yellow()
+                            ));
+                        }
+                        let msg = if warnings.is_empty() {
                             format!("Delete session '{}'?", selected.name)
                         } else {
-                            format!(
-                                "Worktree(s) {:?} have uncommitted changes. Delete anyway?",
-                                dirty
-                            )
+                            format!("{}. Delete anyway?", warnings.join(". "))
                         };
                         if selector.confirm(&msg, false)? {
                             session::delete_session_by_id(

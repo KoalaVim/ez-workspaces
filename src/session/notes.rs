@@ -82,3 +82,22 @@ pub fn notes_readme_exists(repo_id: &str, session_id: &str) -> bool {
         .map(|p| p.exists())
         .unwrap_or(false)
 }
+
+/// Return unchecked markdown todo lines (`- [ ] ...`) from a session's notes README.md.
+/// Returns an empty vec if the file doesn't exist or can't be read. Capped at 5 items.
+pub fn unchecked_todos(repo_id: &str, session_id: &str) -> Vec<String> {
+    let readme = match paths::notes_readme(repo_id, session_id) {
+        Ok(p) => p,
+        Err(_) => return Vec::new(),
+    };
+    let content = match std::fs::read_to_string(&readme) {
+        Ok(c) => c,
+        Err(_) => return Vec::new(),
+    };
+    content
+        .lines()
+        .filter(|line| line.trim_start().starts_with("- [ ] "))
+        .map(|line| line.to_string())
+        .take(5)
+        .collect()
+}

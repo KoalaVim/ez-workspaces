@@ -59,7 +59,7 @@ The system SHALL support configurable name stages when creating a session intera
 - **THEN** system presents the mode selection step first, then dispatches to the chosen mode handler
 
 ### Requirement: Delete session
-The system SHALL delete a session by ID, removing it from `sessions.toml`. If the session has children, it SHALL cascade-delete all descendants. Before deleting, the system SHALL check for uncommitted changes in associated worktrees and prompt for confirmation. The system SHALL run `OnSessionDelete` plugin hooks. The system SHALL also delete the session's notes directory from the data dir if it exists, and for cascade deletes, SHALL clean up notes directories for all deleted descendants.
+The system SHALL delete a session by ID, removing it from `sessions.toml`. If the session has children, it SHALL cascade-delete all descendants. Before deleting, the system SHALL check for uncommitted changes in associated worktrees and prompt for confirmation. The system SHALL also check for unchecked markdown todos (`- [ ]`) in the session's notes README.md and block deletion if any are found (unless `--force` is used). The system SHALL run `OnSessionDelete` plugin hooks. The system SHALL also delete the session's notes directory from the data dir if it exists, and for cascade deletes, SHALL clean up notes directories for all deleted descendants.
 
 #### Scenario: Delete leaf session
 - **WHEN** user runs `ez session delete feature-auth`
@@ -72,6 +72,10 @@ The system SHALL delete a session by ID, removing it from `sessions.toml`. If th
 #### Scenario: Dirty worktree warning
 - **WHEN** a session's worktree has uncommitted changes
 - **THEN** system warns about dirty worktrees and requires `--force` or explicit confirmation
+
+#### Scenario: Unchecked todos warning
+- **WHEN** a session's notes README.md contains unchecked markdown todos
+- **THEN** system warns about outstanding todos and requires `--force` or explicit confirmation
 
 #### Scenario: Auto-detect current session for delete
 - **WHEN** user runs `ez session delete` without a name
