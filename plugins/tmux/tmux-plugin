@@ -359,6 +359,25 @@ case "$HOOK" in
         jq -n --arg cmd "$CMD" '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
+    on_attached_sessions)
+        # Report which sessions have an attached tmux client
+        if ! command -v tmux &>/dev/null; then
+            echo '{"success": true, "attached_sessions": []}'
+            exit 0
+        fi
+
+        # Get ez-managed tmux sessions that have at least one client attached
+        ATTACHED_TMUX=$(tmux list-sessions -F '#{session_name}|#{session_attached}|#{@ez_managed}|#{@ez_session_id}' 2>/dev/null \
+            | awk -F'|' '$3 == "1" && $2+0 > 0 { print $4 }' || true)
+
+        if [ -z "$ATTACHED_TMUX" ]; then
+            echo '{"success": true, "attached_sessions": []}'
+        else
+            # Build JSON array of session IDs
+            echo "$ATTACHED_TMUX" | jq -R -s -c '{success: true, attached_sessions: (split("\n") | map(select(length > 0)))}'
+        fi
+        ;;
+
     *)
         echo '{"success": true}'
         ;;

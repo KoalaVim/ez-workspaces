@@ -3,7 +3,7 @@ pub mod model;
 pub mod protocol;
 pub mod runner;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use colored::Colorize;
@@ -402,6 +402,29 @@ fn build_request(
         user_config,
     };
 
+    let sessions_info = if *hook == HookType::OnAttachedSessions {
+        tree.sessions
+            .iter()
+            .map(|s| {
+                let parent = s.parent_id.as_ref().and_then(|pid| tree.find_by_id(pid));
+                SessionInfo {
+                    id: s.id.clone(),
+                    name: s.name.clone(),
+                    parent_id: s.parent_id.clone(),
+                    parent_name: parent.map(|p| p.name.clone()),
+                    parent_is_default: parent.map(|p| p.is_default),
+                    path: s.path.clone(),
+                    env: s.env.clone(),
+                    plugin_state: s.plugin_state.clone(),
+                    is_default: s.is_default,
+                    start_point: None,
+                }
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     HookRequest {
         hook: hook.clone(),
         repo: repo_info,
@@ -411,7 +434,61 @@ fn build_request(
         view_context: None,
         name_resolve_context: None,
         rename_context: None,
+        sessions: sessions_info,
     }
+}
+
+/// Run the OnAttachedSessions hook across enabled plugins and return the
+/// union of all session IDs reported as attached.
+pub fn get_attached_sessions(
+    repo_entry: &RepoEntry,
+    repo_meta: &RepoMeta,
+    tree: &SessionTree,
+    config: &EzConfig,
+) -> HashSet<String> {
+    let mut attached = HashSet::new();
+
+    let plugins_dir = match resolve_plugins_dir(config) {
+        Ok(d) => d,
+        Err(_) => return attached,
+    };
+    let _ = bundled::ensure_bundled_plugins(&plugins_dir);
+
+    for plugin_name in &config.plugins.enabled {
+        let manifest_path = plugins_dir.join(plugin_name).join("manifest.toml");
+        if !manifest_path.exists() {
+            continue;
+        }
+        let manifest: PluginManifest = match fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok())
+        {
+            Some(m) => m,
+            None => continue,
+        };
+        if !manifest.hooks.contains(&HookType::OnAttachedSessions) {
+            continue;
+        }
+        let plugin_dir = plugins_dir.join(plugin_name);
+        let request = build_request(
+            &HookType::OnAttachedSessions,
+            repo_entry,
+            repo_meta,
+            None,
+            tree,
+            plugin_name,
+            config,
+        );
+        match runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout) {
+            Ok(response) => {
+                attached.extend(response.attached_sessions);
+            }
+            Err(e) => {
+                log::debug!("plugin [{}]: OnAttachedSessions failed: {}", plugin_name, e);
+            }
+        }
+    }
+    attached
 }
 
 fn resolve_plugins_dir(config: &EzConfig) -> Result<std::path::PathBuf> {
@@ -544,6 +621,7 @@ pub fn run_view_hook(
         }),
         name_resolve_context: None,
         rename_context: None,
+        sessions: Vec::new(),
     };
 
     runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout)
@@ -591,6 +669,7 @@ pub fn run_view_select_hook(
         }),
         name_resolve_context: None,
         rename_context: None,
+        sessions: Vec::new(),
     };
 
     runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout)
@@ -662,6 +741,7 @@ pub fn run_name_resolve_hook(
                 candidate_name: candidate_name.to_string(),
             }),
             rename_context: None,
+            sessions: Vec::new(),
         };
 
         log::debug!("run_name_resolve_hook: invoking plugin [{}]", plugin_name);

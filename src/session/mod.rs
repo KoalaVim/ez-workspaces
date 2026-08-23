@@ -8,7 +8,7 @@ pub mod notes;
 pub mod store;
 pub mod tree;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -615,7 +615,10 @@ fn list_sessions(repo_arg: Option<&str>, flat: bool, json: bool, all: bool) -> R
         return Ok(());
     }
 
-    print_sessions(&tree, flat);
+    let repo_meta = repo::store::load_repo_meta(&repo_entry.id).unwrap_or_default();
+    let cfg = crate::config::load().unwrap_or_default();
+    let attached = plugin::get_attached_sessions(&repo_entry, &repo_meta, &tree, &cfg);
+    print_sessions(&tree, flat, &attached);
     Ok(())
 }
 
@@ -663,7 +666,10 @@ fn list_all_sessions(flat: bool, json: bool) -> Result<()> {
         if tree.sessions.is_empty() {
             println!("  {}", "no sessions".dimmed());
         } else {
-            print_sessions(&tree, flat);
+            let repo_meta = repo::store::load_repo_meta(&repo_entry.id).unwrap_or_default();
+            let cfg = crate::config::load().unwrap_or_default();
+            let attached = plugin::get_attached_sessions(repo_entry, &repo_meta, &tree, &cfg);
+            print_sessions(&tree, flat, &attached);
         }
         println!();
     }
@@ -691,7 +697,7 @@ fn sessions_json(sessions: &[model::Session]) -> Vec<serde_json::Value> {
 }
 
 /// Render one repo's sessions as a flat list or an indented tree.
-fn print_sessions(tree: &SessionTree, flat: bool) {
+fn print_sessions(tree: &SessionTree, flat: bool, attached: &HashSet<String>) {
     if flat {
         for session in &tree.sessions {
             let default_marker = if session.is_default {
@@ -704,18 +710,12 @@ fn print_sessions(tree: &SessionTree, flat: bool) {
             } else {
                 String::new()
             };
-            let path_info = session
-                .path
-                .as_ref()
-                .map(|p| format!(" ({})", p.display()).dimmed().to_string())
-                .unwrap_or_default();
-            println!(
-                "{}{}{}{}",
-                session.name.bold().yellow(),
-                default_marker,
-                bare_indicator,
-                path_info
-            );
+            let name_colored = if attached.contains(&session.id) {
+                session.name.bold().blue()
+            } else {
+                session.name.bold().yellow()
+            };
+            println!("{}{}{}", name_colored, default_marker, bare_indicator);
         }
     } else {
         let rendered = tree.render_tree();
@@ -726,19 +726,12 @@ fn print_sessions(tree: &SessionTree, flat: bool) {
             } else {
                 String::new()
             };
-            let path_info = node
-                .session
-                .path
-                .as_ref()
-                .map(|p| format!(" ({})", p.display()).dimmed().to_string())
-                .unwrap_or_default();
-            println!(
-                "{}{}{}{}",
-                prefix,
-                node.session.name.bold().yellow(),
-                default_marker,
-                path_info
-            );
+            let name_colored = if attached.contains(&node.session.id) {
+                node.session.name.bold().blue()
+            } else {
+                node.session.name.bold().yellow()
+            };
+            println!("{}{}{}", prefix, name_colored, default_marker);
         }
     }
 }

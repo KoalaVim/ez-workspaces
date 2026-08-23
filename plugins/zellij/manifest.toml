@@ -1,7 +1,7 @@
 name = "zellij"
 version = "0.1.0"
 description = "Manages zellij sessions for workspaces"
-hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_session_rename", "on_bind", "on_view", "on_view_select"]
+hooks = ["on_session_create", "on_session_delete", "on_session_enter", "on_session_exit", "on_session_rename", "on_bind", "on_view", "on_view_select", "on_attached_sessions"]
 executable = "zellij-plugin"
 
 # In the session picker: alt-z creates/attaches to the zellij session for the

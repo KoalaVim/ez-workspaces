@@ -25,6 +25,9 @@ pub struct HookRequest {
     /// Present for OnSessionRename hooks.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rename_context: Option<RenameContext>,
+    /// Present for OnAttachedSessions hooks — all sessions in this repo.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sessions: Vec<SessionInfo>,
 }
 
 /// Context passed to a plugin when one of its registered binds is pressed.
@@ -141,6 +144,9 @@ pub struct HookResponse {
     /// Resolved name from OnNameResolve hook (e.g. branch name from PR).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resolved_name: Option<String>,
+    /// Session IDs reported as attached by OnAttachedSessions hooks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attached_sessions: Vec<String>,
 }
 
 /// An item provided by a plugin for its view.
@@ -190,6 +196,7 @@ mod tests {
             view_prompt: None,
             view_preview_cmd: None,
             resolved_name: None,
+            attached_sessions: Vec::new(),
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: HookResponse = serde_json::from_str(&json).unwrap();

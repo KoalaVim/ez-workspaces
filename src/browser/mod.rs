@@ -369,6 +369,9 @@ pub(crate) fn session_action_loop(
         };
         let num_managed = rendered.len();
 
+        let repo_meta = repo::store::load_repo_meta(&repo_entry.id).unwrap_or_default();
+        let attached = plugin::get_attached_sessions(repo_entry, &repo_meta, &tree, config);
+
         let mut all_items: Vec<SelectItem> = rendered
             .iter()
             .map(|node| {
@@ -378,12 +381,6 @@ pub(crate) fn session_action_loop(
                 } else {
                     String::new()
                 };
-                let path_info = node
-                    .session
-                    .path
-                    .as_ref()
-                    .map(|p| format!(" → {}", p.display()).dimmed().to_string())
-                    .unwrap_or_default();
                 let bare_indicator = if node.session.bare {
                     " [bare]".dimmed().to_string()
                 } else {
@@ -407,17 +404,21 @@ pub(crate) fn session_action_loop(
                             .to_string()
                     })
                     .unwrap_or_default();
+                let name_colored = if attached.contains(&node.session.id) {
+                    node.session.name.bold().blue()
+                } else {
+                    node.session.name.bold().yellow()
+                };
                 SelectItem {
                     display: format!(
-                        "{}{}{}{}{}{}{}{}",
+                        "{}{}{}{}{}{}{}",
                         prefix,
-                        node.session.name.bold().yellow(),
+                        name_colored,
                         marker,
                         bare_indicator,
                         pr_indicator,
                         labels,
-                        last_used,
-                        path_info
+                        last_used
                     ),
                     value: node.session.id.clone(),
                 }

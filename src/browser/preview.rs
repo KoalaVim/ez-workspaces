@@ -279,12 +279,6 @@ fn preview_repo(path: &Path) -> Result<()> {
                 } else {
                     String::new()
                 };
-                let path_info = node
-                    .session
-                    .path
-                    .as_ref()
-                    .map(|p| format!(" → {}", p.display()).dimmed().to_string())
-                    .unwrap_or_default();
                 let labels = if node.session.labels.is_empty() {
                     String::new()
                 } else {
@@ -294,14 +288,13 @@ fn preview_repo(path: &Path) -> Result<()> {
                 };
                 let pr_indicator = format_pr_indicator(&node.session.env);
                 println!(
-                    "{}{}{}{}{}{}{}",
+                    "{}{}{}{}{}{}",
                     indent,
                     prefix,
                     node.session.name.bold().yellow(),
                     marker,
                     pr_indicator,
-                    labels,
-                    path_info
+                    labels
                 );
                 if let Some(url) = node.session.env.get("ez_pr_url") {
                     println!("{}  {}", indent, url.dimmed());

@@ -487,6 +487,40 @@ case "$HOOK" in
             '{success: true, post_shell_commands: [$cmd]}'
         ;;
 
+    on_attached_sessions)
+        # Report which sessions have a running zellij session
+        if ! zellij_available; then
+            echo '{"success": true, "attached_sessions": []}'
+            exit 0
+        fi
+
+        RUNNING=$(running_sessions || true)
+        if [ -z "$RUNNING" ]; then
+            echo '{"success": true, "attached_sessions": []}'
+            exit 0
+        fi
+
+        # Match each ez session's zellij name (via fit_name, the same
+        # helper used to name the session at creation time — this mirrors
+        # any hash-shortening applied when the plain name doesn't fit the
+        # socket path) against the running list.
+        ATTACHED_IDS=""
+        while IFS=$'\t' read -r sid sname; do
+            [ -n "$sid" ] || continue
+            fit_name "$REPO_NAME" "$sname" || continue
+            if [ -n "$FIT_NAME" ] && printf '%s\n' "$RUNNING" | grep -Fxq "$FIT_NAME"; then
+                ATTACHED_IDS="${ATTACHED_IDS}${sid}
+"
+            fi
+        done < <(echo "$REQUEST" | jq -r '.sessions[]? | [.id, .name] | @tsv')
+
+        if [ -z "$ATTACHED_IDS" ]; then
+            echo '{"success": true, "attached_sessions": []}'
+        else
+            printf '%s' "$ATTACHED_IDS" | jq -R -s -c '{success: true, attached_sessions: (split("\n") | map(select(length > 0)))}'
+        fi
+        ;;
+
     *)
         echo '{"success": true}'
         ;;

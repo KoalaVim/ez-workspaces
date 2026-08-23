@@ -101,6 +101,7 @@ pub enum HookType {
     OnView,
     OnViewSelect,
     OnNameResolve,
+    OnAttachedSessions,
 }
 
 impl std::fmt::Display for HookType {
