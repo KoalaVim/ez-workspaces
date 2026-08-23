@@ -1661,6 +1661,72 @@ pub fn ensure_default_session(repo_id: &str, repo_path: &Path) -> Result<Session
     Ok(tree)
 }
 
+/// Remove a git worktree that is not tracked as an ez session.
+///
+/// Strategy: try `git worktree remove [--force]`. If that fails (e.g. the
+/// worktree's `.git` link is broken), fall back to removing the directory
+/// manually and running `git worktree prune` to clean up stale refs.
+pub fn delete_unmanaged_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> Result<()> {
+    let wt_str = worktree_path.to_string_lossy().to_string();
+
+    // Attempt 1: normal remove
+    let mut args = vec!["worktree", "remove"];
+    if force {
+        args.push("--force");
+    }
+    args.push(&wt_str);
+
+    log::debug!(
+        "delete_unmanaged_worktree: git {} in {}",
+        args.join(" "),
+        repo_path.display()
+    );
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(repo_path)
+        .output()?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    log::debug!("delete_unmanaged_worktree: first attempt failed: {}", stderr);
+
+    // Attempt 2: force retry (handles cwd-inside-worktree case)
+    let retry = Command::new("git")
+        .args(["worktree", "remove", "--force", &wt_str])
+        .current_dir(repo_path)
+        .output()?;
+
+    if retry.status.success() {
+        return Ok(());
+    }
+
+    let retry_err = String::from_utf8_lossy(&retry.stderr).trim().to_string();
+    log::debug!("delete_unmanaged_worktree: force retry failed: {}", retry_err);
+
+    // Attempt 3: broken worktree (missing .git link) — remove dir + prune
+    if worktree_path.exists() {
+        log::debug!(
+            "delete_unmanaged_worktree: falling back to rm + prune for {}",
+            worktree_path.display()
+        );
+        std::fs::remove_dir_all(worktree_path)?;
+        let _ = Command::new("git")
+            .args(["worktree", "prune"])
+            .current_dir(repo_path)
+            .output();
+        return Ok(());
+    }
+
+    Err(EzError::Git(format!(
+        "git worktree remove failed: {}",
+        if retry_err.is_empty() { stderr } else { retry_err }
+    )))
+}
+
 /// A git worktree that exists on disk but is not tracked as an ez session.
 #[derive(Debug, Clone)]
 pub struct UnmanagedWorktree {

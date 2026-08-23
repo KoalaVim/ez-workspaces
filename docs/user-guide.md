@@ -142,6 +142,8 @@ Not Registered
 
 Selecting a non-registered worktree **registers it as a session** (under `main`) and enters it in one step. On the next render, it appears as a normal managed session.
 
+Pressing the **delete** keybind on a non-registered worktree removes it with `git worktree remove --force` (after confirmation). If the worktree has uncommitted changes, the confirmation prompt warns you. The associated branch is kept.
+
 This is useful for discovering worktrees created outside of ez (e.g. via `git worktree add`), orphaned worktrees from failed cleanups, or worktrees created by other tools.
 
 #### Interactive session naming

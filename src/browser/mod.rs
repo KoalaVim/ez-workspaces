@@ -546,10 +546,46 @@ pub(crate) fn session_action_loop(
                 return Ok(true);
             }
             ActionResult::Action(key, idx) if idx >= num_managed => {
-                // Keybind actions on header/unmanaged items: ignore session-specific actions
                 if key == keybinds.sort_toggle {
                     sort_mode = sort_mode.toggle();
                     log::debug!("session_action_loop: sort toggled to {:?}", sort_mode);
+                } else if key == keybinds.delete_session {
+                    let item_value = &all_items[idx].value;
+                    if let Some(wt_path_str) = item_value.strip_prefix("__unmanaged__:") {
+                        let wt_path = PathBuf::from(wt_path_str);
+                        let dirty = is_dirty(&wt_path);
+                        let branch_label = unmanaged
+                            .iter()
+                            .find(|w| w.path == wt_path)
+                            .and_then(|w| w.branch.as_deref())
+                            .unwrap_or("(unknown)");
+                        let msg = if dirty {
+                            format!(
+                                "Worktree '{}' has uncommitted changes. Delete anyway?",
+                                branch_label
+                            )
+                        } else {
+                            format!("Delete unregistered worktree '{}'?", branch_label)
+                        };
+                        if selector.confirm(&msg, false)? {
+                            match session::delete_unmanaged_worktree(
+                                &repo_entry.path,
+                                &wt_path,
+                                true,
+                            ) {
+                                Ok(()) => {
+                                    eprintln!(
+                                        "{} {}",
+                                        "Deleted worktree:".green(),
+                                        branch_label.bold()
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("{} {}", "Delete failed:".red(), e);
+                                }
+                            }
+                        }
+                    }
                 }
                 continue;
             }
