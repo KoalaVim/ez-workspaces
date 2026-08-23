@@ -369,7 +369,7 @@ fn resolve_pr_via_gh(
                 head_ref: head_ref.clone(),
             };
 
-            (head_ref, Some(metadata))
+            (format!("pr{number}-{head_ref}"), Some(metadata))
         }
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
