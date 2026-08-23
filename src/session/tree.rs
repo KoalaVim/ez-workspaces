@@ -98,13 +98,25 @@ impl SessionTree {
         result
     }
 
-    /// Render the tree with root sessions sorted by most-recently-accessed first.
-    /// Children within each root subtree preserve their original order.
-    /// Sessions with no `last_accessed` sort to the end.
+    /// Render the tree with sessions sorted by most-recently-accessed first
+    /// at every level (roots and children). Each session's sort key is the most
+    /// recent `last_accessed` across itself and all its descendants, so a
+    /// deeply-nested recent session bubbles its parent up.
+    /// Sessions with no `last_accessed` in their subtree sort to the end.
     pub fn render_tree_lru(&self) -> Vec<TreeNode<'_>> {
         let mut result = Vec::new();
         let mut roots = self.roots();
-        roots.sort_by(|a, b| {
+        self.sort_by_subtree_lru(&mut roots);
+        let num_roots = roots.len();
+        for (i, root) in roots.iter().enumerate() {
+            let is_last = i == num_roots - 1;
+            self.render_subtree_lru(root, 0, is_last, &[], &mut result);
+        }
+        result
+    }
+
+    fn sort_by_subtree_lru(&self, sessions: &mut [&Session]) {
+        sessions.sort_by(|a, b| {
             let a_ts = self.subtree_max_accessed(&a.id);
             let b_ts = self.subtree_max_accessed(&b.id);
             match (&b_ts, &a_ts) {
@@ -114,12 +126,6 @@ impl SessionTree {
                 (None, None) => std::cmp::Ordering::Equal,
             }
         });
-        let num_roots = roots.len();
-        for (i, root) in roots.iter().enumerate() {
-            let is_last = i == num_roots - 1;
-            self.render_subtree(root, 0, is_last, &[], &mut result);
-        }
-        result
     }
 
     /// Find the most recent `last_accessed` timestamp across a session and all
@@ -139,6 +145,35 @@ impl SessionTree {
             }
         }
         max
+    }
+
+    fn render_subtree_lru<'a>(
+        &'a self,
+        session: &'a Session,
+        depth: usize,
+        is_last_sibling: bool,
+        ancestor_has_next: &[bool],
+        result: &mut Vec<TreeNode<'a>>,
+    ) {
+        result.push(TreeNode {
+            depth,
+            session,
+            is_last_sibling,
+            ancestor_has_next: ancestor_has_next.to_vec(),
+        });
+        let mut children = self.children(&session.id);
+        self.sort_by_subtree_lru(&mut children);
+        let num_children = children.len();
+        for (i, child) in children.iter().enumerate() {
+            let child_is_last = i == num_children - 1;
+            let mut child_ancestor = ancestor_has_next.to_vec();
+            if depth > 0 || ancestor_has_next.is_empty() {
+                if depth > 0 {
+                    child_ancestor.push(!is_last_sibling);
+                }
+            }
+            self.render_subtree_lru(child, depth + 1, child_is_last, &child_ancestor, result);
+        }
     }
 
     fn render_subtree<'a>(
@@ -232,6 +267,17 @@ mod tests {
             bare: false,
             last_accessed: None,
         }
+    }
+
+    fn make_session_with_ts(
+        id: &str,
+        name: &str,
+        parent: Option<&str>,
+        last_accessed: &str,
+    ) -> Session {
+        let mut s = make_session(id, name, parent);
+        s.last_accessed = Some(last_accessed.to_string());
+        s
     }
 
     #[test]
@@ -430,5 +476,45 @@ mod tests {
         assert_eq!(lines[1], "├── "); // a
         assert_eq!(lines[2], "└── "); // b
         assert_eq!(lines[3], "    └── "); // c (b is last sibling, no continuation)
+    }
+
+    #[test]
+    fn test_lru_sorts_children_recursively() {
+        // A (30d ago)
+        //     D (5d ago)
+        //         E (5min ago)
+        //     B (9min ago)
+        // C (9min ago)
+        //
+        // Expected LRU order:
+        //   A (bubbled by E at 5min) before C (9min)
+        //   Within A: D (bubbled by E at 5min) before B (9min)
+        let tree = SessionTree {
+            sessions: vec![
+                make_session_with_ts("a", "A", None, "2026-07-24T00:00:00Z"),
+                make_session_with_ts("d", "D", Some("a"), "2026-08-18T00:00:00Z"),
+                make_session_with_ts("e", "E", Some("d"), "2026-08-23T11:55:00Z"),
+                make_session_with_ts("b", "B", Some("a"), "2026-08-23T11:51:00Z"),
+                make_session_with_ts("c", "C", None, "2026-08-23T11:51:00Z"),
+            ],
+        };
+        let rendered = tree.render_tree_lru();
+        let names: Vec<&str> = rendered.iter().map(|n| n.session.name.as_str()).collect();
+        // A first (E bubbles up), then D (E bubbles up), then E, then B, then C
+        assert_eq!(names, vec!["A", "D", "E", "B", "C"]);
+    }
+
+    #[test]
+    fn test_lru_children_no_timestamps_sort_to_end() {
+        let tree = SessionTree {
+            sessions: vec![
+                make_session_with_ts("r", "root", None, "2026-08-23T00:00:00Z"),
+                make_session("x", "no-ts", Some("r")),
+                make_session_with_ts("y", "has-ts", Some("r"), "2026-08-23T12:00:00Z"),
+            ],
+        };
+        let rendered = tree.render_tree_lru();
+        let names: Vec<&str> = rendered.iter().map(|n| n.session.name.as_str()).collect();
+        assert_eq!(names, vec!["root", "has-ts", "no-ts"]);
     }
 }
