@@ -35,7 +35,7 @@ fn list_plugins() -> Result<()> {
     bundled::ensure_bundled_plugins(&plugins_dir)?;
 
     let entries = fs::read_dir(&plugins_dir)?;
-    let mut found = false;
+    let mut rows: Vec<(String, bool, String)> = Vec::new();
 
     for entry in entries.flatten() {
         if entry.file_type()?.is_dir() {
@@ -44,31 +44,48 @@ fn list_plugins() -> Result<()> {
                 if let Ok(contents) = fs::read_to_string(&manifest_path) {
                     if let Ok(manifest) = toml::from_str::<PluginManifest>(&contents) {
                         let enabled = config.plugins.enabled.contains(&manifest.name);
-                        let status = if enabled {
-                            "enabled".green().to_string()
-                        } else {
-                            "disabled".dimmed().to_string()
-                        };
-                        println!(
-                            "{:<20} {:<19} {}",
-                            manifest.name.cyan(),
-                            status,
-                            manifest.description
-                        );
-                        found = true;
+                        rows.push((manifest.name, enabled, manifest.description));
                     }
                 }
             }
         }
     }
 
-    if !found {
+    if rows.is_empty() {
         println!(
             "{} {}",
             "No plugins found in".yellow(),
             plugins_dir.display()
         );
+        return Ok(());
     }
+
+    let status_label = |enabled: bool| if enabled { "enabled" } else { "disabled" };
+    let name_w = rows.iter().map(|(n, _, _)| n.len()).max().unwrap().max(4);
+    let status_w = 8; // "disabled" is the longest status string
+
+    println!(
+        "{:<name_w$}   {:<status_w$}   {}",
+        "Name".bold(),
+        "Status".bold(),
+        "Description".bold(),
+    );
+    println!(
+        "{}   {}   {}",
+        "─".repeat(name_w),
+        "─".repeat(status_w),
+        "─".repeat(11),
+    );
+
+    for (name, enabled, description) in &rows {
+        let status = if *enabled {
+            format!("{:<status_w$}", status_label(true).green())
+        } else {
+            format!("{:<status_w$}", status_label(false).dimmed())
+        };
+        println!("{:<name_w$}   {}   {}", name.cyan(), status, description);
+    }
+
     Ok(())
 }
 
