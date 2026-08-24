@@ -1132,7 +1132,7 @@ fn enter_session(
     }
     let repo_meta = repo::store::load_repo_meta(&repo_entry.id)?;
 
-    plugin::run_hooks(
+    let hook_post_commands = plugin::run_hooks(
         plugin::model::HookType::OnSessionEnter,
         &repo_entry,
         &repo_meta,
@@ -1140,6 +1140,9 @@ fn enter_session(
         &config,
         &mut tree,
     )?;
+    if !hook_post_commands.is_empty() {
+        crate::browser::write_post_commands(post_cmd_file, &hook_post_commands)?;
+    }
 
     detect_pr_for_session(&mut tree, &session.id, &repo_entry);
 

@@ -28,12 +28,6 @@ description = "Open this session as a herdr workspace"
 contexts = ["session"]
 
 [[config_schema]]
-name = "auto_open"
-type = "bool"
-default = false
-description = "Automatically open/focus the herdr workspace when entering a session"
-
-[[config_schema]]
 name = "close_workspace_on_delete"
 type = "bool"
 default = true

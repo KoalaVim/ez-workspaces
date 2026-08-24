@@ -147,6 +147,10 @@ pub struct HookResponse {
     /// Session IDs reported as attached by OnAttachedSessions hooks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attached_sessions: Vec<String>,
+    /// When true on a bind action, accept the session (exit the browser)
+    /// instead of relaunching the picker after running post_shell_commands.
+    #[serde(default)]
+    pub accept: bool,
 }
 
 /// An item provided by a plugin for its view.
@@ -197,6 +201,7 @@ mod tests {
             view_preview_cmd: None,
             resolved_name: None,
             attached_sessions: Vec::new(),
+            accept: false,
         };
         let json = serde_json::to_string(&response).unwrap();
         let parsed: HookResponse = serde_json::from_str(&json).unwrap();

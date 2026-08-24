@@ -848,7 +848,9 @@ pub(crate) fn session_action_loop(
                                 if response.cd_target.is_some()
                                     || !response.post_shell_commands.is_empty()
                                 {
-                                    write_relaunch_marker(post_cmd_file)?;
+                                    if !response.accept {
+                                        write_relaunch_marker(post_cmd_file)?;
+                                    }
                                     return Ok(true);
                                 }
                                 handled = true;

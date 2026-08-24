@@ -23,8 +23,8 @@ HOOK=$(jq -r '.hook' <<<"$REQUEST")
 REPO_PATH=$(jq -r '.repo.path // empty' <<<"$REQUEST")
 SESSION_NAME=$(jq -r '.session.name // empty' <<<"$REQUEST")
 SESSION_PATH=$(jq -r '.session.path // .repo.path' <<<"$REQUEST")
-AUTO_OPEN=$(jq -r '.config.user_config.auto_open // "false"' <<<"$REQUEST")
 CLOSE_ON_DELETE=$(jq -r '.config.user_config.close_workspace_on_delete // "true"' <<<"$REQUEST")
+INSIDE_HERDR=${HERDR_PANE_ID:+true}
 
 ok() { echo '{"success": true}'; }
 
@@ -116,21 +116,24 @@ on_session_create)
     ;;
 
 on_session_enter)
-    # post_shell_commands, not shell_commands: this changes what the user's
-    # terminal is looking at, so it has to run in their shell after ez exits.
-    if [ "$AUTO_OPEN" = "true" ] && guard; then
-        jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd]}'
+    if guard; then
+        jq -n --arg cmd "$(open_cmd)" \
+            --arg p "$SESSION_PATH" \
+            '{success: true, post_shell_commands: [$cmd], session_mutations: {plugin_state: {herdr_path: $p}}}'
     else
-        ok
+        jq -n --arg p "$SESSION_PATH" \
+            '{success: true, session_mutations: {plugin_state: {herdr_path: $p}}}'
     fi
     ;;
 
 on_bind)
-    # alt-h in the picker, and `on_enter = "herdr"` in config, both land here.
     if guard; then
-        jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd]}'
+        if [ "$INSIDE_HERDR" = "true" ]; then
+            jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd], accept: true}'
+        else
+            jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd]}'
+        fi
     else
-        # Reached only when herdr is absent or stopped; ez falls back to cd.
         ok
     fi
     ;;
