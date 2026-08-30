@@ -1719,7 +1719,11 @@ pub fn ensure_default_session(repo_id: &str, repo_path: &Path) -> Result<Session
 /// Strategy: try `git worktree remove [--force]`. If that fails (e.g. the
 /// worktree's `.git` link is broken), fall back to removing the directory
 /// manually and running `git worktree prune` to clean up stale refs.
-pub fn delete_unmanaged_worktree(repo_path: &Path, worktree_path: &Path, force: bool) -> Result<()> {
+pub fn delete_unmanaged_worktree(
+    repo_path: &Path,
+    worktree_path: &Path,
+    force: bool,
+) -> Result<()> {
     let wt_str = worktree_path.to_string_lossy().to_string();
 
     // Attempt 1: normal remove
@@ -1745,7 +1749,10 @@ pub fn delete_unmanaged_worktree(repo_path: &Path, worktree_path: &Path, force: 
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    log::debug!("delete_unmanaged_worktree: first attempt failed: {}", stderr);
+    log::debug!(
+        "delete_unmanaged_worktree: first attempt failed: {}",
+        stderr
+    );
 
     // Attempt 2: force retry (handles cwd-inside-worktree case)
     let retry = Command::new("git")
@@ -1758,7 +1765,10 @@ pub fn delete_unmanaged_worktree(repo_path: &Path, worktree_path: &Path, force: 
     }
 
     let retry_err = String::from_utf8_lossy(&retry.stderr).trim().to_string();
-    log::debug!("delete_unmanaged_worktree: force retry failed: {}", retry_err);
+    log::debug!(
+        "delete_unmanaged_worktree: force retry failed: {}",
+        retry_err
+    );
 
     // Attempt 3: broken worktree (missing .git link) — remove dir + prune
     if worktree_path.exists() {
@@ -1776,7 +1786,11 @@ pub fn delete_unmanaged_worktree(repo_path: &Path, worktree_path: &Path, force: 
 
     Err(EzError::Git(format!(
         "git worktree remove failed: {}",
-        if retry_err.is_empty() { stderr } else { retry_err }
+        if retry_err.is_empty() {
+            stderr
+        } else {
+            retry_err
+        }
     )))
 }
 

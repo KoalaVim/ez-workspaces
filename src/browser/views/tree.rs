@@ -11,7 +11,7 @@ use crate::repo;
 use crate::session;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{accept_session, browse_repo, get_branch};
+use super::super::{accept_session, browse_repo, format_branch_indicator, get_branch};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 /// Distinguishes tree nodes so selection can dispatch to the right action.
@@ -126,14 +126,26 @@ pub(super) fn run(
                                 .cloned()
                                 .unwrap_or_else(|| repo_path.clone());
 
+                            let branch = match node.session.path.as_ref() {
+                                Some(path) => get_branch(path),
+                                None => get_branch(repo_path),
+                            };
+                            let branch_indicator = format_branch_indicator(branch.as_deref());
+                            log::debug!(
+                                "tree view: session={} branch={:?}",
+                                node.session.name,
+                                branch
+                            );
+
                             nodes.push((
                                 format!(
-                                    "{}{}{}{}{}{}",
+                                    "{}{}{}{}{}{}{}",
                                     root_cont.dimmed(),
                                     repo_cont.dimmed(),
                                     sess_connector.dimmed(),
                                     session_prefix.dimmed(),
                                     node.session.name.bold().yellow(),
+                                    branch_indicator,
                                     marker,
                                 ),
                                 NodeKind::Session {

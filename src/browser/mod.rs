@@ -393,6 +393,16 @@ pub(crate) fn session_action_loop(
                         .magenta()
                         .to_string()
                 };
+                let branch = match node.session.path.as_ref() {
+                    Some(path) => get_branch(path),
+                    None => get_branch(&repo_entry.path),
+                };
+                log::debug!(
+                    "session_action_loop: session '{}' branch={:?}",
+                    node.session.name,
+                    branch
+                );
+                let branch_indicator = format_branch_indicator(branch.as_deref());
                 let pr_indicator = format_pr_indicator(&node.session.env);
                 let last_used = node
                     .session
@@ -411,9 +421,10 @@ pub(crate) fn session_action_loop(
                 };
                 SelectItem {
                     display: format!(
-                        "{}{}{}{}{}{}{}",
+                        "{}{}{}{}{}{}{}{}",
                         prefix,
                         name_colored,
+                        branch_indicator,
                         marker,
                         bare_indicator,
                         pr_indicator,
@@ -732,10 +743,8 @@ pub(crate) fn session_action_loop(
                             session::cascade_unchecked_todos(&repo_entry.id, &selected.id)?;
                         let mut warnings: Vec<String> = Vec::new();
                         if !dirty.is_empty() {
-                            warnings.push(format!(
-                                "Worktree(s) {:?} have uncommitted changes",
-                                dirty
-                            ));
+                            warnings
+                                .push(format!("Worktree(s) {:?} have uncommitted changes", dirty));
                         }
                         if !unchecked.is_empty() {
                             warnings.push(format!(
@@ -1057,6 +1066,14 @@ pub(crate) fn format_pr_indicator(env: &std::collections::HashMap<String, String
         }
         (Some(num), None) => format!(" {}", format!("[PR #{num}]").green()),
         _ => String::new(),
+    }
+}
+
+/// Format a git branch indicator for display in the session picker.
+pub(crate) fn format_branch_indicator(branch: Option<&str>) -> String {
+    match branch {
+        Some(name) => format!(" ({name})").truecolor(0, 120, 0).to_string(),
+        None => String::new(),
     }
 }
 

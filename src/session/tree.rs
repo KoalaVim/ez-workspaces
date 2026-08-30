@@ -167,10 +167,8 @@ impl SessionTree {
         for (i, child) in children.iter().enumerate() {
             let child_is_last = i == num_children - 1;
             let mut child_ancestor = ancestor_has_next.to_vec();
-            if depth > 0 || ancestor_has_next.is_empty() {
-                if depth > 0 {
-                    child_ancestor.push(!is_last_sibling);
-                }
+            if depth > 0 {
+                child_ancestor.push(!is_last_sibling);
             }
             self.render_subtree_lru(child, depth + 1, child_is_last, &child_ancestor, result);
         }

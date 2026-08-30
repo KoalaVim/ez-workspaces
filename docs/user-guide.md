@@ -332,7 +332,7 @@ This resolves the current session — from the tmux `@ez_session_path` user opti
 
 > Under tmux, the option is only set when the tmux session is created by the plugin (on `session new`, the `Ctrl-a` bind, or the tmux view). Pre-existing sessions created before this feature won't have it — recreate them or trigger `Ctrl-a` from the picker to stamp it. Under zellij nothing is stamped: identification comes from the session's name, so any session the plugin created is recognized.
 
-Inside the session picker:
+Inside the session picker (and the tree view), each session shows its git branch in parentheses after the name — `session-name (branch-name) [labels] [PR #n status] (2h ago)`. The indicator is omitted when the branch can't be resolved (e.g. detached HEAD).
 
 - **Alt-n** — New child session
 - **Alt-Shift-N** — New bare session (no worktree)

@@ -63,7 +63,7 @@ docs/               Documentation
 
 ### browser/ - Interactive Browser
 - `selector.rs`: `InteractiveSelector` trait + `FzfSelector` impl
-- `mod.rs`: drill-down browse flow, session action loop, label input parser, shared git helpers
+- `mod.rs`: drill-down browse flow, session action loop, label input parser, shared git helpers; `format_branch_indicator` (dimmed `(branch-name)` next to sessions in the picker and tree view)
 - `preview.rs`: fzf preview pane renderer (repo, directory, keybind help)
 - `views/mod.rs`: top-level view dispatcher (`ViewMode`: Tree/Workspace/Repo/Owner/Label/Plugin) with view-switch keybind handling including plugin views
 - `views/plugin_view.rs`: renderer for plugin-provided views (OnView → fzf → OnViewSelect)
