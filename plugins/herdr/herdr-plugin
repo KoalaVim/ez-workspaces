@@ -35,6 +35,12 @@ dbg() {
 
 herdr_available() { command -v herdr >/dev/null 2>&1; }
 
+is_submodule() {
+    local git_dir
+    git_dir=$(git -C "$REPO_PATH" rev-parse --git-dir 2>/dev/null) || return 1
+    [[ "$git_dir" == */.git/modules/* ]]
+}
+
 # Deliberately not `herdr status | grep -q`. Under `set -o pipefail` that is a
 # trap: grep -q exits at the first match, the closed pipe kills `herdr status`
 # with SIGPIPE, and pipefail reports 141 for a pipeline that actually matched.
@@ -76,6 +82,17 @@ workspace_by_checkout() {
         ' 2>/dev/null || true
 }
 
+# Fallback for submodule workspaces created via `workspace create`, which have
+# no worktree metadata.  Finds the workspace whose root pane cwd matches.
+workspace_by_pane_cwd() {
+    local path="$1"
+    herdr pane list 2>/dev/null |
+        jq -r --arg p "$path" '
+            [.result.panes // [] | .[] | select(.cwd == $p) | .workspace_id]
+            | unique | .[0] // empty
+        ' 2>/dev/null || true
+}
+
 # Open-or-focus, in one call.
 #
 # `herdr worktree open` is idempotent: it reports already_open=false the first
@@ -86,15 +103,30 @@ workspace_by_checkout() {
 # --cwd must be the repo root. Passing a linked worktree as the source fails
 # with linked_worktree_source: "New and open worktree actions start from the
 # repo parent workspace."
+#
+# For git submodules, `herdr worktree open` fails because git reports the
+# .git/modules/ dir as the worktree path, not the checkout dir.  Bypass the
+# worktree API and use workspace create/focus instead.
 open_cmd() {
-    printf 'herdr worktree open --cwd %q --path %q --focus >/dev/null 2>&1' \
-        "$REPO_PATH" "$SESSION_PATH"
+    if is_submodule; then
+        local ws_id
+        ws_id=$(workspace_by_checkout "$SESSION_PATH")
+        [ -n "$ws_id" ] || ws_id=$(workspace_by_pane_cwd "$SESSION_PATH")
+        if [ -n "$ws_id" ]; then
+            printf 'herdr workspace focus %q >/dev/null 2>&1' "$ws_id"
+        else
+            printf 'herdr workspace create --cwd %q --label %q --focus >/dev/null 2>&1' \
+                "$SESSION_PATH" "$(basename "$SESSION_PATH")"
+        fi
+    else
+        printf 'herdr worktree open --cwd %q --path %q --focus >/dev/null 2>&1' \
+            "$REPO_PATH" "$SESSION_PATH"
+    fi
 }
 
 # Open the workspace then attach to herdr (for use outside herdr).
 open_and_attach_cmd() {
-    printf 'herdr worktree open --cwd %q --path %q --focus >/dev/null 2>&1 && herdr' \
-        "$REPO_PATH" "$SESSION_PATH"
+    printf '%s && herdr' "$(open_cmd)"
 }
 
 # A multiplexer that is not installed, or not running, must never be the reason
@@ -154,6 +186,7 @@ on_session_delete)
     if [ "$CLOSE_ON_DELETE" = "true" ] && guard; then
         ws=$(workspace_for_path "$SESSION_PATH")
         [ -n "$ws" ] || ws=$(workspace_by_checkout "$SESSION_PATH")
+        [ -n "$ws" ] || ws=$(workspace_by_pane_cwd "$SESSION_PATH")
         if [ -n "$ws" ]; then
             dbg "closing herdr workspace $ws for $SESSION_PATH"
             herdr workspace close "$ws" >/dev/null 2>&1 || true
@@ -175,6 +208,10 @@ on_session_rename)
         old_path=$(jq -r '.rename_context.old_path // empty' <<<"$REQUEST")
         ws=$(workspace_for_path "${old_path:-$SESSION_PATH}")
         [ -n "$ws" ] || ws=$(workspace_for_path "$SESSION_PATH")
+        [ -n "$ws" ] || ws=$(workspace_by_checkout "${old_path:-$SESSION_PATH}")
+        [ -n "$ws" ] || ws=$(workspace_by_checkout "$SESSION_PATH")
+        [ -n "$ws" ] || ws=$(workspace_by_pane_cwd "${old_path:-$SESSION_PATH}")
+        [ -n "$ws" ] || ws=$(workspace_by_pane_cwd "$SESSION_PATH")
         if [ -n "$ws" ] && [ -n "$new_name" ]; then
             dbg "renaming herdr workspace $ws -> $new_name"
             herdr workspace rename "$ws" "$new_name" >/dev/null 2>&1 || true
@@ -196,9 +233,22 @@ on_attached_sessions)
         exit 0
     fi
 
-    # Get all open workspace checkout paths from herdr
-    OPEN_PATHS=$(herdr worktree list --cwd "$REPO_PATH" 2>/dev/null |
-        jq -r '[.result.worktrees // [] | .[] | select(.open_workspace_id != null and .open_workspace_id != "") | .path] | .[]' 2>/dev/null || true)
+    # Get all open workspace checkout paths from herdr.
+    # For submodules, worktree paths are git-dir paths that won't match session
+    # checkout paths — check both worktree metadata and pane cwds.
+    if is_submodule; then
+        WT_PATHS=$(herdr workspace list 2>/dev/null |
+            jq -r --arg repo "$REPO_PATH" '
+                [.result.workspaces // [] | .[] | select(.worktree.repo_root == $repo) | .worktree.checkout_path // empty]
+                | map(select(length > 0)) | .[]
+            ' 2>/dev/null || true)
+        PANE_PATHS=$(herdr pane list 2>/dev/null |
+            jq -r '[.result.panes // [] | .[] | .cwd // empty] | unique | .[]' 2>/dev/null || true)
+        OPEN_PATHS=$(printf '%s\n%s' "$WT_PATHS" "$PANE_PATHS" | sort -u)
+    else
+        OPEN_PATHS=$(herdr worktree list --cwd "$REPO_PATH" 2>/dev/null |
+            jq -r '[.result.worktrees // [] | .[] | select(.open_workspace_id != null and .open_workspace_id != "") | .path] | .[]' 2>/dev/null || true)
+    fi
 
     if [ -z "$OPEN_PATHS" ]; then
         echo '{"success": true, "attached_sessions": []}'
