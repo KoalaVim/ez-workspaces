@@ -43,6 +43,7 @@ pub fn dispatch(
             repo.as_deref(),
             cd_file,
             post_cmd_file,
+            on_enter,
             on_create,
             interactive,
             bare,
@@ -82,6 +83,7 @@ pub fn dispatch(
             parent.as_deref(),
             cd_file,
             post_cmd_file,
+            on_enter,
             on_create,
         ),
         SessionCommand::Label { command } => dispatch_label(command),
@@ -257,6 +259,7 @@ fn new_session(
     repo_arg: Option<&str>,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    on_enter: Option<&str>,
     on_create: Option<&str>,
     interactive: bool,
     bare: bool,
@@ -267,6 +270,12 @@ fn new_session(
     // If a name was provided on the CLI, use it verbatim. Otherwise, run the
     // configured staged-name prompt.
     let mut config = crate::config::load()?;
+    if let Some(v) = on_enter {
+        config.on_enter = v.into();
+        if on_create.is_none() {
+            config.on_create = v.into();
+        }
+    }
     if let Some(v) = on_create {
         config.on_create = v.into();
     }

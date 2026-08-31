@@ -72,6 +72,9 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
     let mut config = config::load()?;
     if let Some(v) = on_enter {
         config.on_enter = v.into();
+        if on_create.is_none() {
+            config.on_create = v.into();
+        }
     }
     if let Some(v) = on_create {
         config.on_create = v.into();

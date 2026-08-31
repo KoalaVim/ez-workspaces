@@ -19,11 +19,18 @@ pub fn session_from_dirty(
     parent_arg: Option<&str>,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    on_enter: Option<&str>,
     on_create: Option<&str>,
 ) -> Result<()> {
     let created = session_from_dirty_inner(name, repo_arg, parent_arg)?;
 
     let mut config = crate::config::load()?;
+    if let Some(v) = on_enter {
+        config.on_enter = v.into();
+        if on_create.is_none() {
+            config.on_create = v.into();
+        }
+    }
     if let Some(v) = on_create {
         config.on_create = v.into();
     }
