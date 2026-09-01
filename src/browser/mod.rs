@@ -46,6 +46,13 @@ impl SortMode {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum SessionLoopResult {
+    Accepted,
+    Cancelled,
+    ViewAll,
+}
+
 pub struct BrowseOptions<'a> {
     pub cd_file: Option<&'a Path>,
     pub post_cmd_file: Option<&'a Path>,
@@ -100,8 +107,10 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         if let Some(repo_root) = detect_repo_root() {
             let index = repo::store::load_index()?;
             if let Some(entry) = index.find_by_path(&repo_root) {
-                session_action_loop(entry, &selector, cd_file, post_cmd_file, &config)?;
-                return Ok(());
+                match session_action_loop(entry, &selector, cd_file, post_cmd_file, &config)? {
+                    SessionLoopResult::Accepted => return Ok(()),
+                    SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => {}
+                }
             }
         }
     }
@@ -146,7 +155,10 @@ pub(crate) fn browse_repo(
         })?
     };
 
-    session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config)
+    match session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config)? {
+        SessionLoopResult::Accepted => Ok(true),
+        SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => Ok(false),
+    }
 }
 
 /// Check if a path is already tracked as a session worktree under any registered repo.
@@ -341,14 +353,15 @@ pub(crate) fn accept_session(
 }
 
 /// Session selection loop with action keybinds.
-/// Returns `true` when a session was accepted, `false` when cancelled.
+/// Returns `Accepted` when a session was accepted, `Cancelled` when cancelled,
+/// or `ViewAll` when the user asked to switch to the global browser view.
 pub(crate) fn session_action_loop(
     repo_entry: &repo::model::RepoEntry,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
-) -> Result<bool> {
+) -> Result<SessionLoopResult> {
     // Update repo last_accessed timestamp on browse-into
     if let Ok(mut meta) = repo::store::load_repo_meta(&repo_entry.id) {
         meta.last_accessed = Some(chrono::Utc::now().to_rfc3339());
@@ -481,6 +494,7 @@ pub(crate) fn session_action_loop(
             keybinds.sort_toggle.as_str(),
             keybinds.note_open.as_str(),
             keybinds.note_cd.as_str(),
+            keybinds.view_all.as_str(),
         ];
         for pv in &plugin_views {
             expect_keys.push(pv.key.as_str());
@@ -532,7 +546,7 @@ pub(crate) fn session_action_loop(
                                 post_cmd_file,
                                 config,
                             )?;
-                            return Ok(true);
+                            return Ok(SessionLoopResult::Accepted);
                         }
                         Err(e) => {
                             eprintln!("{} {}", "Register failed:".red(), e);
@@ -558,10 +572,12 @@ pub(crate) fn session_action_loop(
                     post_cmd_file,
                     config,
                 )?;
-                return Ok(true);
+                return Ok(SessionLoopResult::Accepted);
             }
             ActionResult::Action(key, idx) if idx >= num_managed => {
-                if key == keybinds.sort_toggle {
+                if key == keybinds.view_all {
+                    return Ok(SessionLoopResult::ViewAll);
+                } else if key == keybinds.sort_toggle {
                     sort_mode = sort_mode.toggle();
                     log::debug!("session_action_loop: sort toggled to {:?}", sort_mode);
                 } else if key == keybinds.delete_session {
@@ -607,6 +623,9 @@ pub(crate) fn session_action_loop(
             ActionResult::Action(key, idx) => {
                 let selected = rendered[idx].session;
                 match key.as_str() {
+                    key if key == keybinds.view_all => {
+                        return Ok(SessionLoopResult::ViewAll);
+                    }
                     key if key == keybinds.new_session => {
                         match session::name_builder::prompt_session_name(
                             selector,
@@ -647,7 +666,7 @@ pub(crate) fn session_action_loop(
                                         post_cmd_file,
                                         config,
                                     )?;
-                                    return Ok(true);
+                                    return Ok(SessionLoopResult::Accepted);
                                 }
                             }
                             session::name_builder::NamePromptResult::Cancelled => {}
@@ -690,7 +709,7 @@ pub(crate) fn session_action_loop(
                                         post_cmd_file,
                                         config,
                                     )?;
-                                    return Ok(true);
+                                    return Ok(SessionLoopResult::Accepted);
                                 }
                             }
                             session::name_builder::NamePromptResult::Cancelled => {}
@@ -729,7 +748,7 @@ pub(crate) fn session_action_loop(
                                                 post_cmd_file,
                                                 config,
                                             )?;
-                                            return Ok(true);
+                                            return Ok(SessionLoopResult::Accepted);
                                         }
                                     }
                                     Err(e) => {
@@ -814,7 +833,7 @@ pub(crate) fn session_action_loop(
                             .cloned()
                             .unwrap_or_else(|| repo_entry.path.clone());
                         write_cd_target(cd_file, &target_dir)?;
-                        return Ok(true);
+                        return Ok(SessionLoopResult::Accepted);
                     }
                     key if key == keybinds.note_open => {
                         match session::notes::open_note(&repo_entry.id, &selected.id, config) {
@@ -828,7 +847,7 @@ pub(crate) fn session_action_loop(
                         match session::notes::ensure_notes_dir(&repo_entry.id, &selected.id) {
                             Ok(dir) => {
                                 write_cd_target(cd_file, &dir)?;
-                                return Ok(true);
+                                return Ok(SessionLoopResult::Accepted);
                             }
                             Err(e) => {
                                 eprintln!("{} {}", "Note cd failed:".red(), e);
@@ -863,7 +882,7 @@ pub(crate) fn session_action_loop(
                                     if !response.accept {
                                         write_relaunch_marker(post_cmd_file)?;
                                     }
-                                    return Ok(true);
+                                    return Ok(SessionLoopResult::Accepted);
                                 }
                                 handled = true;
                                 break;
@@ -886,14 +905,14 @@ pub(crate) fn session_action_loop(
                                     cd_file,
                                     post_cmd_file,
                                 )?;
-                                return Ok(true);
+                                return Ok(SessionLoopResult::Accepted);
                             }
                         }
                     }
                 }
                 // Loop back to show updated session list
             }
-            ActionResult::Cancel => return Ok(false),
+            ActionResult::Cancel => return Ok(SessionLoopResult::Cancelled),
         }
     }
 }

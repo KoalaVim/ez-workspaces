@@ -218,6 +218,10 @@ pub struct KeybindsConfig {
     /// Cd into session notes directory (default: "alt-I" i.e. Alt-Shift-I)
     #[serde(default = "default_bind_note_cd")]
     pub note_cd: String,
+
+    /// Switch to the global browser view from the session picker (default: "ctrl-a")
+    #[serde(default = "default_bind_view_all")]
+    pub view_all: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -293,6 +297,7 @@ impl Default for KeybindsConfig {
             remove_repo: default_bind_remove_repo(),
             note_open: default_bind_note_open(),
             note_cd: default_bind_note_cd(),
+            view_all: default_bind_view_all(),
         }
     }
 }
@@ -371,6 +376,10 @@ fn default_bind_note_open() -> String {
 
 fn default_bind_note_cd() -> String {
     "alt-I".into()
+}
+
+fn default_bind_view_all() -> String {
+    "ctrl-a".into()
 }
 
 fn default_note_open_command() -> String {
