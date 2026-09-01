@@ -11,8 +11,9 @@ use crate::repo;
 use crate::session;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{accept_session, browse_repo, format_branch_indicator, get_branch};
+use super::super::{accept_session, browse_repo, format_branch_indicator, BranchCache};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
+use crate::session::build_worktree_info;
 
 /// Distinguishes tree nodes so selection can dispatch to the right action.
 enum NodeKind {
@@ -30,6 +31,7 @@ pub(super) fn run(
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    branch_cache: &BranchCache,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     let mut nodes: Vec<(String, NodeKind, PathBuf)> = Vec::new();
@@ -76,6 +78,13 @@ pub(super) fn run(
         }
         repos.sort_by(|a, b| a.0.cmp(&b.0));
 
+        // Pre-resolve all repo branches in parallel
+        std::thread::scope(|s| {
+            for (_, repo_path) in &repos {
+                s.spawn(|| branch_cache.get_branch(repo_path));
+            }
+        });
+
         let num_repos = repos.len();
         for (repo_i, (repo_name, repo_path)) in repos.iter().enumerate() {
             let is_last_repo = repo_i == num_repos - 1;
@@ -86,7 +95,7 @@ pub(super) fn run(
             };
             let repo_cont = if is_last_repo { "    " } else { "│   " };
 
-            let branch = get_branch(repo_path).unwrap_or_else(|| "?".into());
+            let branch = branch_cache.get_branch(repo_path).unwrap_or_else(|| "?".into());
 
             nodes.push((
                 format!(
@@ -103,6 +112,7 @@ pub(super) fn run(
             if let Some(repo_entry) = index.find_by_path(repo_path) {
                 if let Ok(tree) = session::store::load_sessions(&repo_entry.id) {
                     if !tree.sessions.is_empty() {
+                        let worktree_info = build_worktree_info(repo_entry, &tree);
                         let rendered = tree.render_tree();
                         let num_sessions = rendered.len();
                         for (sess_i, node) in rendered.iter().enumerate() {
@@ -126,10 +136,10 @@ pub(super) fn run(
                                 .cloned()
                                 .unwrap_or_else(|| repo_path.clone());
 
-                            let branch = match node.session.path.as_ref() {
-                                Some(path) => get_branch(path),
-                                None => get_branch(repo_path),
-                            };
+                            let session_path = node.session.path.as_deref().unwrap_or(repo_path);
+                            let branch = worktree_info
+                                .get_branch_for_path(session_path)
+                                .or_else(|| branch_cache.get_branch(session_path));
                             let branch_indicator = format_branch_indicator(branch.as_deref());
                             log::debug!(
                                 "tree view: session={} branch={:?}",
@@ -206,7 +216,7 @@ pub(super) fn run(
         ActionResult::Select(idx) => match &nodes[idx].1 {
             NodeKind::Root => Ok(Outcome::Switch(ViewMode::Tree)),
             NodeKind::Repo(path) => {
-                if browse_repo(path, selector, cd_file, post_cmd_file, config)? {
+                if browse_repo(path, selector, cd_file, post_cmd_file, config, branch_cache)? {
                     Ok(Outcome::Done)
                 } else {
                     Ok(Outcome::Switch(ViewMode::Tree))

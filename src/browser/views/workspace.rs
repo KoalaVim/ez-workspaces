@@ -8,7 +8,7 @@ use crate::paths;
 use crate::plugin;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, drill_into_directory};
+use super::super::{browse_repo, drill_into_directory, BranchCache};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
@@ -17,6 +17,7 @@ pub(super) fn run(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     jump: Option<&str>,
+    branch_cache: &BranchCache,
 ) -> Result<Outcome> {
     if config.workspace_roots.is_empty() {
         println!("{}", "No workspace roots configured.".yellow());
@@ -91,13 +92,13 @@ pub(super) fn run(
     };
 
     // Drill into directories to find a repo (supports clone keybind).
-    let repo_path = drill_into_directory(&root_path, selector, config)?;
+    let repo_path = drill_into_directory(&root_path, selector, config, branch_cache)?;
     let repo_path = match repo_path {
         Some(p) => p,
         None => return Ok(Outcome::Switch(ViewMode::Workspace)),
     };
 
-    if browse_repo(&repo_path, selector, cd_file, post_cmd_file, config)? {
+    if browse_repo(&repo_path, selector, cd_file, post_cmd_file, config, branch_cache)? {
         Ok(Outcome::Done)
     } else {
         Ok(Outcome::Switch(ViewMode::Workspace))

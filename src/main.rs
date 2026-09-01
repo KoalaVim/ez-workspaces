@@ -31,6 +31,7 @@ fn main() {
         let file = std::fs::File::create(&path).expect("failed to create debug log file");
         env_logger::Builder::new()
             .filter_level(log::LevelFilter::Debug)
+            .format_timestamp_micros()
             .target(env_logger::Target::Pipe(Box::new(file)))
             .init();
         // Plugins read EZ_DEBUG to decide whether to emit their own debug logs.

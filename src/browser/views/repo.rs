@@ -9,7 +9,7 @@ use crate::plugin;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, format_repo_display, get_branch, parse_label_input, SortMode};
+use super::super::{browse_repo, format_repo_display, parse_label_input, BranchCache, SortMode};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
@@ -17,6 +17,7 @@ pub(super) fn run(
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    branch_cache: &BranchCache,
 ) -> Result<Outcome> {
     let plugin_views = plugin::collect_plugin_views("repo", config).unwrap_or_default();
     let mut sort_mode = SortMode::from_config(&config.default_sort);
@@ -53,17 +54,26 @@ pub(super) fn run(
             });
         }
 
+        let branches: Vec<Option<String>> = std::thread::scope(|s| {
+            let handles: Vec<_> = repo_entries
+                .iter()
+                .map(|r| s.spawn(|| branch_cache.get_branch(&r.path)))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
         let items: Vec<SelectItem> = repo_entries
             .iter()
-            .map(|r| {
-                let branch = get_branch(&r.path).unwrap_or_else(|| "?".into());
+            .zip(branches.iter())
+            .map(|(r, branch)| {
+                let branch_str = branch.as_deref().unwrap_or("?");
                 let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
                 let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
                 SelectItem {
                     display: format_repo_display(
                         &r.name,
                         Some(&path_str),
-                        Some(&branch),
+                        Some(branch_str),
                         &meta.labels,
                     ),
                     value: r.path.to_string_lossy().to_string(),
@@ -138,7 +148,7 @@ pub(super) fn run(
             }
             ActionResult::Select(idx) => {
                 let entry = repo_entries[idx];
-                if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)? {
+                if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config, branch_cache)? {
                     return Ok(Outcome::Done);
                 }
                 return Ok(Outcome::Switch(ViewMode::Repo));

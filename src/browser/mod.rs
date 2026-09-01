@@ -4,6 +4,8 @@ pub mod views;
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 use colored::Colorize;
 
@@ -16,6 +18,57 @@ use crate::session::tree::format_session_tree_line;
 use selector::{ActionResult, FzfSelector, InteractiveSelector, SelectItem};
 
 pub use preview::preview;
+
+pub(crate) struct BranchCache {
+    cache: Mutex<std::collections::HashMap<PathBuf, (Option<String>, SystemTime)>>,
+}
+
+impl BranchCache {
+    pub(crate) fn new() -> Self {
+        BranchCache {
+            cache: Mutex::new(std::collections::HashMap::new()),
+        }
+    }
+
+    pub(crate) fn get_branch(&self, path: &Path) -> Option<String> {
+        let head_path = Self::resolve_head_path(path)?;
+        let mtime = std::fs::metadata(&head_path).ok()?.modified().ok()?;
+
+        {
+            let cache = self.cache.lock().unwrap();
+            if let Some((cached_branch, cached_mtime)) = cache.get(path) {
+                if *cached_mtime == mtime {
+                    log::debug!("BranchCache: hit for {}", path.display());
+                    return cached_branch.clone();
+                }
+            }
+        }
+
+        log::debug!("BranchCache: miss for {}", path.display());
+        let branch = git_cmd(path, &["symbolic-ref", "--short", "HEAD"]);
+        self.cache.lock().unwrap().insert(path.to_path_buf(), (branch.clone(), mtime));
+        branch
+    }
+
+    fn resolve_head_path(path: &Path) -> Option<PathBuf> {
+        let dot_git = path.join(".git");
+        if dot_git.is_file() {
+            // Worktree: .git is a file containing "gitdir: /path/to/.git/worktrees/<name>"
+            let content = std::fs::read_to_string(&dot_git).ok()?;
+            let gitdir = content.strip_prefix("gitdir: ")?.trim();
+            let gitdir_path = if PathBuf::from(gitdir).is_absolute() {
+                PathBuf::from(gitdir)
+            } else {
+                path.join(gitdir)
+            };
+            Some(gitdir_path.join("HEAD"))
+        } else if dot_git.is_dir() {
+            Some(dot_git.join("HEAD"))
+        } else {
+            None
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum SortMode {
@@ -87,6 +140,7 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         config.on_create = v.into();
     }
     let selector = FzfSelector::new(&config.fzf)?;
+    let branch_cache = BranchCache::new();
 
     // --repo: jump straight to session picker for a specific repo
     if let Some(repo_path) = repo_flag {
@@ -95,7 +149,7 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         } else {
             std::env::current_dir()?.join(repo_path)
         };
-        if browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config)? {
+        if browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config, &branch_cache)? {
             return Ok(());
         }
         // Esc/cancel: fall through to global view
@@ -107,7 +161,7 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         if let Some(repo_root) = detect_repo_root() {
             let index = repo::store::load_index()?;
             if let Some(entry) = index.find_by_path(&repo_root) {
-                match session_action_loop(entry, &selector, cd_file, post_cmd_file, &config)? {
+                match session_action_loop(entry, &selector, cd_file, post_cmd_file, &config, &branch_cache)? {
                     SessionLoopResult::Accepted => return Ok(()),
                     SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => {}
                 }
@@ -121,7 +175,7 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         None => views::ViewMode::from_flag(&config.default_select_by, &config)?,
     };
 
-    views::run(mode, &selector, &config, workspace, cd_file, post_cmd_file)
+    views::run(mode, &selector, &config, workspace, cd_file, post_cmd_file, &branch_cache)
 }
 
 /// Register repo if needed and enter session action loop.
@@ -133,6 +187,7 @@ pub(crate) fn browse_repo(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
+    branch_cache: &BranchCache,
 ) -> Result<bool> {
     let index = repo::store::load_index()?;
     let repo_entry = if let Some(entry) = index.find_by_path(repo_path) {
@@ -155,7 +210,7 @@ pub(crate) fn browse_repo(
         })?
     };
 
-    match session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config)? {
+    match session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config, branch_cache)? {
         SessionLoopResult::Accepted => Ok(true),
         SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => Ok(false),
     }
@@ -361,6 +416,7 @@ pub(crate) fn session_action_loop(
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
+    branch_cache: &BranchCache,
 ) -> Result<SessionLoopResult> {
     // Update repo last_accessed timestamp on browse-into
     if let Ok(mut meta) = repo::store::load_repo_meta(&repo_entry.id) {
@@ -379,6 +435,7 @@ pub(crate) fn session_action_loop(
 
     loop {
         let tree = session::ensure_default_session(&repo_entry.id, &repo_entry.path)?;
+        let worktree_info = session::build_worktree_info(repo_entry, &tree);
         let rendered = match sort_mode {
             SortMode::Lru => tree.render_tree_lru(),
             SortMode::Alpha => tree.render_tree(),
@@ -409,10 +466,10 @@ pub(crate) fn session_action_loop(
                         .magenta()
                         .to_string()
                 };
-                let branch = match node.session.path.as_ref() {
-                    Some(path) => get_branch(path),
-                    None => get_branch(&repo_entry.path),
-                };
+                let session_path = node.session.path.as_deref().unwrap_or(&repo_entry.path);
+                let branch = worktree_info
+                    .get_branch_for_path(session_path)
+                    .or_else(|| branch_cache.get_branch(session_path));
                 log::debug!(
                     "session_action_loop: session '{}' branch={:?}",
                     node.session.name,
@@ -452,13 +509,13 @@ pub(crate) fn session_action_loop(
             })
             .collect();
 
-        let unmanaged = session::list_unmanaged_worktrees(repo_entry, &tree);
+        let unmanaged = &worktree_info.unmanaged;
         if !unmanaged.is_empty() {
             all_items.push(SelectItem {
                 display: format!("{}", "── Not Registered ──────────────────────".dimmed()),
                 value: "__header__".to_string(),
             });
-            for wt in &unmanaged {
+            for wt in unmanaged {
                 let name = wt.branch.as_deref().unwrap_or("(detached)");
                 all_items.push(SelectItem {
                     display: format!(
@@ -904,6 +961,7 @@ pub(crate) fn session_action_loop(
                                     None,
                                     cd_file,
                                     post_cmd_file,
+                                    branch_cache,
                                 )?;
                                 return Ok(SessionLoopResult::Accepted);
                             }
@@ -923,6 +981,7 @@ pub(crate) fn drill_into_directory(
     start: &Path,
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
+    branch_cache: &BranchCache,
 ) -> Result<Option<std::path::PathBuf>> {
     let mut current = start.to_path_buf();
     let mut history: Vec<std::path::PathBuf> = Vec::new();
@@ -948,7 +1007,7 @@ pub(crate) fn drill_into_directory(
                     let name = path.file_name().unwrap().to_string_lossy().to_string();
 
                     let display = if path.join(".git").exists() {
-                        let branch = get_branch(&path).unwrap_or_else(|| "?".into());
+                        let branch = branch_cache.get_branch(&path).unwrap_or_else(|| "?".into());
                         let labels = index
                             .find_by_path(&path)
                             .and_then(|e| repo::store::load_repo_meta(&e.id).ok())

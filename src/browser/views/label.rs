@@ -11,7 +11,7 @@ use crate::repo;
 use crate::session;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, write_cd_target};
+use super::super::{browse_repo, write_cd_target, BranchCache};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 #[derive(Clone)]
@@ -31,6 +31,7 @@ pub(super) fn run(
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    branch_cache: &BranchCache,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     let mut by_label: BTreeMap<String, Vec<LabeledItem>> = BTreeMap::new();
@@ -156,7 +157,7 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => match &tagged[idx] {
             LabeledItem::Repo(r) => {
-                if browse_repo(&r.path, selector, cd_file, post_cmd_file, config)? {
+                if browse_repo(&r.path, selector, cd_file, post_cmd_file, config, branch_cache)? {
                     Ok(Outcome::Done)
                 } else {
                     Ok(Outcome::Switch(ViewMode::Label))

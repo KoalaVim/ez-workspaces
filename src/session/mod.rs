@@ -1810,16 +1810,27 @@ pub struct UnmanagedWorktree {
     pub branch: Option<String>,
 }
 
-/// Detect git worktrees not tracked as ez sessions.
-///
-/// Runs `git worktree list --porcelain`, subtracts the main repo path and
-/// any path already used by a session. Skips non-git repos.
-pub fn list_unmanaged_worktrees(
+pub struct WorktreeInfo {
+    pub branches: HashMap<PathBuf, Option<String>>,
+    pub unmanaged: Vec<UnmanagedWorktree>,
+}
+
+impl WorktreeInfo {
+    pub fn get_branch_for_path(&self, path: &Path) -> Option<String> {
+        let canonical = path.canonicalize().ok()?;
+        self.branches.get(&canonical).cloned().flatten()
+    }
+}
+
+pub fn build_worktree_info(
     repo_entry: &repo::model::RepoEntry,
     tree: &SessionTree,
-) -> Vec<UnmanagedWorktree> {
+) -> WorktreeInfo {
     if !repo_entry.is_git {
-        return Vec::new();
+        return WorktreeInfo {
+            branches: HashMap::new(),
+            unmanaged: Vec::new(),
+        };
     }
 
     let output = match Command::new("git")
@@ -1830,16 +1841,29 @@ pub fn list_unmanaged_worktrees(
         Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);
-            log::debug!("list_unmanaged_worktrees: git worktree list failed: {stderr}");
-            return Vec::new();
+            log::debug!("build_worktree_info: git worktree list failed: {stderr}");
+            return WorktreeInfo {
+                branches: HashMap::new(),
+                unmanaged: Vec::new(),
+            };
         }
         Err(e) => {
-            log::debug!("list_unmanaged_worktrees: failed to run git: {e}");
-            return Vec::new();
+            log::debug!("build_worktree_info: failed to run git: {e}");
+            return WorktreeInfo {
+                branches: HashMap::new(),
+                unmanaged: Vec::new(),
+            };
         }
     };
 
     let worktrees = parse_worktree_list_porcelain(&output);
+
+    let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
+    for wt in &worktrees {
+        if let Ok(canonical) = wt.path.canonicalize() {
+            branches.insert(canonical, wt.branch.clone());
+        }
+    }
 
     let repo_canonical = repo_entry.path.canonicalize().ok();
 
@@ -1864,14 +1888,14 @@ pub fn list_unmanaged_worktrees(
         .filter_map(|p| p.canonicalize().ok())
         .collect();
 
-    worktrees
+    let unmanaged = worktrees
         .into_iter()
         .filter(|wt| {
             let canonical = match wt.path.canonicalize() {
                 Ok(c) => c,
                 Err(_) => {
                     log::debug!(
-                        "list_unmanaged_worktrees: prunable (path gone): {}",
+                        "build_worktree_info: prunable (path gone): {}",
                         wt.path.display()
                     );
                     return false;
@@ -1882,7 +1906,7 @@ pub fn list_unmanaged_worktrees(
             }
             if git_common_canonical.as_ref() == Some(&canonical) {
                 log::debug!(
-                    "list_unmanaged_worktrees: skipping git-common-dir: {}",
+                    "build_worktree_info: skipping git-common-dir: {}",
                     wt.path.display()
                 );
                 return false;
@@ -1892,7 +1916,12 @@ pub fn list_unmanaged_worktrees(
             }
             true
         })
-        .collect()
+        .collect();
+
+    WorktreeInfo {
+        branches,
+        unmanaged,
+    }
 }
 
 /// Parse `git worktree list --porcelain` output into worktree entries.

@@ -10,7 +10,7 @@ use crate::plugin;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, format_repo_display, get_branch};
+use super::super::{browse_repo, format_repo_display, BranchCache};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
@@ -18,6 +18,7 @@ pub(super) fn run(
     config: &config::model::EzConfig,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    branch_cache: &BranchCache,
 ) -> Result<Outcome> {
     let index = repo::store::load_index()?;
     if index.repos.is_empty() {
@@ -76,14 +77,23 @@ pub(super) fn run(
     };
 
     let (_owner, entries) = &owners[owner_idx];
+    let branches: Vec<Option<String>> = std::thread::scope(|s| {
+        let handles: Vec<_> = entries
+            .iter()
+            .map(|r| s.spawn(|| branch_cache.get_branch(&r.path)))
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+
     let sub_items: Vec<SelectItem> = entries
         .iter()
-        .map(|r| {
-            let branch = get_branch(&r.path).unwrap_or_else(|| "?".into());
+        .zip(branches.iter())
+        .map(|(r, branch)| {
+            let branch_str = branch.as_deref().unwrap_or("?");
             let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
             let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
             SelectItem {
-                display: format_repo_display(&r.name, Some(&path_str), Some(&branch), &meta.labels),
+                display: format_repo_display(&r.name, Some(&path_str), Some(branch_str), &meta.labels),
                 value: r.path.to_string_lossy().to_string(),
             }
         })
@@ -110,7 +120,7 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => {
             let entry = &entries[idx];
-            if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config)? {
+            if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config, branch_cache)? {
                 Ok(Outcome::Done)
             } else {
                 Ok(Outcome::Switch(ViewMode::Owner))

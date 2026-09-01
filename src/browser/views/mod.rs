@@ -22,6 +22,7 @@ use crate::error::{EzError, Result};
 use crate::plugin;
 
 use super::selector::InteractiveSelector;
+use super::BranchCache;
 
 /// Top-level view modes selectable via keybinds.
 #[derive(Clone, Debug)]
@@ -64,13 +65,14 @@ impl ViewMode {
 }
 
 /// Dispatch loop that renders views and handles view-switch keybinds.
-pub fn run(
+pub(crate) fn run(
     initial: ViewMode,
     selector: &dyn InteractiveSelector,
     config: &config::model::EzConfig,
     workspace_override: Option<&str>,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
+    branch_cache: &BranchCache,
 ) -> Result<()> {
     let mut mode = initial;
     // --workspace short-circuits the root picker for the Workspace view only.
@@ -78,14 +80,14 @@ pub fn run(
 
     loop {
         let outcome = match mode {
-            ViewMode::Tree => tree::run(selector, config, cd_file, post_cmd_file)?,
+            ViewMode::Tree => tree::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
             ViewMode::Workspace => {
                 let jump = workspace_jump.take();
-                workspace::run(selector, config, cd_file, post_cmd_file, jump.as_deref())?
+                workspace::run(selector, config, cd_file, post_cmd_file, jump.as_deref(), branch_cache)?
             }
-            ViewMode::Repo => repo::run(selector, config, cd_file, post_cmd_file)?,
-            ViewMode::Owner => owner::run(selector, config, cd_file, post_cmd_file)?,
-            ViewMode::Label => label::run(selector, config, cd_file, post_cmd_file)?,
+            ViewMode::Repo => repo::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
+            ViewMode::Owner => owner::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
+            ViewMode::Label => label::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
             ViewMode::Plugin {
                 ref view_name,
                 ref plugin_name,
