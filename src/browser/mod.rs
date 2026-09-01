@@ -45,29 +45,60 @@ impl BranchCache {
         }
 
         log::debug!("BranchCache: miss for {}", path.display());
-        let branch = git_cmd(path, &["symbolic-ref", "--short", "HEAD"]);
+        let branch = git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
+            .or_else(|| {
+                let gitdir = resolve_gitdir(path)?;
+                recover_rebase_branch(&gitdir)
+            });
         self.cache.lock().unwrap().insert(path.to_path_buf(), (branch.clone(), mtime));
         branch
     }
 
     fn resolve_head_path(path: &Path) -> Option<PathBuf> {
-        let dot_git = path.join(".git");
-        if dot_git.is_file() {
-            // Worktree: .git is a file containing "gitdir: /path/to/.git/worktrees/<name>"
-            let content = std::fs::read_to_string(&dot_git).ok()?;
-            let gitdir = content.strip_prefix("gitdir: ")?.trim();
-            let gitdir_path = if PathBuf::from(gitdir).is_absolute() {
-                PathBuf::from(gitdir)
-            } else {
-                path.join(gitdir)
-            };
-            Some(gitdir_path.join("HEAD"))
-        } else if dot_git.is_dir() {
-            Some(dot_git.join("HEAD"))
-        } else {
-            None
-        }
+        resolve_gitdir(path).map(|gd| gd.join("HEAD"))
     }
+}
+
+/// Resolves the `.git` directory for a repository or worktree at `path`.
+///
+/// If `path/.git` is a file (worktree layout), reads the `gitdir: ...`
+/// pointer inside it. If it is a directory, returns it directly.
+pub(crate) fn resolve_gitdir(path: &Path) -> Option<PathBuf> {
+    let dot_git = path.join(".git");
+    if dot_git.is_file() {
+        // Worktree: .git is a file containing "gitdir: /path/to/.git/worktrees/<name>"
+        let content = std::fs::read_to_string(&dot_git).ok()?;
+        let gitdir = content.strip_prefix("gitdir: ")?.trim();
+        let gitdir_path = if PathBuf::from(gitdir).is_absolute() {
+            PathBuf::from(gitdir)
+        } else {
+            path.join(gitdir)
+        };
+        Some(gitdir_path)
+    } else if dot_git.is_dir() {
+        Some(dot_git)
+    } else {
+        None
+    }
+}
+
+/// Recovers the original branch name during a rebase from git's rebase
+/// state files (`rebase-merge/head-name` for interactive rebases, or
+/// `rebase-apply/head-name` for non-interactive ones), since HEAD is
+/// detached while a rebase is in progress.
+///
+/// Returns `Some("branch-name|REBASE")` if a rebase is in progress and the
+/// original branch name can be recovered, otherwise `None`.
+pub(crate) fn recover_rebase_branch(gitdir: &Path) -> Option<String> {
+    let head_name = gitdir.join("rebase-merge").join("head-name");
+    let content = if head_name.is_file() {
+        std::fs::read_to_string(&head_name).ok()?
+    } else {
+        let head_name = gitdir.join("rebase-apply").join("head-name");
+        std::fs::read_to_string(&head_name).ok()?
+    };
+    let branch = content.trim().strip_prefix("refs/heads/")?.to_string();
+    Some(format!("{branch}|REBASE"))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1302,5 +1333,38 @@ mod tests {
         let (a, r) = parse_label_input("-");
         assert!(a.is_empty());
         assert!(r.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod rebase_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn recover_rebase_branch_interactive() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_merge = dir.path().join("rebase-merge");
+        fs::create_dir(&rebase_merge).unwrap();
+        fs::write(rebase_merge.join("head-name"), "refs/heads/feature-x\n").unwrap();
+        let result = recover_rebase_branch(dir.path());
+        assert_eq!(result, Some("feature-x|REBASE".to_string()));
+    }
+
+    #[test]
+    fn recover_rebase_branch_non_interactive() {
+        let dir = tempfile::tempdir().unwrap();
+        let rebase_apply = dir.path().join("rebase-apply");
+        fs::create_dir(&rebase_apply).unwrap();
+        fs::write(rebase_apply.join("head-name"), "refs/heads/fix-bug\n").unwrap();
+        let result = recover_rebase_branch(dir.path());
+        assert_eq!(result, Some("fix-bug|REBASE".to_string()));
+    }
+
+    #[test]
+    fn recover_rebase_branch_no_rebase() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = recover_rebase_branch(dir.path());
+        assert_eq!(result, None);
     }
 }

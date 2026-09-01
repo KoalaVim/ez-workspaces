@@ -1808,6 +1808,7 @@ pub fn delete_unmanaged_worktree(
 pub struct UnmanagedWorktree {
     pub path: PathBuf,
     pub branch: Option<String>,
+    pub detached: bool,
 }
 
 pub struct WorktreeInfo {
@@ -1862,6 +1863,18 @@ pub fn build_worktree_info(
     for wt in &worktrees {
         if let Ok(canonical) = wt.path.canonicalize() {
             branches.insert(canonical, wt.branch.clone());
+        }
+    }
+
+    for wt in &worktrees {
+        if wt.detached {
+            if let Some(branch) = crate::browser::resolve_gitdir(&wt.path)
+                .and_then(|gd| crate::browser::recover_rebase_branch(&gd))
+            {
+                if let Ok(canonical) = wt.path.canonicalize() {
+                    branches.insert(canonical, Some(branch));
+                }
+            }
         }
     }
 
@@ -1955,7 +1968,11 @@ fn parse_worktree_list_porcelain(output: &str) -> Vec<UnmanagedWorktree> {
                 } else {
                     current_branch.take()
                 };
-                result.push(UnmanagedWorktree { path, branch });
+                result.push(UnmanagedWorktree {
+                    path,
+                    branch,
+                    detached: is_detached,
+                });
             }
             current_branch = None;
             is_detached = false;
@@ -1987,7 +2004,11 @@ fn parse_worktree_list_porcelain(output: &str) -> Vec<UnmanagedWorktree> {
         } else {
             current_branch.take()
         };
-        result.push(UnmanagedWorktree { path, branch });
+        result.push(UnmanagedWorktree {
+            path,
+            branch,
+            detached: is_detached,
+        });
     }
 
     result
