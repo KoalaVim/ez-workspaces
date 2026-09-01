@@ -1,8 +1,4 @@
-## Purpose
-
-Display the git branch name alongside session entries in the interactive browser's session picker and tree view, so users can see which branch each session points to without leaving the picker.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Branch name displayed in session picker
 
@@ -27,20 +23,6 @@ The session picker (`session_action_loop`) SHALL display the git branch name for
 
 - **WHEN** a session's worktree is mid-rebase (HEAD detached due to rebase)
 - **THEN** the branch name is recovered from rebase state files and displayed as `(branch-name|REBASE)` in dark green text
-
-### Requirement: Branch name displayed in tree view
-
-The tree view (`browser/views/tree.rs`) SHALL display the git branch name for each session entry using the same format as the session picker. Resolution SHALL use the per-repo worktree cache instead of per-session subprocess calls.
-
-#### Scenario: Tree view session with worktree
-
-- **WHEN** a session in the tree view has a `path` field
-- **THEN** the branch is resolved from the repo's worktree cache and displayed as `(branch-name)` in dark green, after the session name
-
-#### Scenario: Tree view session without path
-
-- **WHEN** a session in the tree view has no `path`
-- **THEN** the branch is resolved from the repo root's entry in the worktree cache and displayed the same way
 
 ### Requirement: Shared branch formatting helper
 

@@ -1,10 +1,4 @@
-# Unmanaged Worktree Discovery
-
-## Purpose
-
-Detect git worktrees that exist on disk but are not tracked as ez sessions, enabling the browser and other components to surface and register them.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Detect non-managed worktrees
 The system SHALL detect git worktrees that exist on disk but are not tracked as ez sessions. Detection SHALL consume the already-parsed `git worktree list --porcelain` output from the worktree info cache (shared with branch resolution) instead of running `git worktree list --porcelain` independently. The parsed worktree paths and branch names SHALL be filtered by subtracting the main repo path and all managed session paths. The result SHALL be a list of unmanaged worktrees with their path and branch name (or short SHA for detached HEAD). Worktrees whose path does not exist on disk (prunable) SHALL be excluded.
