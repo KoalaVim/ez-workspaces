@@ -35,6 +35,22 @@ dbg() {
 
 herdr_available() { command -v herdr >/dev/null 2>&1; }
 
+# Resolve the main worktree (repo root) for a checkout path.
+# For a linked worktree this is the parent repo's root; for a standalone clone
+# it is the clone's own toplevel — which may differ from REPO_PATH when
+# kvim-envs (or similar) keeps each session in a separate clone.
+repo_root_for() {
+    local path="$1"
+    local git_dir common_dir
+    git_dir=$(git -C "$path" rev-parse --git-dir 2>/dev/null) || { echo "$path"; return; }
+    common_dir=$(git -C "$path" rev-parse --git-common-dir 2>/dev/null) || { echo "$path"; return; }
+    if [[ "$git_dir" != "$common_dir" ]]; then
+        (cd "$path" && cd "$common_dir/.." && pwd)
+    else
+        git -C "$path" rev-parse --show-toplevel 2>/dev/null || echo "$path"
+    fi
+}
+
 is_submodule() {
     local git_dir
     git_dir=$(git -C "$REPO_PATH" rev-parse --git-dir 2>/dev/null) || return 1
@@ -119,8 +135,10 @@ open_cmd() {
                 "$SESSION_PATH" "$(basename "$SESSION_PATH")"
         fi
     else
+        local cwd
+        cwd=$(repo_root_for "$SESSION_PATH")
         printf 'herdr worktree open --cwd %q --path %q --focus >/dev/null 2>&1' \
-            "$REPO_PATH" "$SESSION_PATH"
+            "$cwd" "$SESSION_PATH"
     fi
 }
 
