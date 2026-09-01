@@ -7,7 +7,7 @@ Background daemon process that periodically refreshes PR statuses for all sessio
 ## Requirements
 
 ### Requirement: Daemon auto-start on ez invocation
-Every `ez` invocation SHALL check whether the PR status daemon is running by reading `~/.config/ez/daemon.pid` and verifying the PID is alive (`kill -0`). If the daemon is not running, `ez` SHALL spawn it in the background and continue without blocking.
+Every `ez` invocation SHALL check whether the PR status daemon is running by reading `~/.config/ez/daemon.pid` and verifying the PID is alive. If the daemon is not running, `ez` SHALL spawn it in the background and continue without blocking.
 
 #### Scenario: Daemon not running on ez launch
 - **WHEN** user runs any `ez` command and `daemon.pid` does not exist or the PID is dead
@@ -41,7 +41,7 @@ The daemon SHALL iterate all registered repos and their sessions, refreshing `ez
 - **THEN** the daemon refreshes sessions in order of most recent `last_accessed`, processing at most 20 per cycle
 
 ### Requirement: Daemon CLI surface
-The system SHALL provide `ez daemon` subcommands for manual control: `ez daemon start` (start if not running), `ez daemon stop` (send SIGTERM and remove PID file), and `ez daemon status` (print whether daemon is running and its PID).
+The system SHALL provide `ez daemon` subcommands for manual control: `ez daemon start` (start if not running), `ez daemon stop` (terminate the daemon process and remove PID file), and `ez daemon status` (print whether daemon is running and its PID).
 
 #### Scenario: Manual daemon start
 - **WHEN** user runs `ez daemon start` and daemon is not running
@@ -49,7 +49,7 @@ The system SHALL provide `ez daemon` subcommands for manual control: `ez daemon 
 
 #### Scenario: Manual daemon stop
 - **WHEN** user runs `ez daemon stop` and daemon is running
-- **THEN** daemon receives SIGTERM, exits gracefully, and PID file is removed
+- **THEN** daemon is terminated, exits, and PID file is removed
 
 #### Scenario: Daemon status check
 - **WHEN** user runs `ez daemon status`
@@ -93,7 +93,7 @@ The daemon SHALL only refresh PR statuses for sessions whose `ez_pr_gh_user` mat
 - **THEN** daemon refreshes it using the currently active `gh` user and backfills `ez_pr_gh_user` with that username
 
 ### Requirement: File locking for session data
-The daemon SHALL acquire an exclusive file lock (`flock`) on the sessions file before reading and writing session data. The lock SHALL be held only for the duration of the read-modify-write cycle.
+The daemon SHALL acquire an exclusive file lock on the sessions file before reading and writing session data. The lock SHALL be held only for the duration of the read-modify-write cycle.
 
 #### Scenario: Concurrent daemon and interactive write
 - **WHEN** the daemon and an interactive `ez` process both attempt to write `sessions.toml` simultaneously

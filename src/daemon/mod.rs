@@ -1,5 +1,4 @@
 use std::fs;
-use std::os::unix::io::AsRawFd;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -52,9 +51,7 @@ pub fn is_daemon_alive() -> bool {
         return false;
     };
 
-    // Signal 0 performs no-op error checking: it tells us whether the
-    // process exists (and is signalable) without actually sending a signal.
-    let alive = unsafe { libc::kill(pid as libc::pid_t, 0) } == 0;
+    let alive = is_process_alive(pid);
 
     if !alive {
         log::debug!("daemon: stale PID file for pid {pid}, cleaning up");
@@ -109,17 +106,15 @@ pub fn ensure_daemon_running() {
         .spawn();
 }
 
-/// Stop the running daemon by sending SIGTERM, then remove the PID file.
+/// Stop the running daemon, then remove the PID file.
 pub fn stop_daemon() -> Result<()> {
     let Some(pid) = read_pid_file() else {
         println!("{}", "Daemon is not running.".yellow());
         return Ok(());
     };
 
-    log::debug!("daemon: sending SIGTERM to pid {pid}");
-    unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGTERM);
-    }
+    log::debug!("daemon: terminating pid {pid}");
+    terminate_process(pid);
 
     if let Ok(path) = paths::daemon_pid_file() {
         let _ = fs::remove_file(path);
@@ -150,28 +145,18 @@ const POLL_INTERVAL_SECS: u64 = 300;
 /// Maximum number of sessions refreshed per cycle.
 const MAX_CANDIDATES: usize = 20;
 
-/// Set by the SIGTERM handler; polled by the main loop between sleeps.
+/// Set by the signal/ctrl handler; polled by the main loop between sleeps.
 static SHOULD_STOP: AtomicBool = AtomicBool::new(false);
-
-extern "C" fn handle_sigterm(_signum: libc::c_int) {
-    SHOULD_STOP.store(true, Ordering::SeqCst);
-}
 
 /// The actual daemon loop entry point (run via `ez daemon run`, not called
 /// directly by users). Writes the PID file, sets up logging to the daemon
-/// log file, installs a SIGTERM handler, and then polls for PR status
+/// log file, installs a stop handler, and then polls for PR status
 /// updates every `POLL_INTERVAL_SECS` seconds until asked to stop.
 fn daemon_run() -> Result<()> {
     let pid = std::process::id();
     write_pid_file(pid)?;
     setup_daemon_logging()?;
-
-    unsafe {
-        libc::signal(
-            libc::SIGTERM,
-            handle_sigterm as *const () as libc::sighandler_t,
-        );
-    }
+    install_stop_handler();
 
     log::info!("daemon: started (pid {pid})");
 
@@ -316,8 +301,8 @@ fn pr_status_is_fresh(session: &Session) -> bool {
 }
 
 /// Refresh (or skip) a single candidate session's PR status, holding an
-/// exclusive `flock` on the repo's sessions file for the whole
-/// read-modify-write cycle so an interactive `ez` process can't race it.
+/// exclusive lock on the repo's sessions file for the whole read-modify-write
+/// cycle so an interactive `ez` process can't race it.
 fn process_candidate(candidate: &Candidate, current_gh_user: &str) -> ProcessOutcome {
     let repo_id = &candidate.repo_id;
     let session_id = &candidate.session_id;
@@ -384,7 +369,7 @@ fn process_candidate(candidate: &Candidate, current_gh_user: &str) -> ProcessOut
     }
 }
 
-/// Run `f` while holding an exclusive `flock` on the repo's sessions file,
+/// Run `f` while holding an exclusive lock on the repo's sessions file,
 /// blocking until the lock is available. Guards against interactive `ez`
 /// processes writing the same file concurrently.
 fn with_session_lock<F, T>(repo_id: &str, f: F) -> Result<T>
@@ -395,7 +380,6 @@ where
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Open (creating if missing) without truncating, purely to hold a lock.
     #[allow(clippy::suspicious_open_options)]
     let file = fs::OpenOptions::new()
         .read(true)
@@ -404,12 +388,178 @@ where
         .truncate(false)
         .open(&path)?;
 
+    lock_file_exclusive(&file);
+    let result = f();
+    unlock_file(&file);
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Platform-specific helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+fn is_process_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(unix)]
+fn terminate_process(pid: u32) {
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+    }
+}
+
+#[cfg(unix)]
+fn install_stop_handler() {
+    extern "C" fn handle_sigterm(_signum: libc::c_int) {
+        SHOULD_STOP.store(true, Ordering::SeqCst);
+    }
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            handle_sigterm as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+#[cfg(unix)]
+fn lock_file_exclusive(file: &fs::File) {
+    use std::os::unix::io::AsRawFd;
     unsafe {
         libc::flock(file.as_raw_fd(), libc::LOCK_EX);
     }
-    let result = f();
+}
+
+#[cfg(unix)]
+fn unlock_file(file: &fs::File) {
+    use std::os::unix::io::AsRawFd;
     unsafe {
         libc::flock(file.as_raw_fd(), libc::LOCK_UN);
     }
-    result
+}
+
+#[cfg(windows)]
+fn is_process_alive(pid: u32) -> bool {
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == 0 {
+            false
+        } else {
+            CloseHandle(handle);
+            true
+        }
+    }
+}
+
+#[cfg(windows)]
+fn terminate_process(pid: u32) {
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> isize;
+        fn TerminateProcess(process: isize, exit_code: u32) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+    const PROCESS_TERMINATE: u32 = 0x0001;
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle != 0 {
+            TerminateProcess(handle, 1);
+            CloseHandle(handle);
+        }
+    }
+}
+
+#[cfg(windows)]
+fn install_stop_handler() {
+    extern "system" {
+        fn SetConsoleCtrlHandler(
+            handler: Option<unsafe extern "system" fn(u32) -> i32>,
+            add: i32,
+        ) -> i32;
+    }
+    unsafe extern "system" fn handler(_ctrl_type: u32) -> i32 {
+        SHOULD_STOP.store(true, Ordering::SeqCst);
+        1
+    }
+    unsafe {
+        SetConsoleCtrlHandler(Some(handler), 1);
+    }
+}
+
+#[cfg(windows)]
+#[repr(C)]
+struct Overlapped {
+    internal: usize,
+    internal_high: usize,
+    offset: u32,
+    offset_high: u32,
+    h_event: isize,
+}
+
+#[cfg(windows)]
+fn lock_file_exclusive(file: &fs::File) {
+    use std::os::windows::io::AsRawHandle;
+    extern "system" {
+        fn LockFileEx(
+            file: isize,
+            flags: u32,
+            reserved: u32,
+            low: u32,
+            high: u32,
+            overlapped: *mut Overlapped,
+        ) -> i32;
+    }
+    const LOCKFILE_EXCLUSIVE_LOCK: u32 = 0x00000002;
+    let mut overlapped = Overlapped {
+        internal: 0,
+        internal_high: 0,
+        offset: 0,
+        offset_high: 0,
+        h_event: 0,
+    };
+    unsafe {
+        LockFileEx(
+            file.as_raw_handle() as isize,
+            LOCKFILE_EXCLUSIVE_LOCK,
+            0,
+            u32::MAX,
+            u32::MAX,
+            &mut overlapped,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn unlock_file(file: &fs::File) {
+    use std::os::windows::io::AsRawHandle;
+    extern "system" {
+        fn UnlockFileEx(
+            file: isize,
+            reserved: u32,
+            low: u32,
+            high: u32,
+            overlapped: *mut Overlapped,
+        ) -> i32;
+    }
+    let mut overlapped = Overlapped {
+        internal: 0,
+        internal_high: 0,
+        offset: 0,
+        offset_high: 0,
+        h_event: 0,
+    };
+    unsafe {
+        UnlockFileEx(
+            file.as_raw_handle() as isize,
+            0,
+            u32::MAX,
+            u32::MAX,
+            &mut overlapped,
+        );
+    }
 }

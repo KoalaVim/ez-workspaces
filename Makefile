@@ -13,10 +13,14 @@ run:
 	cargo run --release -- $(ARGS)
 
 install:
+	-ez daemon stop
 	cargo install --locked --path .
+	ez daemon start
 
 install-debug:
+	-ez daemon stop
 	cargo install --locked --debug --path .
+	ez daemon start
 
 clean:
 	cargo clean
