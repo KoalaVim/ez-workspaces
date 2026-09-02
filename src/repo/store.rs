@@ -12,7 +12,10 @@ pub fn load_index() -> Result<RepoIndex> {
         return Ok(RepoIndex::default());
     }
     let contents = fs::read_to_string(&path)?;
-    let index: RepoIndex = toml::from_str(&contents)?;
+    let mut index: RepoIndex = toml::from_str(&contents)?;
+    for repo in &mut index.repos {
+        repo.path = paths::strip_unc_prefix(&repo.path);
+    }
     Ok(index)
 }
 

@@ -35,6 +35,9 @@ pub enum EzError {
     #[error("Plugin '{0}' not found")]
     PluginNotFound(String),
 
+    #[error("Plugins require bash. Install Git for Windows: https://gitforwindows.org")]
+    BashNotFound,
+
     #[error("Interactive selector not available: {0}")]
     SelectorUnavailable(String),
 

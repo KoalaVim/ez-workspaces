@@ -448,5 +448,7 @@ fn detect_repo_root_from(dir: &Path) -> Option<std::path::PathBuf> {
     } else {
         dir.join(&common_path)
     };
-    abs.canonicalize().ok()?.parent().map(|p| p.to_path_buf())
+    crate::paths::normalize(&abs)
+        .parent()
+        .map(|p| p.to_path_buf())
 }

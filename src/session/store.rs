@@ -12,7 +12,10 @@ pub fn load_sessions(repo_id: &str) -> Result<SessionTree> {
         return Ok(SessionTree::default());
     }
     let contents = fs::read_to_string(&path)?;
-    let tree: SessionTree = toml::from_str(&contents)?;
+    let mut tree: SessionTree = toml::from_str(&contents)?;
+    for session in &mut tree.sessions {
+        session.path = session.path.as_ref().map(|p| paths::strip_unc_prefix(p));
+    }
     Ok(tree)
 }
 

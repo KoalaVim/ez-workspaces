@@ -34,9 +34,7 @@ pub fn cursor_slug(path: &Path) -> String {
 /// Compute the Cursor chat hash for a workspace path.
 /// Uses md5(realpath(workspace_path)) and returns the hex digest.
 pub fn cursor_chat_hash(workspace_path: &Path) -> String {
-    let real_path = workspace_path
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_path.to_path_buf());
+    let real_path = crate::paths::normalize(workspace_path);
     let digest = md5::compute(real_path.display().to_string().as_bytes());
     format!("{:x}", digest)
 }

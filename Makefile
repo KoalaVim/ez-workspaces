@@ -1,4 +1,4 @@
-.PHONY: build release test run install install-debug clean lint fmt check
+.PHONY: build release test run install install-debug clean lint fmt check setup
 
 build:
 	cargo build
@@ -35,3 +35,16 @@ check:
 	cargo fmt -- --check
 	cargo clippy --locked -- -D warnings
 	cargo test --locked
+
+setup:
+ifeq ($(OS),Windows_NT)
+	winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+	winget install --id stedolan.jq -e --accept-source-agreements --accept-package-agreements
+else
+	UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+	brew install jq
+else
+	sudo apt-get install -y jq
+endif
+endif

@@ -7,6 +7,52 @@ use crate::error::{EzError, Result};
 use super::model::PluginManifest;
 use super::protocol::{HookRequest, HookResponse};
 
+#[cfg(windows)]
+fn find_bash() -> crate::error::Result<std::path::PathBuf> {
+    static BASH_PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+    if let Some(path) = BASH_PATH.get() {
+        log::debug!("find_bash: cached {}", path.display());
+        return Ok(path.clone());
+    }
+
+    log::debug!("find_bash: probing PATH for bash");
+    if Command::new("bash")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        let path = std::path::PathBuf::from("bash");
+        log::debug!("find_bash: found bash on PATH");
+        let _ = BASH_PATH.set(path.clone());
+        return Ok(path);
+    }
+
+    for candidate in [
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+    ] {
+        log::debug!("find_bash: checking {}", candidate);
+        let path = std::path::Path::new(candidate);
+        if path.exists() {
+            let path = path.to_path_buf();
+            log::debug!("find_bash: found {}", path.display());
+            let _ = BASH_PATH.set(path.clone());
+            return Ok(path);
+        }
+    }
+
+    log::debug!("find_bash: bash not found");
+    Err(EzError::BashNotFound)
+}
+
+#[cfg(unix)]
+fn find_bash() -> crate::error::Result<std::path::PathBuf> {
+    Ok(std::path::PathBuf::from("sh"))
+}
+
 /// Execute a plugin with the given request and return its response.
 pub fn execute(
     manifest: &PluginManifest,
@@ -33,7 +79,15 @@ pub fn execute(
     );
     log::debug!("plugin [{}]: request={}", manifest.name, request_json);
 
+    #[cfg(unix)]
     let mut cmd = Command::new(&executable);
+    #[cfg(windows)]
+    let mut cmd = {
+        let bash = find_bash()?;
+        let mut c = Command::new(&bash);
+        c.arg(&executable);
+        c
+    };
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -230,8 +284,9 @@ fn wait_with_timeout(
 
 /// Execute shell commands returned by a plugin.
 pub fn run_shell_commands(commands: &[String]) -> Result<()> {
+    let shell = find_bash()?;
     for cmd in commands {
-        let status = Command::new("sh")
+        let status = Command::new(&shell)
             .args(["-c", cmd])
             .status()
             .map_err(|e| EzError::PluginFailed("shell".into(), e.to_string()))?;

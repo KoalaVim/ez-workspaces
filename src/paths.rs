@@ -97,7 +97,17 @@ pub fn expand_tilde(path: &str) -> PathBuf {
 /// directory, unreadable parent). Never fails.
 pub fn normalize(path: &std::path::Path) -> PathBuf {
     match std::fs::canonicalize(path) {
-        Ok(resolved) => resolved,
+        Ok(resolved) => {
+            #[cfg(windows)]
+            {
+                let s = resolved.to_string_lossy();
+                if let Some(stripped) = s.strip_prefix(r"\\?\") {
+                    log::debug!("normalize: stripped \\\\?\\ prefix from {}", path.display());
+                    return PathBuf::from(stripped);
+                }
+            }
+            resolved
+        }
         Err(e) => {
             log::debug!(
                 "normalize: canonicalize failed for {}: {e}, using path as-is",
@@ -106,6 +116,22 @@ pub fn normalize(path: &std::path::Path) -> PathBuf {
             path.to_path_buf()
         }
     }
+}
+
+/// Strip the Windows extended-length path prefix (`\\?\`) if present.
+///
+/// Unlike `normalize()`, this does not call `canonicalize()` — it only strips
+/// the prefix from an already-resolved path. Use it to clean paths loaded from
+/// storage that were canonicalized before the prefix-stripping was added.
+pub fn strip_unc_prefix(path: &std::path::Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = path.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
 }
 
 /// Collapse the home directory prefix back to ~/

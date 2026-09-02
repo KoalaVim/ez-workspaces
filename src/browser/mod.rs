@@ -253,15 +253,12 @@ fn find_repo_owning_session_path(
     index: &repo::model::RepoIndex,
     path: &Path,
 ) -> Option<repo::model::RepoEntry> {
-    let canonical = std::fs::canonicalize(path).ok()?;
+    let canonical = crate::paths::normalize(path);
     for entry in &index.repos {
         if let Ok(tree) = session::store::load_sessions(&entry.id) {
             for s in &tree.sessions {
                 if let Some(ref session_path) = s.path {
-                    let matches = session_path
-                        .canonicalize()
-                        .map(|p| p == canonical)
-                        .unwrap_or(false);
+                    let matches = crate::paths::normalize(session_path) == canonical;
                     if matches {
                         log::debug!(
                             "find_repo_owning_session_path: {} matches session '{}' in repo '{}'",
@@ -1110,7 +1107,7 @@ pub(crate) fn drill_into_directory(
                 );
                 match repo::clone_repo(url.trim(), Some(&target)) {
                     Ok(()) => {
-                        let canonical = fs::canonicalize(&target).unwrap_or(target);
+                        let canonical = crate::paths::normalize(&target);
                         return Ok(Some(canonical));
                     }
                     Err(e) => {
@@ -1259,7 +1256,9 @@ fn detect_repo_root() -> Option<PathBuf> {
         cwd.join(&common_path)
     };
     // --git-common-dir returns the .git dir; the repo root is its parent
-    abs.canonicalize().ok()?.parent().map(|p| p.to_path_buf())
+    crate::paths::normalize(&abs)
+        .parent()
+        .map(|p| p.to_path_buf())
 }
 
 /// Shared display style for a repository row in any picker (drill-down,

@@ -484,7 +484,7 @@ fn detect_existing_worktree(path: &Path) -> Result<ExistingWorktree> {
 
     let worktree_path = git_output(path, &["rev-parse", "--show-toplevel"])?;
     let worktree_path = PathBuf::from(worktree_path);
-    let worktree_path = worktree_path.canonicalize()?;
+    let worktree_path = crate::paths::normalize(&worktree_path);
 
     let common_dir = git_output(&worktree_path, &["rev-parse", "--git-common-dir"])?;
     let common_dir = PathBuf::from(common_dir);
@@ -493,7 +493,7 @@ fn detect_existing_worktree(path: &Path) -> Result<ExistingWorktree> {
     } else {
         worktree_path.join(common_dir)
     };
-    let common_dir = common_dir.canonicalize()?;
+    let common_dir = crate::paths::normalize(&common_dir);
     let main_repo_path = common_dir
         .file_name()
         .filter(|name| *name == ".git")
@@ -503,8 +503,8 @@ fn detect_existing_worktree(path: &Path) -> Result<ExistingWorktree> {
                 "could not resolve main repo from git common dir: {}",
                 common_dir.display()
             ))
-        })?
-        .canonicalize()?;
+        })?;
+    let main_repo_path = crate::paths::normalize(main_repo_path);
 
     let branch = git_output(
         &worktree_path,
@@ -526,7 +526,7 @@ fn resolve_registered_repo_for_worktree(
 ) -> Result<repo::model::RepoEntry> {
     if let Some(repo_arg) = repo_arg {
         let repo_entry = repo::resolve_repo(Some(repo_arg))?;
-        let registered_path = repo_entry.path.canonicalize()?;
+        let registered_path = crate::paths::normalize(&repo_entry.path);
         if registered_path != main_repo_path {
             return Err(EzError::RepoNotFound(format!(
                 "worktree belongs to '{}', but --repo resolved to '{}'",
@@ -541,12 +541,7 @@ fn resolve_registered_repo_for_worktree(
     index
         .repos
         .into_iter()
-        .find(|repo| {
-            repo.path
-                .canonicalize()
-                .map(|path| path == main_repo_path)
-                .unwrap_or(false)
-        })
+        .find(|repo| crate::paths::normalize(&repo.path) == main_repo_path)
         .ok_or_else(|| {
             EzError::RepoNotFound(format!(
                 "{} (register the main repo with `ez add {}` first)",
@@ -561,8 +556,7 @@ fn find_session_by_path<'a>(tree: &'a SessionTree, worktree_path: &Path) -> Opti
         session
             .path
             .as_deref()
-            .and_then(|path| path.canonicalize().ok())
-            .map(|path| path == worktree_path)
+            .map(|path| crate::paths::normalize(path) == worktree_path)
             .unwrap_or(false)
     })
 }
@@ -1818,7 +1812,7 @@ pub struct WorktreeInfo {
 
 impl WorktreeInfo {
     pub fn get_branch_for_path(&self, path: &Path) -> Option<String> {
-        let canonical = path.canonicalize().ok()?;
+        let canonical = crate::paths::normalize(path);
         self.branches.get(&canonical).cloned().flatten()
     }
 }
@@ -1861,9 +1855,8 @@ pub fn build_worktree_info(
 
     let mut branches: HashMap<PathBuf, Option<String>> = HashMap::new();
     for wt in &worktrees {
-        if let Ok(canonical) = wt.path.canonicalize() {
-            branches.insert(canonical, wt.branch.clone());
-        }
+        let canonical = crate::paths::normalize(&wt.path);
+        branches.insert(canonical, wt.branch.clone());
     }
 
     for wt in &worktrees {
@@ -1871,14 +1864,13 @@ pub fn build_worktree_info(
             if let Some(branch) = crate::browser::resolve_gitdir(&wt.path)
                 .and_then(|gd| crate::browser::recover_rebase_branch(&gd))
             {
-                if let Ok(canonical) = wt.path.canonicalize() {
-                    branches.insert(canonical, Some(branch));
-                }
+                let canonical = crate::paths::normalize(&wt.path);
+                branches.insert(canonical, Some(branch));
             }
         }
     }
 
-    let repo_canonical = repo_entry.path.canonicalize().ok();
+    let repo_canonical = Some(crate::paths::normalize(&repo_entry.path));
 
     // Also exclude the git-common-dir (handles submodules where the bare repo
     // at .git/modules/<name> appears as a worktree entry).
@@ -1892,28 +1884,19 @@ pub fn build_worktree_info(
                 repo_entry.path.join(p)
             }
         })
-        .and_then(|p| p.canonicalize().ok());
+        .map(|p| crate::paths::normalize(&p));
 
     let managed_paths: Vec<PathBuf> = tree
         .sessions
         .iter()
         .filter_map(|s| s.path.as_ref())
-        .filter_map(|p| p.canonicalize().ok())
+        .map(|p| crate::paths::normalize(p))
         .collect();
 
     let unmanaged = worktrees
         .into_iter()
         .filter(|wt| {
-            let canonical = match wt.path.canonicalize() {
-                Ok(c) => c,
-                Err(_) => {
-                    log::debug!(
-                        "build_worktree_info: prunable (path gone): {}",
-                        wt.path.display()
-                    );
-                    return false;
-                }
-            };
+            let canonical = crate::paths::normalize(&wt.path);
             if repo_canonical.as_ref() == Some(&canonical) {
                 return false;
             }

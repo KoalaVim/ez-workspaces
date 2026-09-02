@@ -146,6 +146,17 @@ bind -T prefix n display-popup -E -w 65% -h 65% "ez session note open"
 - jq (for bundled plugins)
 - tmux or zellij 0.40+ (optional)
 
+## Windows Prerequisites
+
+Plugins are bash scripts and require the following on Windows:
+
+1. **Git for Windows** — provides `bash.exe` used to run plugins
+   - Install: `winget install Git.Git` or download from https://gitforwindows.org
+2. **jq** — used by plugins for JSON parsing
+   - Install: `winget install stedolan.jq` or download from https://jqlang.github.io/jq/
+
+Or run `make setup` to install both automatically.
+
 ## License
 
 AGPL-3.0

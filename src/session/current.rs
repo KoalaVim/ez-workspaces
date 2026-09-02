@@ -340,7 +340,7 @@ fn session_path<'a>(session: &'a Session, repo_entry: &'a RepoEntry) -> Option<&
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    crate::paths::normalize(path)
 }
 
 fn path_matches_current(current_path: &Path, session_path: &Path) -> bool {
