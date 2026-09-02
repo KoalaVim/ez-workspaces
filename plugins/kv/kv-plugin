@@ -40,22 +40,26 @@ KV_ENV_NAME="$SESSION_NAME"
 
 dbg "hook=$HOOK repo=$REPO_NAME session=$SESSION_NAME is_default=$SESSION_IS_DEFAULT source_env=$SOURCE_ENV repos=$REPOS kv_env=$KV_ENV_NAME"
 
-# If repos is configured, only run on matching repos
-if [ -n "$REPOS" ]; then
-    match=false
-    IFS=',' read -ra REPO_LIST <<< "$REPOS"
-    for r in "${REPO_LIST[@]}"; do
-        r=$(echo "$r" | xargs)
-        if [ "$r" = "$REPO_NAME" ]; then
-            match=true
-            break
-        fi
-    done
-    if [ "$match" = "false" ]; then
-        dbg "repo '$REPO_NAME' not in repos list, skipping"
-        echo '{"success": true}'
-        exit 0
+# repos must be configured; empty means skip all repos
+if [ -z "$REPOS" ]; then
+    dbg "repos not configured, skipping"
+    echo '{"success": true}'
+    exit 0
+fi
+
+match=false
+IFS=',' read -ra REPO_LIST <<< "$REPOS"
+for r in "${REPO_LIST[@]}"; do
+    r=$(echo "$r" | xargs)
+    if [ "$r" = "$REPO_NAME" ]; then
+        match=true
+        break
     fi
+done
+if [ "$match" = "false" ]; then
+    dbg "repo '$REPO_NAME' not in repos list, skipping"
+    echo '{"success": true}'
+    exit 0
 fi
 
 if ! command -v kv &>/dev/null; then
