@@ -93,6 +93,7 @@ description = "Run automatically on session enter"
 ```
 
 - `session` is `null` for repo-level hooks and view hooks
+- `session.start_point` mirrors `ez_start_point` from the session env when set (PR checkout sets `origin/<headRefName>`); the bundled git-worktree plugin fetches an `origin/...` start point from the remote before branching from it, since the ref may not exist in the local clone yet
 - `config.plugin_state` carries this plugin's per-repo state from previous invocations
 - `config.user_config` carries user-facing settings from `[plugin_settings.<name>]` in config.toml
 - `view_context` is present for `on_view` and `on_view_select` hooks (contains `view_name`, `selected_value`, `selected_display`)

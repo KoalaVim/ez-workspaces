@@ -135,6 +135,38 @@ resolve_start_point() {
     fi
 }
 
+# Same as resolve_start_point, but honors an explicit `ez_start_point` override
+# (set by PR checkout as `origin/<headRefName>`, by session-from-dirty as a SHA).
+# An `origin/<ref>` override can name a branch this clone has never fetched, so
+# fetch that single ref first. The fetch TTL deliberately does not apply here: it
+# tracks the periodic origin/main refresh, not whether this ref exists locally.
+resolve_start_point_with_override() {
+    if [ -z "$START_POINT_OVERRIDE" ]; then
+        resolve_start_point
+        return
+    fi
+    if [[ "$START_POINT_OVERRIDE" == origin/* ]]; then
+        local ref="${START_POINT_OVERRIDE#origin/}"
+        dbg "start point strategy: override=$START_POINT_OVERRIDE (fetching $ref from origin)"
+        echo "fetching $START_POINT_OVERRIDE..." >&2
+        # Failure is not fatal on its own (offline with the ref already local is
+        # fine); verify_override_start_point decides whether we can proceed.
+        git -C "$REPO_PATH" fetch origin "$ref" 2>/dev/null || true
+    else
+        dbg "start point strategy: override=$START_POINT_OVERRIDE (not a remote ref, no fetch)"
+    fi
+    echo "$START_POINT_OVERRIDE"
+}
+
+# An override start point that still does not resolve is fatal: falling back to
+# origin/main would hand back a worktree that is not the PR the user asked for.
+verify_override_start_point() {
+    [ -n "$START_POINT_OVERRIDE" ] || return 0
+    git -C "$REPO_PATH" rev-parse --verify "$START_POINT_OVERRIDE" >/dev/null 2>&1 && return 0
+    json_error "Start point '$START_POINT_OVERRIDE' not found after fetching from origin (a PR opened from a fork has no branch on origin)."
+    return 1
+}
+
 json_error() {
     local err="$1"
     dbg "error: $err"
@@ -160,7 +192,8 @@ if [ "$HOOK" = "on_session_create" ] && [ -n "$SESSION_PATH" ]; then
         FETCH_STAMP="${GIT_DIR_ABS}/ez-fetch-stamp"
 
         BRANCH_NAME="${SESSION_NAME}"
-        START_POINT=$(resolve_start_point)
+        START_POINT=$(resolve_start_point_with_override)
+        verify_override_start_point || exit 0
         dbg "branch=$BRANCH_NAME start_point=$START_POINT"
 
         tc=$(t_ms)
@@ -209,12 +242,8 @@ case "$HOOK" in
                 exit 0
             fi
         else
-            if [ -n "$START_POINT_OVERRIDE" ]; then
-                START_POINT="$START_POINT_OVERRIDE"
-                dbg "start point: override=$START_POINT"
-            else
-                START_POINT=$(resolve_start_point)
-            fi
+            START_POINT=$(resolve_start_point_with_override)
+            verify_override_start_point || exit 0
             if git -C "$REPO_PATH" rev-parse --verify "origin/${BRANCH_NAME}" >/dev/null 2>&1; then
                 dbg "worktree add: tracking remote branch origin/${BRANCH_NAME}"
                 if ! git_err=$(git -C "$REPO_PATH" worktree add --track -b "$BRANCH_NAME" "$WORKTREE_PATH" "origin/${BRANCH_NAME}" 2>&1 >/dev/null); then
