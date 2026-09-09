@@ -117,6 +117,7 @@ description = "Run automatically on session enter"
   "shell_commands": ["echo 'hello'"],
   "post_shell_commands": ["tmux switch-client -t mysession"],
   "cd_target": "/path/to/directory",
+  "keep_cwd": false,
   "view_items": [
     { "display": "  Item 1", "value": "item-1" },
     { "display": "  Item 2", "value": "item-2" }
@@ -131,6 +132,7 @@ description = "Run automatically on session enter"
 - `shell_commands` are executed inside ez (before exit)
 - `post_shell_commands` are executed in the user's shell *after* ez exits — use for commands that need the terminal (e.g., `tmux switch-client`)
 - `cd_target` overrides the directory the shell wrapper will `cd` into
+- `keep_cwd: true` says the plugin already navigated the user (e.g. focused a workspace in its own multiplexer), so ez must leave the invoking shell's directory alone. It suppresses the cd that `on_enter`/`on_create` would otherwise write into the session's worktree; an explicit `cd_target` still wins. Set it only when the shell that ran `ez` keeps running where it is — a plugin that attaches a multiplexer *in that terminal* should leave it unset, so the cd still applies after detach
 - `view_items`, `view_prompt`, `view_preview_cmd` are returned by `on_view` hooks to provide items for plugin views
 - `resolved_name` is returned by `on_name_resolve` hooks to provide the resolved name (e.g. a branch name derived from a PR URL)
 - `error` is a string message if `success` is false
@@ -148,7 +150,7 @@ Plugins can register custom views that appear as keybinds alongside the built-in
 4. ez renders items in fzf with all view-switch keys active
 5. User selects an item (or switches to another view)
 6. ez calls the plugin with `on_view_select` hook, passing the selected item in `view_context`
-7. Plugin returns `post_shell_commands` and/or `cd_target`
+7. Plugin returns `post_shell_commands` and/or `cd_target` (or `keep_cwd` to suppress ez's own cd)
 8. ez writes post commands and exits; the shell wrapper executes them
 
 ### Conflict resolution
