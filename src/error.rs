@@ -35,6 +35,7 @@ pub enum EzError {
     #[error("Plugin '{0}' not found")]
     PluginNotFound(String),
 
+    #[cfg(windows)]
     #[error("Plugins require bash. Install Git for Windows: https://gitforwindows.org")]
     BashNotFound,
 

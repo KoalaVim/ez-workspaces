@@ -148,7 +148,14 @@ pub(super) fn run(
             }
             ActionResult::Select(idx) => {
                 let entry = repo_entries[idx];
-                if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config, branch_cache)? {
+                if browse_repo(
+                    &entry.path,
+                    selector,
+                    cd_file,
+                    post_cmd_file,
+                    config,
+                    branch_cache,
+                )? {
                     return Ok(Outcome::Done);
                 }
                 return Ok(Outcome::Switch(ViewMode::Repo));
