@@ -132,6 +132,12 @@ pub struct HookResponse {
     /// Override the cd target written to --cd-file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cd_target: Option<PathBuf>,
+    /// The plugin navigated on its own (e.g. focused a workspace in its own
+    /// multiplexer), so ez must not cd the shell that invoked it. Suppresses
+    /// both the implicit and the fallback cd of the `on_enter`/`on_create`
+    /// action; an explicit `cd_target` still wins.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep_cwd: bool,
     /// Items for a plugin view (returned from OnView hook).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_items: Option<Vec<ViewItem>>,
@@ -196,6 +202,7 @@ mod tests {
             shell_commands: vec!["tmux attach".into()],
             post_shell_commands: vec!["tmux switch-client -t foo".into()],
             cd_target: None,
+            keep_cwd: false,
             view_items: None,
             view_prompt: None,
             view_preview_cmd: None,
@@ -225,5 +232,13 @@ mod tests {
         assert!(parsed.post_shell_commands.is_empty());
         assert!(parsed.view_items.is_none());
         assert!(parsed.cd_target.is_none());
+        assert!(!parsed.keep_cwd);
+    }
+
+    #[test]
+    fn test_hook_response_keep_cwd() {
+        let json = r#"{"success": true, "keep_cwd": true}"#;
+        let parsed: HookResponse = serde_json::from_str(json).unwrap();
+        assert!(parsed.keep_cwd);
     }
 }

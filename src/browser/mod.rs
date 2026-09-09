@@ -359,6 +359,12 @@ fn apply_bind_response(
     Ok(())
 }
 
+/// Whether a bind response navigated the user somewhere, so `accept_session` must not fall
+/// back to a plain cd. `keep_cwd` counts: the plugin moved focus inside its own multiplexer.
+fn bind_handled_navigation(response: &plugin::protocol::HookResponse) -> bool {
+    response.cd_target.is_some() || !response.post_shell_commands.is_empty() || response.keep_cwd
+}
+
 /// Accept a session: either cd into it (default) or run a named plugin bind's hook.
 ///
 /// The `on_enter` value is matched against each session-context bind's `label`, `bind_name`,
@@ -366,6 +372,10 @@ fn apply_bind_response(
 /// carries a `cd_target` or `post_shell_commands` the function returns `Ok(())` after applying
 /// them. When there is no match, or the bind produces no navigation effect, the function falls
 /// back to a plain `cd` into `target_dir`.
+///
+/// A response with `keep_cwd` suppresses every cd this function would write on its own — the
+/// plugin navigated elsewhere (its own multiplexer workspace), so the invoking shell stays put.
+/// An explicit `cd_target` still wins; env exports are written either way.
 pub(crate) fn accept_session(
     on_enter: &str,
     repo_entry: &repo::model::RepoEntry,
@@ -406,10 +416,8 @@ pub(crate) fn accept_session(
             config,
         ) {
             Ok(response) => {
-                let has_effect =
-                    response.cd_target.is_some() || !response.post_shell_commands.is_empty();
-                if has_effect {
-                    if response.cd_target.is_none() {
+                if bind_handled_navigation(&response) {
+                    if response.cd_target.is_none() && !response.keep_cwd {
                         write_cd_target(cd_file, target_dir)?;
                     }
                     let mut all_commands = response.post_shell_commands.clone();
@@ -1332,6 +1340,53 @@ mod tests {
         let (a, r) = parse_label_input("-");
         assert!(a.is_empty());
         assert!(r.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod accept_session_tests {
+    use super::bind_handled_navigation;
+    use crate::plugin::protocol::HookResponse;
+    use std::path::PathBuf;
+
+    fn response(post: &[&str], cd: Option<&str>, keep_cwd: bool) -> HookResponse {
+        HookResponse {
+            success: true,
+            post_shell_commands: post.iter().map(|s| s.to_string()).collect(),
+            cd_target: cd.map(PathBuf::from),
+            keep_cwd,
+            ..Default::default()
+        }
+    }
+
+    /// The `on_create = herdr` case: herdr focused its own workspace, so ez writes no cd.
+    #[test]
+    fn keep_cwd_suppresses_ez_cd() {
+        let r = response(&["herdr worktree open ..."], None, true);
+        assert!(bind_handled_navigation(&r));
+        assert!(r.cd_target.is_none() && r.keep_cwd);
+    }
+
+    /// Same response without keep_cwd (tmux, zellij): ez still cds into the worktree.
+    #[test]
+    fn without_keep_cwd_ez_cds() {
+        let r = response(&["tmux attach -t foo"], None, false);
+        assert!(bind_handled_navigation(&r));
+        assert!(r.cd_target.is_none() && !r.keep_cwd);
+    }
+
+    /// An explicit cd_target wins over keep_cwd.
+    #[test]
+    fn explicit_cd_target_wins() {
+        let r = response(&[], Some("/tmp/elsewhere"), true);
+        assert!(bind_handled_navigation(&r));
+        assert_eq!(r.cd_target, Some(PathBuf::from("/tmp/elsewhere")));
+    }
+
+    /// A no-op response leaves the fallback cd in place.
+    #[test]
+    fn no_effect_falls_back_to_cd() {
+        assert!(!bind_handled_navigation(&response(&[], None, false)));
     }
 }
 

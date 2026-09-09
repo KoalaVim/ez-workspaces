@@ -191,7 +191,10 @@ on_session_enter)
 on_bind)
     if guard; then
         if [ "$INSIDE_HERDR" = "true" ]; then
-            jq -n --arg cmd "$(open_cmd)" '{success: true, post_shell_commands: [$cmd], accept: true}'
+            # keep_cwd: focus moves to the herdr workspace, so the shell that ran
+            # ez (e.g. on_create = "herdr") must stay in its own directory.
+            jq -n --arg cmd "$(open_cmd)" \
+                '{success: true, post_shell_commands: [$cmd], accept: true, keep_cwd: true}'
         else
             jq -n --arg cmd "$(open_and_attach_cmd)" '{success: true, post_shell_commands: [$cmd], accept: true}'
         fi
