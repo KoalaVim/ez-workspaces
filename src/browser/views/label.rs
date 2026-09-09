@@ -157,7 +157,14 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => match &tagged[idx] {
             LabeledItem::Repo(r) => {
-                if browse_repo(&r.path, selector, cd_file, post_cmd_file, config, branch_cache)? {
+                if browse_repo(
+                    &r.path,
+                    selector,
+                    cd_file,
+                    post_cmd_file,
+                    config,
+                    branch_cache,
+                )? {
                     Ok(Outcome::Done)
                 } else {
                     Ok(Outcome::Switch(ViewMode::Label))

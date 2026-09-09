@@ -98,7 +98,14 @@ pub(super) fn run(
         None => return Ok(Outcome::Switch(ViewMode::Workspace)),
     };
 
-    if browse_repo(&repo_path, selector, cd_file, post_cmd_file, config, branch_cache)? {
+    if browse_repo(
+        &repo_path,
+        selector,
+        cd_file,
+        post_cmd_file,
+        config,
+        branch_cache,
+    )? {
         Ok(Outcome::Done)
     } else {
         Ok(Outcome::Switch(ViewMode::Workspace))

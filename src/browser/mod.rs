@@ -45,12 +45,14 @@ impl BranchCache {
         }
 
         log::debug!("BranchCache: miss for {}", path.display());
-        let branch = git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
-            .or_else(|| {
-                let gitdir = resolve_gitdir(path)?;
-                recover_rebase_branch(&gitdir)
-            });
-        self.cache.lock().unwrap().insert(path.to_path_buf(), (branch.clone(), mtime));
+        let branch = git_cmd(path, &["symbolic-ref", "--short", "HEAD"]).or_else(|| {
+            let gitdir = resolve_gitdir(path)?;
+            recover_rebase_branch(&gitdir)
+        });
+        self.cache
+            .lock()
+            .unwrap()
+            .insert(path.to_path_buf(), (branch.clone(), mtime));
         branch
     }
 
@@ -180,7 +182,14 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         } else {
             std::env::current_dir()?.join(repo_path)
         };
-        if browse_repo(&repo_path, &selector, cd_file, post_cmd_file, &config, &branch_cache)? {
+        if browse_repo(
+            &repo_path,
+            &selector,
+            cd_file,
+            post_cmd_file,
+            &config,
+            &branch_cache,
+        )? {
             return Ok(());
         }
         // Esc/cancel: fall through to global view
@@ -192,7 +201,14 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         if let Some(repo_root) = detect_repo_root() {
             let index = repo::store::load_index()?;
             if let Some(entry) = index.find_by_path(&repo_root) {
-                match session_action_loop(entry, &selector, cd_file, post_cmd_file, &config, &branch_cache)? {
+                match session_action_loop(
+                    entry,
+                    &selector,
+                    cd_file,
+                    post_cmd_file,
+                    &config,
+                    &branch_cache,
+                )? {
                     SessionLoopResult::Accepted => return Ok(()),
                     SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => {}
                 }
@@ -206,7 +222,15 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         None => views::ViewMode::from_flag(&config.default_select_by, &config)?,
     };
 
-    views::run(mode, &selector, &config, workspace, cd_file, post_cmd_file, &branch_cache)
+    views::run(
+        mode,
+        &selector,
+        &config,
+        workspace,
+        cd_file,
+        post_cmd_file,
+        &branch_cache,
+    )
 }
 
 /// Register repo if needed and enter session action loop.
@@ -241,7 +265,14 @@ pub(crate) fn browse_repo(
         })?
     };
 
-    match session_action_loop(&repo_entry, selector, cd_file, post_cmd_file, config, branch_cache)? {
+    match session_action_loop(
+        &repo_entry,
+        selector,
+        cd_file,
+        post_cmd_file,
+        config,
+        branch_cache,
+    )? {
         SessionLoopResult::Accepted => Ok(true),
         SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => Ok(false),
     }

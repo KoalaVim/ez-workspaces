@@ -95,7 +95,9 @@ pub(super) fn run(
             };
             let repo_cont = if is_last_repo { "    " } else { "│   " };
 
-            let branch = branch_cache.get_branch(repo_path).unwrap_or_else(|| "?".into());
+            let branch = branch_cache
+                .get_branch(repo_path)
+                .unwrap_or_else(|| "?".into());
 
             nodes.push((
                 format!(

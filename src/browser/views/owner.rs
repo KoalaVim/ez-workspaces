@@ -93,7 +93,12 @@ pub(super) fn run(
             let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
             let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
             SelectItem {
-                display: format_repo_display(&r.name, Some(&path_str), Some(branch_str), &meta.labels),
+                display: format_repo_display(
+                    &r.name,
+                    Some(&path_str),
+                    Some(branch_str),
+                    &meta.labels,
+                ),
                 value: r.path.to_string_lossy().to_string(),
             }
         })
@@ -120,7 +125,14 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => {
             let entry = &entries[idx];
-            if browse_repo(&entry.path, selector, cd_file, post_cmd_file, config, branch_cache)? {
+            if browse_repo(
+                &entry.path,
+                selector,
+                cd_file,
+                post_cmd_file,
+                config,
+                branch_cache,
+            )? {
                 Ok(Outcome::Done)
             } else {
                 Ok(Outcome::Switch(ViewMode::Owner))

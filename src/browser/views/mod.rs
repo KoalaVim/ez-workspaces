@@ -83,7 +83,14 @@ pub(crate) fn run(
             ViewMode::Tree => tree::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
             ViewMode::Workspace => {
                 let jump = workspace_jump.take();
-                workspace::run(selector, config, cd_file, post_cmd_file, jump.as_deref(), branch_cache)?
+                workspace::run(
+                    selector,
+                    config,
+                    cd_file,
+                    post_cmd_file,
+                    jump.as_deref(),
+                    branch_cache,
+                )?
             }
             ViewMode::Repo => repo::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
             ViewMode::Owner => owner::run(selector, config, cd_file, post_cmd_file, branch_cache)?,
