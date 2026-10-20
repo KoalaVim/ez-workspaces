@@ -92,12 +92,18 @@ fn main() {
             path,
             session_actions,
             session_id,
+            root,
         }) => {
             // fzf pipes preview output — force colors on (unless --no-color)
             if !cli.no_color {
                 colored::control::set_override(true);
             }
-            browser::preview(&path, session_actions, session_id.as_deref())
+            let origin = if root {
+                browser::PickerOrigin::Root
+            } else {
+                browser::PickerOrigin::View
+            };
+            browser::preview(&path, session_actions, session_id.as_deref(), origin)
         }
         Some(Command::Daemon { command }) => daemon::dispatch(command),
     };

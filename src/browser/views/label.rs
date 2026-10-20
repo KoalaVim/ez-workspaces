@@ -11,8 +11,8 @@ use crate::repo;
 use crate::session;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, write_cd_target, BranchCache};
-use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
+use super::super::{write_cd_target, BranchCache};
+use super::{match_view_switch, open_repo, view_header, view_switch_keys, Outcome, ViewMode};
 
 #[derive(Clone)]
 enum LabeledItem {
@@ -156,20 +156,15 @@ pub(super) fn run(
             }
         }
         ActionResult::Select(idx) => match &tagged[idx] {
-            LabeledItem::Repo(r) => {
-                if browse_repo(
-                    &r.path,
-                    selector,
-                    cd_file,
-                    post_cmd_file,
-                    config,
-                    branch_cache,
-                )? {
-                    Ok(Outcome::Done)
-                } else {
-                    Ok(Outcome::Switch(ViewMode::Label))
-                }
-            }
+            LabeledItem::Repo(r) => open_repo(
+                &r.path,
+                ViewMode::Label,
+                selector,
+                cd_file,
+                post_cmd_file,
+                config,
+                branch_cache,
+            ),
             LabeledItem::Session(b) => {
                 let target = b
                     .session

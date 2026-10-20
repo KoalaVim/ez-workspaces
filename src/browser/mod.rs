@@ -132,8 +132,17 @@ impl SortMode {
     }
 }
 
+/// Where the session picker was opened from.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum SessionLoopResult {
+pub enum PickerOrigin {
+    /// The starting screen (auto-detect or `--repo`): Esc quits.
+    Root,
+    /// Opened from a view: Esc goes back to it.
+    View,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SessionLoopResult {
     Accepted,
     Cancelled,
     ViewAll,
@@ -182,17 +191,21 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
         } else {
             std::env::current_dir()?.join(repo_path)
         };
-        if browse_repo(
+        match browse_repo(
             &repo_path,
             &selector,
             cd_file,
             post_cmd_file,
             &config,
             &branch_cache,
+            PickerOrigin::Root,
         )? {
-            return Ok(());
+            // The session picker is the root view here, so cancelling exits
+            // rather than dropping the user into a view they never came from.
+            SessionLoopResult::Accepted | SessionLoopResult::Cancelled => return Ok(()),
+            // Only an explicit view_all press falls through to the global view.
+            SessionLoopResult::ViewAll => {}
         }
-        // Esc/cancel: fall through to global view
     }
 
     // Auto-detect: if cwd is inside a registered repo (or one of its worktrees),
@@ -208,9 +221,11 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
                     post_cmd_file,
                     &config,
                     &branch_cache,
+                    PickerOrigin::Root,
                 )? {
-                    SessionLoopResult::Accepted => return Ok(()),
-                    SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => {}
+                    // Root view: cancelling exits instead of falling through.
+                    SessionLoopResult::Accepted | SessionLoopResult::Cancelled => return Ok(()),
+                    SessionLoopResult::ViewAll => {}
                 }
             }
         }
@@ -234,16 +249,18 @@ pub fn browse(options: BrowseOptions<'_>) -> Result<()> {
 }
 
 /// Register repo if needed and enter session action loop.
-/// Returns `true` when a session was accepted (caller should exit the browser),
-/// `false` when the user cancelled (caller should go back).
-pub(crate) fn browse_repo(
+/// Returns the loop's outcome unchanged: `Accepted` when a session was
+/// accepted (caller should exit the browser), `Cancelled` when the user
+/// cancelled, `ViewAll` when they asked for the global browser view.
+fn browse_repo(
     repo_path: &Path,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
     branch_cache: &BranchCache,
-) -> Result<bool> {
+    origin: PickerOrigin,
+) -> Result<SessionLoopResult> {
     let index = repo::store::load_index()?;
     let repo_entry = if let Some(entry) = index.find_by_path(repo_path) {
         entry.clone()
@@ -265,17 +282,15 @@ pub(crate) fn browse_repo(
         })?
     };
 
-    match session_action_loop(
+    session_action_loop(
         &repo_entry,
         selector,
         cd_file,
         post_cmd_file,
         config,
         branch_cache,
-    )? {
-        SessionLoopResult::Accepted => Ok(true),
-        SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => Ok(false),
-    }
+        origin,
+    )
 }
 
 /// Check if a path is already tracked as a session worktree under any registered repo.
@@ -477,13 +492,17 @@ pub(crate) fn accept_session(
 /// Session selection loop with action keybinds.
 /// Returns `Accepted` when a session was accepted, `Cancelled` when cancelled,
 /// or `ViewAll` when the user asked to switch to the global browser view.
-pub(crate) fn session_action_loop(
+///
+/// `origin` only labels Esc in the preview's keybind help — what cancelling
+/// actually does is the caller's decision.
+fn session_action_loop(
     repo_entry: &repo::model::RepoEntry,
     selector: &dyn InteractiveSelector,
     cd_file: Option<&Path>,
     post_cmd_file: Option<&Path>,
     config: &config::model::EzConfig,
     branch_cache: &BranchCache,
+    origin: PickerOrigin,
 ) -> Result<SessionLoopResult> {
     // Update repo last_accessed timestamp on browse-into
     if let Ok(mut meta) = repo::store::load_repo_meta(&repo_entry.id) {
@@ -597,10 +616,15 @@ pub(crate) fn session_action_loop(
 
         let ez_bin = std::env::current_exe().ok();
         let repo_path_str = repo_entry.path.to_string_lossy();
+        let root_flag = match origin {
+            PickerOrigin::Root => " --root",
+            PickerOrigin::View => "",
+        };
         let preview_cmd = ez_bin.map(|bin| {
             format!(
-                "{} preview --session-actions --session-id {{}} {}",
+                "{} preview --session-actions{} --session-id {{}} {}",
                 bin.display(),
+                root_flag,
                 repo_path_str
             )
         });

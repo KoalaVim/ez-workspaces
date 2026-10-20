@@ -22,7 +22,7 @@ use crate::error::{EzError, Result};
 use crate::plugin;
 
 use super::selector::InteractiveSelector;
-use super::BranchCache;
+use super::{browse_repo, BranchCache, PickerOrigin, SessionLoopResult};
 
 /// Top-level view modes selectable via keybinds.
 #[derive(Clone, Debug)]
@@ -121,6 +121,33 @@ pub(crate) fn run(
 pub(super) enum Outcome {
     Done,
     Switch(ViewMode),
+}
+
+/// Open a repo's session picker from a view. Accepting a session finishes the
+/// browser; cancelling or `view_all` returns to `return_to`.
+pub(super) fn open_repo(
+    repo_path: &Path,
+    return_to: ViewMode,
+    selector: &dyn InteractiveSelector,
+    cd_file: Option<&Path>,
+    post_cmd_file: Option<&Path>,
+    config: &config::model::EzConfig,
+    branch_cache: &BranchCache,
+) -> Result<Outcome> {
+    let result = browse_repo(
+        repo_path,
+        selector,
+        cd_file,
+        post_cmd_file,
+        config,
+        branch_cache,
+        PickerOrigin::View,
+    )?;
+    log::debug!("open_repo: {} -> {:?}", repo_path.display(), result);
+    Ok(match result {
+        SessionLoopResult::Accepted => Outcome::Done,
+        SessionLoopResult::Cancelled | SessionLoopResult::ViewAll => Outcome::Switch(return_to),
+    })
 }
 
 /// Keys registered with `select_with_actions` for view-switching; the caller

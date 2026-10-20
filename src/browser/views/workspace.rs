@@ -8,8 +8,8 @@ use crate::paths;
 use crate::plugin;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, drill_into_directory, BranchCache};
-use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
+use super::super::{drill_into_directory, BranchCache};
+use super::{match_view_switch, open_repo, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
     selector: &dyn InteractiveSelector,
@@ -98,16 +98,13 @@ pub(super) fn run(
         None => return Ok(Outcome::Switch(ViewMode::Workspace)),
     };
 
-    if browse_repo(
+    open_repo(
         &repo_path,
+        ViewMode::Workspace,
         selector,
         cd_file,
         post_cmd_file,
         config,
         branch_cache,
-    )? {
-        Ok(Outcome::Done)
-    } else {
-        Ok(Outcome::Switch(ViewMode::Workspace))
-    }
+    )
 }

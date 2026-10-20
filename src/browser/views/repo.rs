@@ -9,8 +9,8 @@ use crate::plugin;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, format_repo_display, parse_label_input, BranchCache, SortMode};
-use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
+use super::super::{format_repo_display, parse_label_input, BranchCache, SortMode};
+use super::{match_view_switch, open_repo, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
     selector: &dyn InteractiveSelector,
@@ -148,17 +148,15 @@ pub(super) fn run(
             }
             ActionResult::Select(idx) => {
                 let entry = repo_entries[idx];
-                if browse_repo(
+                return open_repo(
                     &entry.path,
+                    ViewMode::Repo,
                     selector,
                     cd_file,
                     post_cmd_file,
                     config,
                     branch_cache,
-                )? {
-                    return Ok(Outcome::Done);
-                }
-                return Ok(Outcome::Switch(ViewMode::Repo));
+                );
             }
         }
     }

@@ -10,8 +10,8 @@ use crate::plugin;
 use crate::repo;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, format_repo_display, BranchCache};
-use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
+use super::super::{format_repo_display, BranchCache};
+use super::{match_view_switch, open_repo, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
     selector: &dyn InteractiveSelector,
@@ -125,18 +125,15 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => {
             let entry = &entries[idx];
-            if browse_repo(
+            open_repo(
                 &entry.path,
+                ViewMode::Owner,
                 selector,
                 cd_file,
                 post_cmd_file,
                 config,
                 branch_cache,
-            )? {
-                Ok(Outcome::Done)
-            } else {
-                Ok(Outcome::Switch(ViewMode::Owner))
-            }
+            )
         }
     }
 }
