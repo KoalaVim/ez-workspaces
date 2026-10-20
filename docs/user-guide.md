@@ -530,6 +530,8 @@ Or set the `NO_COLOR` environment variable (respected automatically).
 
 In interactive menus (browsing directories, config wizard), pressing **Escape** goes back to the previous level instead of quitting. At the top level, Escape exits.
 
+**Ctrl-C** quits ez immediately from any level. This relies on fzf's `become` action (fzf 0.38+).
+
 ## Environment Variables
 
 Sessions can carry environment variables. Plugins may set them (for example PR metadata), and you can manage them directly with `ez session env`:

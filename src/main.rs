@@ -107,7 +107,7 @@ fn main() {
     }
 
     if let Err(e) = result {
-        if matches!(e, error::EzError::Cancelled) {
+        if matches!(e, error::EzError::Cancelled | error::EzError::Interrupted) {
             std::process::exit(130);
         }
         eprintln!("{} {e}", "ez:".red().bold());

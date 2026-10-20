@@ -277,6 +277,10 @@ The browser SHALL implement consistent back navigation across all levels. Escape
 - **WHEN** user presses Escape at the top level of any view (workspace root list, repo list, tree view)
 - **THEN** system exits the browser with code 130
 
+#### Scenario: Ctrl-C exits from any level
+- **WHEN** user presses Ctrl-C in any browser prompt (session loop, drill-down, view, name builder, input)
+- **THEN** system exits the browser immediately with code 130, without going back a level
+
 ### Requirement: LRU sort toggle
 The browser SHALL support a `ctrl-s` keybind in all views (Repo, Workspace, Owner, Label, Tree, session picker) that toggles the sort order between alphabetical and LRU (most recently accessed first). The current sort mode SHALL be displayed in the fzf header. The sort state SHALL persist across view switches within a single browser session.
 

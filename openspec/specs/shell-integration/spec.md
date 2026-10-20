@@ -126,10 +126,14 @@ The system SHALL support `--debug` flag that writes debug logs to `/tmp/ez-debug
 - **THEN** system logs to a temp file, sets `EZ_DEBUG=1`, and prints the log path on exit
 
 ### Requirement: Cancellation exit code
-The system SHALL exit with code 130 when the user cancels (Escape/Ctrl-C), matching the Unix convention for SIGINT termination.
+The system SHALL exit with code 130 when the user cancels (Escape at the top level, or Ctrl-C at any level), matching the Unix convention for SIGINT termination.
 
 #### Scenario: Cancel exits 130
 - **WHEN** user presses Escape at the top level of the browser
+- **THEN** ez exits with code 130
+
+#### Scenario: Ctrl-C exits 130
+- **WHEN** user presses Ctrl-C at any level of the browser
 - **THEN** ez exits with code 130
 
 ### Requirement: Return to ez after tmux detach

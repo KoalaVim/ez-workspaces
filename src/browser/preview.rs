@@ -673,6 +673,7 @@ fn preview_keybind_help() {
             "Toggle sort".into(),
         ),
         ("Esc".bold().dimmed().to_string(), "Go back".into()),
+        ("Ctrl-C".bold().dimmed().to_string(), "Quit".into()),
     ];
     for pv in plugin::collect_plugin_views("session", &config).unwrap_or_default() {
         right.push((

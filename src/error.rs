@@ -45,6 +45,10 @@ pub enum EzError {
     #[error("Aborted.")]
     Cancelled,
 
+    /// Ctrl-C in an interactive prompt: quit ez from any level.
+    #[error("Interrupted.")]
+    Interrupted,
+
     #[error("Git error: {0}")]
     Git(String),
 

@@ -1,7 +1,21 @@
 use std::io::Write;
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 
 use crate::error::{EzError, Result};
+
+/// fzf binding that makes Ctrl-C exit with a code distinct from Esc (130),
+/// so Ctrl-C quits ez from any level while Esc goes back one level.
+const CTRL_C_BIND: &str = "ctrl-c:become(exit 131)";
+const CTRL_C_EXIT: i32 = 131;
+
+/// Returns `Err(Interrupted)` when fzf exited via the Ctrl-C binding.
+fn check_interrupt(status: &ExitStatus) -> Result<()> {
+    if status.code() == Some(CTRL_C_EXIT) {
+        log::debug!("fzf: ctrl-c pressed, quitting ez");
+        return Err(EzError::Interrupted);
+    }
+    Ok(())
+}
 
 /// An item presented in the interactive selector.
 pub struct SelectItem {
@@ -17,7 +31,7 @@ pub enum ActionResult {
     Select(usize),
     /// User pressed a keybind — action key + selected index.
     Action(String, usize),
-    /// User cancelled (Escape/Ctrl-C).
+    /// User cancelled (Escape).
     Cancel,
 }
 
@@ -29,12 +43,15 @@ pub enum StageOutcome {
     Picked(String),
     /// User asked to go back to the previous stage.
     Back,
-    /// User cancelled the whole flow (Esc / Ctrl-C).
+    /// User cancelled the whole flow (Esc).
     Cancel,
 }
 
 /// Trait for interactive selection UIs. Default impl uses fzf.
 /// Implementors can swap in skim, dialoguer, or a TUI framework.
+///
+/// Esc is reported per method (`None` / `Cancel`) so callers can go back;
+/// Ctrl-C returns `Err(EzError::Interrupted)` so it propagates and quits ez.
 pub trait InteractiveSelector {
     /// Present a list of items, return the selected item's index.
     fn select_one(
@@ -171,6 +188,9 @@ impl InteractiveSelector for FzfSelector {
             args.push("right:50%".to_string());
         }
 
+        args.push("--bind".to_string());
+        args.push(CTRL_C_BIND.to_string());
+
         if let Some(opts) = &self.extra_opts {
             args.extend(opts.split_whitespace().map(String::from));
         }
@@ -195,6 +215,7 @@ impl InteractiveSelector for FzfSelector {
         }
 
         let output = child.wait_with_output()?;
+        check_interrupt(&output.status)?;
 
         log::debug!(
             "select_one: fzf exit={}, stdout={:?}",
@@ -245,6 +266,9 @@ impl InteractiveSelector for FzfSelector {
             "--ansi".to_string(),
         ];
 
+        args.push("--bind".to_string());
+        args.push(CTRL_C_BIND.to_string());
+
         if let Some(opts) = &self.extra_opts {
             args.extend(opts.split_whitespace().map(String::from));
         }
@@ -264,6 +288,7 @@ impl InteractiveSelector for FzfSelector {
         }
 
         let output = child.wait_with_output()?;
+        check_interrupt(&output.status)?;
 
         if !output.status.success() {
             return Ok(Vec::new());
@@ -292,6 +317,8 @@ impl InteractiveSelector for FzfSelector {
             "~10%".to_string(),
             "--layout".to_string(),
             "reverse".to_string(),
+            "--bind".to_string(),
+            CTRL_C_BIND.to_string(),
         ];
 
         if let Some(def) = default {
@@ -311,6 +338,7 @@ impl InteractiveSelector for FzfSelector {
         drop(child.stdin.take());
 
         let output = child.wait_with_output()?;
+        check_interrupt(&output.status)?;
         let result = String::from_utf8_lossy(&output.stdout)
             .lines()
             .next()
@@ -381,6 +409,9 @@ impl InteractiveSelector for FzfSelector {
             args.push("ctrl-p".to_string());
         }
 
+        args.push("--bind".to_string());
+        args.push(CTRL_C_BIND.to_string());
+
         if let Some(opts) = &self.extra_opts {
             args.extend(opts.split_whitespace().map(String::from));
         }
@@ -400,12 +431,13 @@ impl InteractiveSelector for FzfSelector {
         }
 
         let output = child.wait_with_output()?;
+        check_interrupt(&output.status)?;
         let code = output.status.code().unwrap_or(-1);
 
         // Exit codes with --print-query:
         //   0  → Enter on a matching list item
         //   1  → Enter with no matching item (typed-query path)
-        //   130 → Esc / Ctrl-C
+        //   130 → Esc (Ctrl-C exits 131, handled above)
         if code == 130 {
             log::debug!("select_with_back: cancelled (exit 130)");
             return Ok(StageOutcome::Cancel);
@@ -466,6 +498,8 @@ impl InteractiveSelector for FzfSelector {
             "~10%".to_string(),
             "--layout".to_string(),
             "reverse".to_string(),
+            "--bind".to_string(),
+            CTRL_C_BIND.to_string(),
         ];
 
         let hint = if allow_back {
@@ -503,6 +537,7 @@ impl InteractiveSelector for FzfSelector {
         drop(child.stdin.take());
 
         let output = child.wait_with_output()?;
+        check_interrupt(&output.status)?;
         let code = output.status.code().unwrap_or(-1);
 
         if code == 130 {
@@ -587,6 +622,9 @@ impl InteractiveSelector for FzfSelector {
             args.push("right:50%".to_string());
         }
 
+        args.push("--bind".to_string());
+        args.push(CTRL_C_BIND.to_string());
+
         if let Some(opts) = &self.extra_opts {
             args.extend(opts.split_whitespace().map(String::from));
         }
@@ -610,6 +648,7 @@ impl InteractiveSelector for FzfSelector {
         }
 
         let output = child.wait_with_output()?;
+        check_interrupt(&output.status)?;
 
         log::debug!("fzf exit status: {}", output.status);
         log::debug!(
