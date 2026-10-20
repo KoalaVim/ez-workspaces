@@ -137,9 +137,6 @@ pub enum Command {
         /// Session ID for session-specific preview
         #[arg(long, hide = true)]
         session_id: Option<String>,
-        /// The session picker is the root view, so Esc quits rather than going back
-        #[arg(long, hide = true)]
-        root: bool,
     },
 
     /// Manage the background daemon (PR status updates, etc.)

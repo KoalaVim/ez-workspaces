@@ -14,7 +14,7 @@ The system SHALL define an `InteractiveSelector` trait with 7 methods that cover
 - **THEN** it calls methods on `&dyn InteractiveSelector`, never references a concrete backend type
 
 ### Requirement: Single selection
-The trait SHALL provide `select_one` to present a list of items and return the selected index. It accepts an optional preview command string. It SHALL return `None` on cancel (Escape/Ctrl-C).
+The trait SHALL provide `select_one` to present a list of items and return the selected index. It accepts an optional preview command string. It SHALL return `None` on cancel (Escape).
 
 #### Scenario: Select from list
 - **WHEN** `select_one` is called with items and a prompt
@@ -85,6 +85,13 @@ The trait SHALL provide `select_with_actions` for the session action loop and vi
 #### Scenario: Cancel
 - **WHEN** user presses Escape
 - **THEN** method returns `ActionResult::Cancel`
+
+### Requirement: Ctrl-C interrupts
+Every selector method SHALL return `Err(EzError::Interrupted)` when the user presses Ctrl-C, distinct from Escape's `None` / `Cancel`, so Ctrl-C propagates up and quits ez from any level. The fzf backend binds `ctrl-c:become(exit 131)` and maps exit code 131 to `Interrupted` (Escape keeps fzf's 130).
+
+#### Scenario: Ctrl-C returns Interrupted
+- **WHEN** user presses Ctrl-C in any selector prompt
+- **THEN** method returns `Err(EzError::Interrupted)`
 
 ### Requirement: Data types are backend-agnostic
 `SelectItem` (display + value strings), `ActionResult`, and `StageOutcome` SHALL contain no backend-specific data. They use plain strings and indices.

@@ -10,7 +10,7 @@ use crate::error::{EzError, Result};
 use crate::paths;
 use model::EzConfig;
 
-/// Helper: select_one that returns Cancelled on None (Ctrl+C / Escape).
+/// Helper: select_one that returns Cancelled on None (Escape).
 fn require_select(
     selector: &dyn InteractiveSelector,
     items: &[SelectItem],
@@ -341,7 +341,7 @@ fn interactive_init() -> Result<()> {
 }
 
 /// Browse directories interactively starting from home.
-/// Returns the selected directory path, or Cancelled on Ctrl+C.
+/// Returns the selected directory path, or Cancelled on Escape at the top level.
 fn browse_for_directory(
     selector: &dyn InteractiveSelector,
     start_from: Option<&std::path::Path>,

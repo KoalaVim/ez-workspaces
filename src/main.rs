@@ -92,18 +92,12 @@ fn main() {
             path,
             session_actions,
             session_id,
-            root,
         }) => {
             // fzf pipes preview output — force colors on (unless --no-color)
             if !cli.no_color {
                 colored::control::set_override(true);
             }
-            let origin = if root {
-                browser::PickerOrigin::Root
-            } else {
-                browser::PickerOrigin::View
-            };
-            browser::preview(&path, session_actions, session_id.as_deref(), origin)
+            browser::preview(&path, session_actions, session_id.as_deref())
         }
         Some(Command::Daemon { command }) => daemon::dispatch(command),
     };
@@ -113,7 +107,7 @@ fn main() {
     }
 
     if let Err(e) = result {
-        if matches!(e, error::EzError::Cancelled) {
+        if matches!(e, error::EzError::Cancelled | error::EzError::Interrupted) {
             std::process::exit(130);
         }
         eprintln!("{} {e}", "ez:".red().bold());

@@ -173,12 +173,8 @@ After the managed session items, the picker SHALL append a "Not Registered" sect
 - **AND** the browser exits and the shell wrapper cd's into the notes directory
 
 #### Scenario: Cancel returns to view layer
-- **WHEN** user presses Escape in the session action loop, having reached it by selecting a repo from a view
+- **WHEN** user presses Escape in the session action loop
 - **THEN** system returns to the previous view level (the view that was active before repo selection)
-
-#### Scenario: Cancel exits when the session action loop is the root view
-- **WHEN** user presses Escape in the session action loop, having reached it directly via auto-detect or `--repo`
-- **THEN** ez exits with a success status and does not open any other view
 
 #### Scenario: Tree glyph rendering
 - **WHEN** sessions are displayed in the session action loop
@@ -218,10 +214,6 @@ The browser SHALL auto-detect whether the user is inside a registered repo (or o
 #### Scenario: Force full browser
 - **WHEN** user runs `ez --all`
 - **THEN** auto-detection is skipped and the full view layer is shown
-
-#### Scenario: Cancel from an auto-detected session picker exits
-- **WHEN** user cancels the session picker that auto-detect opened
-- **THEN** ez exits with a success status rather than falling through to the view layer
 
 ### Requirement: Preview pane
 The browser SHALL show a preview pane (right 50%) in fzf. The preview calls back into the ez binary (`ez preview <path>`) to render context-dependent information. The fzf title/header SHALL only show minimal state (current view name, sort mode) — all keybinds SHALL be displayed in the preview pane instead.
@@ -271,13 +263,7 @@ The browser SHALL parse comma-separated label edit strings where labels prefixed
 - **THEN** system ignores the bare dash (no add, no remove)
 
 ### Requirement: Consistent back navigation
-The browser SHALL implement consistent back navigation across all levels. Escape SHALL always return to the previous navigation level: from the session action loop to the view layer, from directory drill-down to the parent directory, from views to exit. Back navigation SHALL never skip levels or exit the browser unexpectedly. Cancelling SHALL never move the user to a navigation level they did not arrive from.
-
-The root navigation level depends on how ez was launched. When the session picker is the entry point — bare `ez` inside a registered repo or one of its worktrees, or `ez --repo <path>` — the session picker IS the root level, and cancelling it SHALL exit ez. It SHALL NOT fall through to the global browser view. Reaching the global browser view from the session picker is done deliberately with the `view_all` keybind (default `ctrl-a`), not by cancelling.
-
-Escape and Ctrl-C SHALL behave identically wherever cancellation is offered.
-
-Cancelling SHALL exit with a success status, the same as cancelling at the top level of any view. Cancellation is a normal outcome, not an error: the shell wrapper propagates ez's exit status to the calling shell, so a failure status would mark every cancelled browse as an error in the user's prompt.
+The browser SHALL implement consistent back navigation across all levels. Escape SHALL always return to the previous navigation level: from the session action loop to the view layer, from directory drill-down to the parent directory, from views to exit. Back navigation SHALL never skip levels or exit the browser unexpectedly.
 
 #### Scenario: Escape in session loop returns to view
 - **WHEN** user presses Escape in the session action loop after selecting a repo from any view
@@ -289,40 +275,11 @@ Cancelling SHALL exit with a success status, the same as cancelling at the top l
 
 #### Scenario: Escape at top level exits
 - **WHEN** user presses Escape at the top level of any view (workspace root list, repo list, tree view)
-- **THEN** system exits the browser with a success status
+- **THEN** system exits the browser with code 130
 
-#### Scenario: Escape in an auto-detected repo exits
-- **WHEN** user runs bare `ez` inside a registered repo, the session picker opens by auto-detect, and the user presses Escape
-- **THEN** ez exits with a success status
-- **AND** the global browser view is not shown
-- **AND** the shell returns to the directory it was launched from
-
-#### Scenario: Ctrl-C in an auto-detected repo exits
-- **WHEN** user runs bare `ez` inside a registered repo and presses Ctrl-C in the session picker
-- **THEN** ez exits with a success status
-- **AND** the global browser view is not shown
-
-#### Scenario: Escape with `--repo` exits
-- **WHEN** user runs `ez --repo <path>` and presses Escape in the session picker
-- **THEN** ez exits with a success status
-- **AND** the global browser view is not shown
-
-#### Scenario: Escape inside a worktree of an auto-detected repo exits
-- **WHEN** user runs bare `ez` inside a worktree of a registered repo and presses Escape in the session picker
-- **THEN** ez exits with a success status
-
-#### Scenario: View-all keybind still reaches the global view
-- **WHEN** user is in a root-entry session picker and presses the `view_all` keybind
-- **THEN** the global browser view opens in the default view mode
-- **AND** cancelling there exits ez
-
-#### Scenario: Keybind help labels Escape by navigation level
-- **WHEN** user views the session picker's preview-pane keybind help in a root-entry session picker
-- **THEN** the help shows Escape as `Quit`
-
-#### Scenario: Keybind help shows go-back when nested
-- **WHEN** user views the session picker's preview-pane keybind help after reaching it by selecting a repo from a view
-- **THEN** the help shows Escape as `Go back`
+#### Scenario: Ctrl-C exits from any level
+- **WHEN** user presses Ctrl-C in any browser prompt (session loop, drill-down, view, name builder, input)
+- **THEN** system exits the browser immediately with code 130, without going back a level
 
 ### Requirement: LRU sort toggle
 The browser SHALL support a `ctrl-s` keybind in all views (Repo, Workspace, Owner, Label, Tree, session picker) that toggles the sort order between alphabetical and LRU (most recently accessed first). The current sort mode SHALL be displayed in the fzf header. The sort state SHALL persist across view switches within a single browser session.

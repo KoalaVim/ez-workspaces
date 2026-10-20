@@ -10,15 +10,10 @@ use crate::repo;
 use crate::session;
 use crate::session::notes;
 
-use super::{format_last_accessed, format_pr_indicator, get_branch, git_cmd, PickerOrigin};
+use super::{format_last_accessed, format_pr_indicator, get_branch, git_cmd};
 
 /// Preview handler for fzf (hidden `ez preview <path>` command).
-pub fn preview(
-    path: &Path,
-    show_session_actions: bool,
-    session_id: Option<&str>,
-    origin: PickerOrigin,
-) -> Result<()> {
+pub fn preview(path: &Path, show_session_actions: bool, session_id: Option<&str>) -> Result<()> {
     if !path.exists() {
         println!("{}", "Path does not exist".red().bold());
         println!("{}", path.display());
@@ -33,7 +28,7 @@ pub fn preview(
             if let Some(wt_path_str) = sid.strip_prefix("__unmanaged__:") {
                 return preview_unmanaged_worktree(std::path::Path::new(wt_path_str));
             }
-            return preview_session(path, sid, origin);
+            return preview_session(path, sid);
         }
     }
 
@@ -51,7 +46,7 @@ pub fn preview(
     Ok(())
 }
 
-fn preview_session(repo_path: &Path, session_id: &str, origin: PickerOrigin) -> Result<()> {
+fn preview_session(repo_path: &Path, session_id: &str) -> Result<()> {
     let index = repo::store::load_index()?;
     let entry = match index.find_by_path(repo_path) {
         Some(e) => e,
@@ -151,7 +146,7 @@ fn preview_session(repo_path: &Path, session_id: &str, origin: PickerOrigin) -> 
     }
 
     println!();
-    preview_keybind_help(origin);
+    preview_keybind_help();
 
     // Note section (bat-rendered README.md), after keybinds
     if notes::notes_readme_exists(&entry.id, session_id) {
@@ -613,7 +608,7 @@ fn print_keybind_table(
     }
 }
 
-fn preview_keybind_help(origin: PickerOrigin) {
+fn preview_keybind_help() {
     let config = config::load().unwrap_or_default();
     let keybinds = &config.keybinds;
 
@@ -677,14 +672,8 @@ fn preview_keybind_help(origin: PickerOrigin) {
             fmt_key(&keybinds.sort_toggle).bold().yellow().to_string(),
             "Toggle sort".into(),
         ),
-        (
-            "Esc".bold().dimmed().to_string(),
-            match origin {
-                PickerOrigin::Root => "Quit",
-                PickerOrigin::View => "Go back",
-            }
-            .into(),
-        ),
+        ("Esc".bold().dimmed().to_string(), "Go back".into()),
+        ("Ctrl-C".bold().dimmed().to_string(), "Quit".into()),
     ];
     for pv in plugin::collect_plugin_views("session", &config).unwrap_or_default() {
         right.push((

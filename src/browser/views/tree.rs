@@ -11,8 +11,8 @@ use crate::repo;
 use crate::session;
 
 use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{accept_session, format_branch_indicator, BranchCache};
-use super::{match_view_switch, open_repo, view_header, view_switch_keys, Outcome, ViewMode};
+use super::super::{accept_session, browse_repo, format_branch_indicator, BranchCache};
+use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 use crate::session::build_worktree_info;
 
 /// Distinguishes tree nodes so selection can dispatch to the right action.
@@ -217,15 +217,13 @@ pub(super) fn run(
         }
         ActionResult::Select(idx) => match &nodes[idx].1 {
             NodeKind::Root => Ok(Outcome::Switch(ViewMode::Tree)),
-            NodeKind::Repo(path) => open_repo(
-                path,
-                ViewMode::Tree,
-                selector,
-                cd_file,
-                post_cmd_file,
-                config,
-                branch_cache,
-            ),
+            NodeKind::Repo(path) => {
+                if browse_repo(path, selector, cd_file, post_cmd_file, config, branch_cache)? {
+                    Ok(Outcome::Done)
+                } else {
+                    Ok(Outcome::Switch(ViewMode::Tree))
+                }
+            }
             NodeKind::Session {
                 repo_entry,
                 session,

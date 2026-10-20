@@ -86,7 +86,7 @@ Launch with `ez`. The preview pane shows all available keybinds.
 
 - `Enter` enter · `Alt-n` new · `Alt-N` bare · `Alt-s` from dirty · `Alt-r` rename · `Alt-d` delete · `Alt-l` labels · `Ctrl-d` cd · `Ctrl-s` sort · `Alt-i` note · `Alt-I` note cd
 
-All keybinds are [configurable](docs/user-guide.md#keybinds).
+`Esc` goes back one level; `Ctrl-C` quits from anywhere. All keybinds are [configurable](docs/user-guide.md#keybinds).
 
 ## Plugins
 
