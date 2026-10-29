@@ -310,7 +310,11 @@ fn find_session_by_path(repos: &[RepoEntry], path: &Path) -> Result<Option<(Repo
     let mut best: Option<(RepoEntry, Session, usize)> = None;
 
     for repo_entry in repos {
-        let tree = store::load_sessions(&repo_entry.id)?;
+        let tree = if path_matches_current(&current_path, &normalize_path(&repo_entry.path)) {
+            super::ensure_default_session(&repo_entry.id, &repo_entry.path)?
+        } else {
+            store::load_sessions(&repo_entry.id)?
+        };
         for session in tree.sessions {
             let Some(session_path) = session_path(&session, repo_entry) else {
                 continue;
