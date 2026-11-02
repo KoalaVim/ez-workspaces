@@ -9,7 +9,7 @@ executable = "rex-plugin"
 #
 # ez silently drops a bind whose key collides with a core keybind, and does no
 # cross-plugin collision detection. Taken at time of writing: core ctrl-t/w/e/o/g,
-# ctrl-s, ctrl-d, alt-n, alt-N, alt-d, alt-r, alt-l, alt-s, alt-a; plugins
+# ctrl-s, ctrl-d, alt-n, alt-N, alt-d, alt-r, alt-l, alt-s, alt-a, alt-i, alt-I; plugins
 # alt-a/ctrl-a (tmux), alt-z/ctrl-z (zellij) and alt-h (herdr).
 [[binds]]
 key = "alt-x"
