@@ -82,24 +82,34 @@ if ! command -v rex >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
     exit 0
 fi
 
-hook=$(jq -r '.hook // empty' <<<"$request" 2>/dev/null) || exit 0
-repo=$(jq -r '.repo.path // "" | rtrimstr("/") | split("/") | last // ""' <<<"$request" 2>/dev/null) || exit 0
-sess=$(jq -r '.session.name // empty' <<<"$request" 2>/dev/null) || exit 0
-dir=$(jq -r '.session.path // .repo.path // empty' <<<"$request" 2>/dev/null) || exit 0
-dbg "hook=$hook repo=$repo session=$sess dir=$dir"
+# ez runs plugins by absolute path; resolve anything else against $PWD.
+case $0 in
+/*) self=$0 ;;
+*) self=$PWD/$0 ;;
+esac
 
-# Single-quote for the user's shell, which may be bash, zsh or fish.
-sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# One jq call parses the whole request (each jq costs ~20ms, and on_bind is
+# on the path of every switch) and also prepares on_bind's answer. @sh
+# single-quotes values for eval here and for the user's shell, which may be
+# bash, zsh or fish.
+vars=$(jq -r --arg self "$self" '
+    (.repo.path // "" | rtrimstr("/") | split("/") | last // "") as $repo
+    | (.session.name // "") as $sess
+    | (.session.path // .repo.path // "") as $dir
+    | @sh "hook=\(.hook // "") repo=\($repo) sess=\($sess) dir=\($dir)",
+      @sh "old=\(.rename_context.old_name // "") new=\(.rename_context.new_name // "")",
+      # keep_cwd: focus moves to the Rex tab, so the shell that ran ez stays put.
+      @sh "bind_response=\({success: true,
+          post_shell_commands: [[$self, "focus", $repo, $sess, $dir] | @sh],
+          accept: true, keep_cwd: true} | tojson)"
+    ' <<<"$request" 2>/dev/null) || exit 0
+[ -n "$vars" ] && eval "$vars" || exit 0
+dbg "hook=$hook repo=$repo session=$sess dir=$dir"
 
 case $hook in
 on_bind)
     [ -n "$repo" ] && [ -n "$sess" ] && [ -n "$dir" ] || exit 0
-    self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
-    cmd="$(sq "$self") focus $(sq "$repo") $(sq "$sess") $(sq "$dir")"
-    # keep_cwd: focus moves to the Rex tab, so the shell that ran ez stays put.
-    response=$(jq -cn --arg cmd "$cmd" \
-        '{success: true, post_shell_commands: [$cmd], accept: true, keep_cwd: true}') ||
-        response='{"success": true}'
+    response=$bind_response
     ;;
 
 on_session_delete)
@@ -127,8 +137,6 @@ on_session_delete)
 
 on_session_rename)
     # Without this, the next focus would open a second tab under the new name.
-    old=$(jq -r '.rename_context.old_name // empty' <<<"$request" 2>/dev/null) || exit 0
-    new=$(jq -r '.rename_context.new_name // empty' <<<"$request" 2>/dev/null) || exit 0
     [ -n "$old" ] && [ -n "$new" ] || exit 0
     sid=$(find_session "$repo" --autostart=false)
     [ -n "$sid" ] || exit 0
