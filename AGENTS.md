@@ -88,7 +88,7 @@ make check         # fmt check + clippy + tests
 
 ## Plugin Development
 
-Plugins are shell scripts or executables in `~/.config/ez/plugins/<name>/`. See `docs/plugin-guide.md` for the JSON protocol. Bundled plugins (git-worktree, tmux, cursor-mcp-auth, cursor-trusted-workspace, cursor-mcp-approvals, kv) in `plugins/` directory.
+Plugins are shell scripts or executables in `~/.config/ez/plugins/<name>/`. See `docs/plugin-guide.md` for the JSON protocol. Bundled plugins (git-worktree, tmux, zellij, herdr, rex, cursor-mcp-auth, cursor-trusted-workspace, cursor-mcp-approvals, kv) in `plugins/` directory.
 
 ## Conventions
 
