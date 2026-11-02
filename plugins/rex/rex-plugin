@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+#
+# ez-workspaces plugin: maps an ez session onto Rex. One Rex session per repo,
+# one tab (a Rex "window") per ez session in it, each created on first use.
+# Renaming an ez session relabels its tab; deleting it closes the tab.
+#
+# The bind itself only answers ez: the work happens in `rex-plugin focus`,
+# handed back as a post-shell command so it runs in the shell that ran ez and
+# its errors land on that terminal rather than in ez's plugin pipe.
+#
+# Rex resolves label targets case-insensitively and lets two things share a
+# label, so labels are matched here (in --json listings, or in the focus
+# script) case-insensitively, first match wins, and changes are made by ID.
+#
+# Written for the bash 3.2 that macOS ships: no ${x,,}, no empty "${a[@]}".
+set -uo pipefail
+
+dbg() {
+    [ -n "${EZ_PLUGIN_DEBUG_LOG:-}" ] || return 0
+    printf '[rex] %s\n' "$*" >>"$EZ_PLUGIN_DEBUG_LOG"
+}
+
+# The ID of the Rex session labelled $1, empty if none. Extra args are global
+# rex flags, e.g. --autostart=false.
+find_session() {
+    local label=$1
+    shift
+    rex "$@" ls --json 2>/dev/null | jq -r --arg l "$label" '
+        first(.sessions[]? | select((.label // "" | ascii_downcase) == ($l | ascii_downcase))
+            | .session_id) // empty' 2>/dev/null || true
+}
+
+# The ID of the tab labelled $2 in Rex session $1, empty if none. Tabs that
+# hold the block in $skip_block are passed over. Extra args as above.
+skip_block=
+find_window() {
+    local sid=$1 label=$2
+    shift 2
+    rex "$@" window ls -s "$sid" --json 2>/dev/null | jq -r --arg l "$label" --arg b "$skip_block" '
+        first(.windows[]?
+            | select((.label // "" | ascii_downcase) == ($l | ascii_downcase))
+            | select($b == "" or ([.. | .block_id? // empty] | index($b) | not))
+            | .window_id) // empty' 2>/dev/null || true
+}
+
+# The focus step, as one Rex call: `rex do` runs this against the repo's Rex
+# session (attached by label), finds or creates the tab and switches the app
+# to it. Every separate `rex` call costs ~40ms, so this replaces the four the
+# CLI would need. `session.*` calls only reach the attached session; when the
+# repo has no Rex session yet, it runs unattached and creates one instead.
+# Rex also resolves -s by position or ID suffix when no label matches, so the
+# attached session's label is checked before it is used. No single quotes in
+# here: it is a bash single-quoted string.
+FOCUS_LUA='
+local a = rex.args
+local function same(x, y) return tostring(x or ""):lower() == tostring(y or ""):lower() end
+local function must(r, err) if r == nil then error(err, 0) end return r end
+local block = rex.layout.block{ flavor = "com.superlogical.terminal.shell", options = { cwd = a.dir } }
+local sid, wid
+local view = a.attached and must(rex.session.view{}) or nil
+if view ~= nil and same(view.label, a.repo) then
+  sid = view.session_id
+  for _, w in ipairs(view.windows or {}) do
+    if same(w.label, a.sess) then wid = w.window_id break end
+  end
+  if wid == nil then
+    wid = must(rex.session.new_window{ layout = block, window_label = a.sess }).window_id
+  end
+else
+  sid = must(rex.call("session.create", {
+    label = a.repo, initial_windows = { { layout = block, window_label = a.sess } } })).session_id
+end
+if a.select ~= false then
+  rex.client.queue("session.select", { session_id = sid, window_id = wid })
+end
+'
+
+if [ "${1-}" = focus ]; then
+    repo=$2 sess=$3 args=$4 # args: {"repo","sess","dir"} as JSON, built by on_bind
+
+    # session.select is an action of the Rex app, which only takes actions from
+    # the CLI with Settings > Rex Server > Remote Control on.
+    rex_do() { rex ${REX_CLIENT:+-C "$REX_CLIENT"} do "$@" -e "$FOCUS_LUA" 2>&1 >/dev/null; }
+    attached="{\"attached\":true,${args#\{}"
+    if ! err=$(rex_do -s "$repo" --args "$attached"); then
+        case $err in
+        *"session target"*"not found"*)
+            err=$(rex_do --args "$args") && exit 0 ;;
+        *"session target"*"ambiguous"*)
+            # Two Rex sessions share the label: use the first, like the
+            # listings-based lookups in this file do.
+            sid=$(find_session "$repo")
+            [ -n "$sid" ] && err=$(rex_do -s "$sid" --args "$attached") && exit 0 ;;
+        esac
+        printf '%s/%s: could not open the Rex tab: %s\n' "$repo" "$sess" "$err" >&2
+        # When ez runs in a Rex popup that closes on exit, hold the error on screen.
+        if [ -n "${REX_EZ_POPUP:-}" ]; then
+            read -r -n1 -p 'press any key' _ || true
+        fi
+        exit 1
+    fi
+    exit 0
+fi
+
+# Hook mode: whatever fails below, ez gets exactly one JSON answer, and Rex
+# trouble never fails the ez operation.
+response='{"success": true}'
+trap 'printf "%s\n" "$response"' EXIT
+
+request=$(cat)
+if ! command -v rex >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
+    dbg "rex or jq not on PATH, skipping"
+    exit 0
+fi
+
+# ez runs plugins by absolute path; resolve anything else against $PWD.
+case $0 in
+/*) self=$0 ;;
+*) self=$PWD/$0 ;;
+esac
+
+# One jq call parses the whole request (each jq costs ~20ms, and on_bind is
+# on the path of every switch) and also prepares on_bind's answer. @sh
+# single-quotes values for eval here and for the user's shell, which may be
+# bash, zsh or fish.
+vars=$(jq -r --arg self "$self" '
+    (.repo.path // "" | rtrimstr("/") | split("/") | last // "") as $repo
+    | (.session.name // "") as $sess
+    | (.session.path // .repo.path // "") as $dir
+    | @sh "hook=\(.hook // "") repo=\($repo) sess=\($sess) dir=\($dir)",
+      @sh "old=\(.rename_context.old_name // "") new=\(.rename_context.new_name // "")",
+      # keep_cwd: focus moves to the Rex tab, so the shell that ran ez stays put.
+      @sh "bind_response=\({success: true,
+          post_shell_commands: [[$self, "focus", $repo, $sess,
+              ({repo: $repo, sess: $sess, dir: $dir} | tojson)] | @sh],
+          accept: true, keep_cwd: true} | tojson)"
+    ' <<<"$request" 2>/dev/null) || exit 0
+[ -n "$vars" ] && eval "$vars" || exit 0
+dbg "hook=$hook repo=$repo session=$sess dir=$dir"
+
+case $hook in
+on_bind)
+    [ -n "$repo" ] && [ -n "$sess" ] && [ -n "$dir" ] || exit 0
+    response=$bind_response
+    ;;
+
+on_session_delete)
+    # Cleanup must not start a Rex server just to find nothing to clean up.
+    # The tab ez is running in is left alone: closing it would kill ez halfway
+    # through the delete.
+    sid=$(find_session "$repo" --autostart=false)
+    [ -n "$sid" ] || exit 0
+    skip_block=${REX_BLOCK:-}
+    wid=$(find_window "$sid" "$sess" --autostart=false)
+    if [ -z "$wid" ]; then
+        dbg "no tab for $repo/$sess"
+        exit 0
+    fi
+    dbg "closing tab $wid in $sid"
+    rex --autostart=false window close -s "$sid" "$wid" >/dev/null 2>&1 || exit 0
+    # Rex keeps a session with no tabs left; focus recreates it when needed.
+    left=$(rex --autostart=false window ls -s "$sid" --json 2>/dev/null |
+        jq '.windows | length' 2>/dev/null) || exit 0
+    if [ "$left" = 0 ]; then
+        dbg "killing empty session $sid"
+        rex --autostart=false session kill "$sid" >/dev/null 2>&1 || true
+    fi
+    ;;
+
+on_session_rename)
+    # Without this, the next focus would open a second tab under the new name.
+    [ -n "$old" ] && [ -n "$new" ] || exit 0
+    sid=$(find_session "$repo" --autostart=false)
+    [ -n "$sid" ] || exit 0
+    wid=$(find_window "$sid" "$old" --autostart=false)
+    [ -n "$wid" ] || exit 0
+    dbg "relabelling tab $wid: $old -> $new"
+    rex --autostart=false window rename -s "$sid" "$wid" "$new" >/dev/null 2>&1 || true
+    ;;
+esac

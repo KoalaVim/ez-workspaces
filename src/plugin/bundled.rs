@@ -64,6 +64,12 @@ const BUNDLED_PLUGINS: &[BundledPlugin] = &[
         executable_name: "herdr-plugin",
         executable: include_str!("../../plugins/herdr/herdr-plugin"),
     },
+    BundledPlugin {
+        name: "rex",
+        manifest: include_str!("../../plugins/rex/manifest.toml"),
+        executable_name: "rex-plugin",
+        executable: include_str!("../../plugins/rex/rex-plugin"),
+    },
 ];
 
 /// Ensure all bundled plugins are extracted to the plugins directory.

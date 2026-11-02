@@ -341,6 +341,7 @@ Inside the session picker (and the tree view), each session shows its git branch
 - **Alt-d** — Delete session
 - **Alt-a** — Attach to the session's tmux session (plugin)
 - **Alt-z** — Attach to the session's zellij session (plugin)
+- **Alt-x** — Open the session as a Rex tab (plugin)
 - **Alt-l** — Edit labels (comma-separated, prefix `-` to remove, e.g. `wip, -stale`)
 - **Ctrl-d** — Cd into session worktree (bypasses on_enter action like tmux)
 - **Ctrl-s** — Toggle sort (alphabetical / LRU)
@@ -448,6 +449,26 @@ or globally, in your shell rc (`export ZELLIJ_SOCKET_DIR=/tmp/zellij-$(id -u)`),
 **Limitation:** zellij has no equivalent of `tmux set-environment`, so session env vars are applied only when the zellij session is created. If a session's env changes later, recreate its zellij session to pick up the new values.
 
 Both multiplexer plugins can be enabled at once — their keys don't overlap (`Alt-a`/`Ctrl-a` for tmux, `Alt-z`/`Ctrl-z` for zellij) — but each session then gets both a tmux and a zellij session, so most people enable just one.
+
+### Rex Plugin
+
+The `rex` plugin opens ez sessions in [Rex](https://www.superlogical.com/rex): one Rex session per repo (labelled with the repo's directory name), one tab per ez session (labelled with the session name), each created on first use in the session's directory.
+
+```bash
+ez plugin enable rex
+```
+
+Requires `rex` and `jq` on your `PATH`. Without `rex`, every hook silently no-ops — session creation, rename and delete are never blocked.
+
+- **Alt-x** in the session picker — create the Rex session/tab if needed, then switch Rex to it. ez exits and the invoking shell keeps its directory.
+- **Rename** relabels the session's tab, so the next `Alt-x` finds it instead of opening a second one
+- **Delete** closes the session's tab, and the repo's Rex session too once it has no tabs left. The tab ez itself is running in is never closed. Delete and rename never start a Rex server that isn't running.
+
+Set `on_enter = "rex"` (and/or `on_create = "rex"`) to open the tab on Enter instead of `cd`.
+
+Switching tabs is an action of the Rex app, so the app must be running with **Settings > Rex Server > Remote Control** turned on. Otherwise the tab is still created, and ez prints Rex's error. With several Rex apps connected, set `REX_CLIENT` to pick the one to switch. When ez runs in a Rex popup that closes on exit, set `REX_EZ_POPUP=1` to keep errors on screen until a key is pressed.
+
+Rex labels are matched case-insensitively, so two repos whose directory names differ only in case — or are the same — share one Rex session.
 
 ### KoalaVim (kv) Plugin
 

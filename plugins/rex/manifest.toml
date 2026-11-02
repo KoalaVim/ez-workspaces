@@ -1,0 +1,19 @@
+name = "rex"
+version = "0.1.0"
+description = "Opens ez sessions as Rex tabs"
+hooks = ["on_bind", "on_session_delete", "on_session_rename"]
+executable = "rex-plugin"
+
+# In the session picker: alt-x opens the selected session as a tab in Rex. Set
+# on_enter = "rex" / on_create = "rex" to run it on every enter/create.
+#
+# ez silently drops a bind whose key collides with a core keybind, and does no
+# cross-plugin collision detection. Taken at time of writing: core ctrl-t/w/e/o/g,
+# ctrl-s, ctrl-d, alt-n, alt-N, alt-d, alt-r, alt-l, alt-s, alt-a, alt-i, alt-I; plugins
+# alt-a/ctrl-a (tmux), alt-z/ctrl-z (zellij) and alt-h (herdr).
+[[binds]]
+key = "alt-x"
+name = "rex_open"
+label = "rex"
+description = "Open this session as a Rex tab"
+contexts = ["session"]
