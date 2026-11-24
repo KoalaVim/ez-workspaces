@@ -6,12 +6,13 @@ use console::strip_ansi_codes;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState};
+use ratatui::widgets::{HighlightSpacing, List, ListItem, ListState};
 use ratatui::Frame;
 
 use crate::browser::domain::Row;
+use crate::browser::tui::theme;
 
 /// One row that passed the filter.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +100,10 @@ impl FilteredList {
     #[cfg(test)]
     pub fn hits(&self) -> &[Hit] {
         &self.hits
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.hits.is_empty()
     }
 
     pub fn len(&self) -> usize {
@@ -189,8 +194,12 @@ impl FilteredList {
             .map(|h| ListItem::new(display_line(&self.rows[h.index].display, &h.indices)))
             .collect();
         let list = List::new(items)
-            .highlight_symbol("> ")
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+            .highlight_symbol(Line::from(Span::styled(
+                theme::GUTTER,
+                Style::default().fg(theme::ACCENT),
+            )))
+            .highlight_spacing(HighlightSpacing::Always)
+            .highlight_style(theme::selected());
         frame.render_stateful_widget(list, area, &mut self.state);
     }
 }
@@ -209,9 +218,7 @@ pub fn highlight(line: Line<'static>, matched: &[u32]) -> Line<'static> {
     if matched.is_empty() {
         return line;
     }
-    let hl = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
+    let hl = theme::matched();
     let (style, alignment) = (line.style, line.alignment);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut pos: u32 = 0;
@@ -362,7 +369,7 @@ mod tests {
         let hl: Vec<(String, bool)> = line
             .spans
             .iter()
-            .map(|s| (s.content.to_string(), s.style.fg == Some(Color::Yellow)))
+            .map(|s| (s.content.to_string(), s.style.fg == theme::matched().fg))
             .collect();
         assert_eq!(
             hl,

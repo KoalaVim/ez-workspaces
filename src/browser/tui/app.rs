@@ -7,6 +7,7 @@
 
 mod actions;
 mod draw;
+mod handler;
 mod keymap;
 mod loader;
 mod snapshot_io;
@@ -18,16 +19,13 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::Frame;
-
-use self::keymap::{build_keymap, Action, RowCtx, RowKeys};
+use self::keymap::{build_keymap, build_tabs, Action, RowKeys};
 use self::loader::Loader;
-use super::event::{self, Flow, Handler};
+use super::event::{self, Flow};
 use super::keys::Key;
 use super::level::{Level, Source, ViewKind};
 use super::modal::{Core, NativeSelector};
-use super::nav::{Back, Nav};
+use super::nav::Nav;
 use super::preview_pane::PreviewPane;
 use super::snapshot::Snapshot;
 use super::terminal::SharedGuard;
@@ -36,7 +34,7 @@ use crate::browser::domain::{Level as Severity, RowKind};
 use crate::browser::selector::set_confirm_override;
 use crate::browser::{BranchCache, SortMode};
 use crate::config::model::EzConfig;
-use crate::error::{EzError, Result};
+use crate::error::Result;
 use crate::plugin::{self, PluginBindInfo};
 
 pub use self::loader::Msg;
@@ -60,6 +58,8 @@ struct App {
     config: Arc<EzConfig>,
     loader: Loader,
     keymap: HashMap<Key, Action>,
+    /// View tabs shown under the search bar.
+    tabs: Vec<(ViewKind, String)>,
     nav: Nav<Level>,
     /// Top-level views that are not currently shown.
     saved: HashMap<ViewKind, Level>,
@@ -136,7 +136,9 @@ impl App {
         let mut root = Level::new(0, Source::View(start.view), start.view.title().into(), sort);
         let seeded = snapshot.as_ref().is_some_and(|s| s.seed(&mut root));
         loader.request(&mut root);
+        let tabs = build_tabs(&config);
         let mut app = Self {
+            tabs,
             config,
             loader,
             keymap,
@@ -167,14 +169,15 @@ impl App {
         app
     }
 
-    fn sort_default(&self) -> SortMode {
-        SortMode::from_config(&self.config.default_sort)
-    }
-
     fn new_level(&mut self, source: Source, title: String) -> Level {
         let id = self.next_id;
         self.next_id += 1;
-        Level::new(id, source, title, self.sort_default())
+        Level::new(
+            id,
+            source,
+            title,
+            SortMode::from_config(&self.config.default_sort),
+        )
     }
 
     fn push_loading(&mut self, source: Source, title: String) {
@@ -363,130 +366,4 @@ fn find_level<'a>(
     nav.iter_mut()
         .find(|l| l.id == id)
         .or_else(|| saved.values_mut().find(|l| l.id == id))
-}
-
-impl Handler for App {
-    type Msg = Msg;
-
-    fn on_key(&mut self, ev: KeyEvent) -> Result<Flow> {
-        let key = Key::from_event(&ev);
-        self.notice = None;
-        if key == Key::new(KeyCode::Char('c'), KeyModifiers::CONTROL) {
-            return Err(EzError::Interrupted);
-        }
-        if key.code == KeyCode::Esc && key.mods.is_empty() {
-            return Ok(match self.nav.back() {
-                Back::Popped => Flow::Continue,
-                Back::Exit => Flow::Quit,
-            });
-        }
-        if let Some(action) = self.keymap.get(&key).copied() {
-            return Ok(self.act(action));
-        }
-        let enter = key == Key::new(KeyCode::Enter, KeyModifiers::NONE);
-        let row_spec = RowCtx::of(self.nav.top())
-            .and_then(|ctx| Some((ctx, self.row_keys.find(ctx, &key)?.to_string())));
-        if (enter || row_spec.is_some()) && self.nav.top().stale {
-            // Snapshot rows carry no payload to act on; fresh rows arrive in a moment.
-            self.notice = Some((
-                "Still loading fresh data, try again in a moment".into(),
-                Severity::Warn,
-            ));
-            return Ok(Flow::Continue);
-        }
-        if enter {
-            return self.enter();
-        }
-        if let Some((ctx, spec)) = row_spec {
-            return self.row_action(ctx, &spec);
-        }
-        let list = &mut self.nav.top_mut().list;
-        match (key.code, key.mods) {
-            (KeyCode::Up, _) | (KeyCode::Char('p' | 'k'), KeyModifiers::CONTROL) => {
-                list.move_cursor(-1)
-            }
-            (KeyCode::Down, _) | (KeyCode::Char('n' | 'j'), KeyModifiers::CONTROL) => {
-                list.move_cursor(1)
-            }
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => list.set_query(""),
-            (KeyCode::PageUp, _) => list.move_cursor(-10),
-            (KeyCode::PageDown, _) => list.move_cursor(10),
-            (KeyCode::Backspace, _) => list.pop_char(),
-            (KeyCode::Char(c), m) if m.is_empty() => list.push_char(c),
-            _ => log::debug!("tui: unmapped key {ev:?}"),
-        }
-        Ok(Flow::Continue)
-    }
-
-    fn on_msg(&mut self, msg: Msg) {
-        match msg {
-            Msg::Rows {
-                level,
-                gen,
-                loaded,
-                quiet,
-                pending,
-            } => {
-                let Some(l) =
-                    find_level(&mut self.nav, &mut self.saved, level).filter(|l| l.gen == gen)
-                else {
-                    log::debug!("tui: dropped stale result for level {level}");
-                    return;
-                };
-                log::debug!(
-                    "tui: level {level} loaded, {} rows ({} branches pending)",
-                    loaded.rows.len(),
-                    pending.len()
-                );
-                l.list.set_rows(loaded.rows);
-                l.loading = false;
-                l.busy = false;
-                l.stale = false;
-                l.preview_cmd = loaded.preview_cmd;
-                if let Some(entry) = loaded.repo {
-                    l.title = entry.name.clone();
-                    l.repo = Some(entry);
-                }
-                if std::mem::take(&mut l.reload_again) {
-                    self.loader.request_quiet(l);
-                }
-                self.first_paint_at = None;
-                if !quiet {
-                    self.data_gen += 1;
-                }
-                if !pending.is_empty() {
-                    self.branch_inflight += pending.len();
-                    self.loader.resolve_branches(pending);
-                }
-            }
-            Msg::Failed { level, gen, error } => {
-                let Some(l) =
-                    find_level(&mut self.nav, &mut self.saved, level).filter(|l| l.gen == gen)
-                else {
-                    return;
-                };
-                log::debug!("tui: level {level} failed: {error}");
-                l.error = Some(error);
-                l.loading = false;
-                l.busy = false;
-                self.first_paint_at = None;
-            }
-            Msg::Branch => self.branch_resolved(),
-            Msg::Preview {
-                key,
-                data_gen,
-                index,
-                text,
-            } => self.preview.fill(key, data_gen, index, text),
-        }
-    }
-
-    fn draw(&mut self, frame: &mut Frame) {
-        draw::draw(self, frame);
-    }
-
-    fn ready(&self) -> bool {
-        self.first_paint_at
-            .is_none_or(|since| since.elapsed() >= FIRST_PAINT_WAIT)
-    }
 }

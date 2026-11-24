@@ -11,15 +11,16 @@ use console::strip_ansi_codes;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::buffer::Buffer;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::capture::{Capture, Unmuted};
 use super::keys::Key;
 use super::modal_state::{Done, Kind, Modal, Step};
 use super::terminal::SharedGuard;
+use super::theme;
 use crate::browser::selector::{ActionResult, InteractiveSelector, SelectItem, StageOutcome};
 use crate::error::Result;
 
@@ -240,10 +241,14 @@ pub fn draw(frame: &mut Frame, modal: &mut Modal, backdrop: Option<&Buffer>) {
     let area = frame.area();
     if let Some(b) = backdrop.filter(|b| b.area == area) {
         *frame.buffer_mut() = b.clone();
+        // Fade the frozen frame so the modal stands out.
+        for cell in frame.buffer_mut().content.iter_mut() {
+            cell.modifier.insert(ratatui::style::Modifier::DIM);
+        }
     }
-    let dim = Style::default().add_modifier(Modifier::DIM);
+    let dim = theme::dim();
     let width = area.width.saturating_sub(4).clamp(24, 90);
-    let inner_w = width.saturating_sub(2);
+    let inner_w = width.saturating_sub(4);
     let header: Vec<Line> = modal.header.iter().flat_map(|h| lines_of(h)).collect();
     let header_h = wrapped_height(&header, inner_w);
 
@@ -261,11 +266,18 @@ pub fn draw(frame: &mut Frame, modal: &mut Modal, backdrop: Option<&Buffer>) {
             )
         }
     };
-    let popup = popup_area(area, width, body_h + 2);
+    let popup = popup_area(area, width, body_h + 3);
     frame.render_widget(Clear, popup);
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(format!(" {title} "));
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(theme::ACCENT))
+        .padding(Padding::horizontal(1))
+        .title(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(title, theme::accent_bold()),
+            Span::raw(" "),
+        ]));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
 
@@ -283,21 +295,32 @@ pub fn draw(frame: &mut Frame, modal: &mut Modal, backdrop: Option<&Buffer>) {
         return;
     }
 
-    let [header_area, input_area, list_area] = Layout::vertical([
+    let [header_area, input_area, rule_area, list_area] = Layout::vertical([
         Constraint::Length(header_h.min(inner.height)),
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(0),
     ])
     .areas(inner);
+    frame.render_widget(
+        Paragraph::new("─".repeat(rule_area.width as usize)).style(theme::muted()),
+        rule_area,
+    );
     frame.render_widget(
         Paragraph::new(Text::from(header))
             .style(dim)
             .wrap(Wrap { trim: false }),
         header_area,
     );
-    let prompt = format!("> {}", modal.input());
-    let cursor_x = input_area.x + prompt.chars().count() as u16;
-    frame.render_widget(Paragraph::new(prompt), input_area);
+    let input = modal.input().to_string();
+    let cursor_x = input_area.x + (theme::PROMPT.chars().count() + input.chars().count()) as u16;
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(theme::PROMPT, theme::accent_bold()),
+            Span::raw(input),
+        ])),
+        input_area,
+    );
     frame.set_cursor_position(Position::new(
         cursor_x.min(input_area.right().saturating_sub(1)),
         input_area.y,

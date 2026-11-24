@@ -13,7 +13,9 @@ use std::sync::Arc;
 use ansi_to_tui::IntoText;
 use ratatui::layout::Rect;
 use ratatui::text::Text;
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
+
+use crate::browser::tui::theme;
 use ratatui::Frame;
 
 use super::app::Msg;
@@ -21,7 +23,7 @@ use super::level::PreviewReq;
 use super::workers::Pool;
 use crate::browser::domain::preview::{preview_segments, Segment, Slow};
 
-const PLACEHOLDER: &str = "\x1b[2m  loading...\x1b[0m\n";
+const PLACEHOLDER: &str = "\x1b[2m  loading…\x1b[0m\n";
 
 struct Entry {
     segments: Vec<Segment>,
@@ -49,7 +51,7 @@ impl Entry {
                 Segment::Slow(_) => raw.push_str(self.done.get(&i).map_or(PLACEHOLDER, |s| s)),
             }
         }
-        self.text = to_text(&raw);
+        self.text = theme::section_headers(to_text(&raw));
     }
 }
 
@@ -134,7 +136,7 @@ impl PreviewPane {
         req: Option<&PreviewReq>,
         data_gen: u64,
     ) {
-        let block = Block::default().borders(Borders::LEFT);
+        let block = theme::panel("Preview", false);
         let text = match req {
             Some(req) => self.entry(req, data_gen).text.clone(),
             None => Text::default(),
@@ -173,7 +175,7 @@ mod tests {
             cmd: Some("echo from-plugin".into()),
         };
         let key = req.key();
-        assert!(plain(&pane.entry(&req, 1).text).contains("loading..."));
+        assert!(plain(&pane.entry(&req, 1).text).contains("loading…"));
         let Msg::Preview {
             key: k,
             data_gen,

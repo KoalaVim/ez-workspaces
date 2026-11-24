@@ -54,6 +54,23 @@ pub(super) fn build_keymap(config: &EzConfig) -> HashMap<Key, Action> {
     map
 }
 
+/// View tabs in display order: core views, then plugin views, with their keys.
+pub(super) fn build_tabs(config: &EzConfig) -> Vec<(ViewKind, String)> {
+    let b = &config.keybinds;
+    let mut tabs = vec![
+        (ViewKind::Tree, b.view_tree.clone()),
+        (ViewKind::Workspace, b.view_workspace.clone()),
+        (ViewKind::Repo, b.view_repo.clone()),
+        (ViewKind::Owner, b.view_owner.clone()),
+        (ViewKind::Label, b.view_label.clone()),
+    ];
+    for info in plugin_views(config) {
+        let key = info.key.clone();
+        tabs.push((ViewKind::plugin(info), key));
+    }
+    tabs
+}
+
 /// Plugin views usable from any core view or from a plugin view (each once).
 fn plugin_views(config: &EzConfig) -> Vec<PluginViewInfo> {
     let mut views: Vec<PluginViewInfo> = Vec::new();

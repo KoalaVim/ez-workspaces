@@ -12,6 +12,8 @@ use super::terminal::SharedGuard;
 use crate::error::Result;
 
 const POLL: Duration = Duration::from_millis(16);
+/// Redraw interval while [`Handler::animating`] is true.
+const TICK: Duration = Duration::from_millis(80);
 
 /// What the loop should do after an event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,6 +33,11 @@ pub trait Handler {
     fn on_msg(&mut self, msg: Self::Msg);
     fn draw(&mut self, frame: &mut Frame);
 
+    /// True while something animates (the loading spinner): redraw on a tick.
+    fn animating(&self) -> bool {
+        false
+    }
+
     /// False while the first frame is held back (waiting for fresh data).
     fn ready(&self) -> bool {
         true
@@ -44,10 +51,15 @@ pub fn run<H: Handler>(
     results: &Receiver<H::Msg>,
 ) -> Result<()> {
     let mut dirty = true;
+    let mut last_draw = std::time::Instant::now();
     loop {
+        if !dirty && handler.animating() && last_draw.elapsed() >= TICK {
+            dirty = true;
+        }
         if dirty && handler.ready() {
             guard.borrow_mut().terminal().draw(|f| handler.draw(f))?;
             dirty = false;
+            last_draw = std::time::Instant::now();
         }
         if event::poll(POLL)? {
             match event::read()? {

@@ -557,6 +557,8 @@ In interactive menus (browsing directories, config wizard), pressing **Escape** 
 
 ez also ships a built-in full-screen browser that does not need fzf. It is experimental; fzf stays the default.
 
+Layout: the search bar sits on top (with the current path and a match counter), view tabs below it, then the list and a preview panel, and a footer with the key hints for the current list. Colors come from your terminal's ANSI palette, so it follows your terminal theme. The preview hides on terminals narrower than 80 columns.
+
 Enable it (and switch back) with:
 
 ```bash

@@ -29,6 +29,7 @@ mod preview_pane;
 mod snapshot;
 mod stdio;
 mod terminal;
+mod theme;
 mod workers;
 
 use std::cell::RefCell;
