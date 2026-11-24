@@ -194,9 +194,10 @@ EZ_CONFIG_DIR=~/ez-dev/config EZ_DATA_DIR=~/ez-dev/data ez
 make dev                                  # launch the browser against .dev/
 make dev ARGS="config get selector.backend"
 make dev ARGS="add ~/code/some-repo"      # the dev index starts empty
+make dev-sync                             # or mirror your real repos/sessions/notes into .dev/
 ```
 
-On first run it copies your real `config.toml` (repos and sessions are not copied) and sets `selector.backend` to `native`. Repos under `workspace_roots` still show up through scanning. `make dev` is for testing the UI: without the shell wrapper, cd effects need `--cd-file <path>`.
+On first run it copies your real `config.toml` (repos and sessions are not copied) and sets `selector.backend` to `native`. `make dev-sync` replaces the dev repo index, sessions and notes with a copy of your real ones (re-run it to pick up changes). The copied sessions still point at your real worktrees, so deleting or renaming one in dev changes the real worktree and branch while only the dev index is updated. Repos under `workspace_roots` still show up through scanning. `make dev` is for testing the UI: without the shell wrapper, cd effects need `--cd-file <path>`.
 
 ## Docs
 

@@ -104,6 +104,7 @@ make lint          # clippy
 make fmt           # format code
 make check         # fmt check + clippy + tests
 make dev           # debug build against .dev/ (EZ_CONFIG_DIR/EZ_DATA_DIR); ARGS="...", DEV_DIR=...
+make dev-sync      # mirror real repos/sessions/notes into .dev/
 ```
 
 ## Plugin Development
