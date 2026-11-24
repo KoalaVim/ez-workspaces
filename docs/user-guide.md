@@ -295,7 +295,7 @@ Notes are stored in the OS data directory (`~/.local/share/ez/` on Linux, `~/Lib
 
 ### 5. Browse interactively
 
-Run bare `ez` to get an fzf-powered browser:
+Run bare `ez` to get the interactive browser:
 
 1. Select a workspace root
 2. Drill into directories (repos show `[branch]`)
@@ -553,17 +553,17 @@ In interactive menus (browsing directories, config wizard), pressing **Escape** 
 
 **Ctrl-C** quits ez immediately from any level. This relies on fzf's `become` action (fzf 0.38+).
 
-## Native browser (experimental)
+## Native browser
 
-ez also ships a built-in full-screen browser that does not need fzf. It is experimental; fzf stays the default.
+The default browser is a built-in full-screen TUI that does not need fzf. The fzf backend is still available.
 
 Layout: the search bar sits on top (with the current path and a match counter), view tabs below it, then the list and a preview panel, and a footer with the key hints for the current list. Colors come from your terminal's ANSI palette, so it follows your terminal theme. The preview hides on terminals narrower than 80 columns.
 
-Enable it (and switch back) with:
+Switch to fzf (and back) with:
 
 ```bash
-ez config set selector.backend native
 ez config set selector.backend fzf
+ez config set selector.backend native
 ```
 
 Options live in the `[native]` section of `config.toml`:

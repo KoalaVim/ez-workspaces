@@ -11,7 +11,7 @@ ez-workspaces (`ez`) is a Rust-based workspace and session manager. It manages g
 - **Data**: Notes and session data at `<data_dir>/ez/` (macOS: `~/Library/Application Support/ez/`, Linux: `~/.local/share/ez/`)
 - **Dir overrides**: `EZ_CONFIG_DIR` / `EZ_DATA_DIR` (non-empty) replace the config/data dirs (resolved in `src/paths.rs`; plugins receive both)
 - **Plugins**: External scripts (JSON-over-stdio protocol)
-- **Interactive UI**: fzf (default) or native ratatui TUI (experimental, `selector.backend = "native"`); both share `browser/domain/`; wizards use the `InteractiveSelector` trait (`FzfSelector`, `NativeSelector`)
+- **Interactive UI**: native ratatui TUI (default) or fzf (`selector.backend = "fzf"`); both share `browser/domain/`; wizards use the `InteractiveSelector` trait (`FzfSelector`, `NativeSelector`)
 - **Env**: `EZ_NO_DAEMON=1` disables daemon auto-start
 
 ## Source Layout

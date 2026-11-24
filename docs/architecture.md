@@ -62,7 +62,7 @@ Plugins are external executables using JSON-over-stdio:
 
 ### Interactive Selector Trait
 
-The `InteractiveSelector` trait abstracts the UI backend. The default `FzfSelector` shells out to fzf. This can be replaced with skim, dialoguer, or a TUI framework without changing browser logic.
+The `InteractiveSelector` trait abstracts the UI backend. `NativeSelector` (ratatui, the default) and `FzfSelector` (shells out to fzf) implement it. This can be replaced with skim, dialoguer, or a TUI framework without changing browser logic.
 
 ### Browser View Dispatcher
 

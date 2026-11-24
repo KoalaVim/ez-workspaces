@@ -89,7 +89,7 @@ fn browse_with_unknown_backend_in_file_errors() {
     let path = path.expect("config.toml created");
     let text = std::fs::read_to_string(&path)
         .unwrap()
-        .replace("backend = \"fzf\"", "backend = \"skim\"");
+        .replace("backend = \"native\"", "backend = \"skim\"");
     std::fs::write(&path, text).unwrap();
     ez(home.path())
         .assert()

@@ -11,7 +11,7 @@ A fast, plugin-extensible workspace and session manager for git repos. Browse, c
 
 ## Why
 
-Switching between tasks means juggling git branches, stashing changes, and losing editor context. **ez** turns git worktrees into managed "sessions" — each task gets its own directory, branch, and terminal, so you never lose your place. An interactive fzf browser ties it all together.
+Switching between tasks means juggling git branches, stashing changes, and losing editor context. **ez** turns git worktrees into managed "sessions" — each task gets its own directory, branch, and terminal, so you never lose your place. An interactive browser ties it all together.
 
 ## Install
 
@@ -133,17 +133,17 @@ alias Note='ez session note cd'
 bind -T prefix n display-popup -E -w 65% -h 65% "ez session note open"
 ```
 
-## Native browser (experimental)
+## Native browser
 
-ez also ships a built-in full-screen browser that does not need fzf. It is experimental; fzf stays the default.
+The default browser is a built-in full-screen TUI that does not need fzf. The fzf backend is still available.
 
 Layout: the search bar sits on top (with the current path and a match counter), view tabs below it, then the list and a preview panel, and a footer with the key hints for the current list. Colors come from your terminal's ANSI palette, so it follows your terminal theme. The preview hides on terminals narrower than 80 columns.
 
-Enable it (and switch back) with:
+Switch to fzf (and back) with:
 
 ```bash
-ez config set selector.backend native
 ez config set selector.backend fzf
+ez config set selector.backend native
 ```
 
 Options live in the `[native]` section of `config.toml`:
@@ -211,7 +211,7 @@ On first run it copies your real `config.toml` (repos and sessions are not copie
 ## Requirements
 
 - Rust 1.70+
-- [fzf](https://github.com/junegunn/fzf)
+- [fzf](https://github.com/junegunn/fzf) (only for `selector.backend = "fzf"`)
 - git
 - jq (for bundled plugins)
 - tmux, zellij 0.40+ or Rex (optional)

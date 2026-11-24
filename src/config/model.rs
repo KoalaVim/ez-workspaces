@@ -133,7 +133,7 @@ pub enum StageKind {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SelectorConfig {
-    /// Selector backend: "fzf" (default) or "native"
+    /// Selector backend: "native" (default) or "fzf"
     #[serde(default = "default_selector_backend")]
     pub backend: String,
 
@@ -143,7 +143,7 @@ pub struct SelectorConfig {
 }
 
 /// Accepted values for `selector.backend`.
-pub const SELECTOR_BACKENDS: [&str; 2] = ["fzf", "native"];
+pub const SELECTOR_BACKENDS: [&str; 2] = ["native", "fzf"];
 
 /// Parsed `selector.backend`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -361,7 +361,7 @@ impl Default for KeybindsConfig {
 }
 
 fn default_selector_backend() -> String {
-    "fzf".into()
+    "native".into()
 }
 
 fn default_fzf_height() -> String {
