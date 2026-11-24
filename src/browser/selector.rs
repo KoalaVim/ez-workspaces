@@ -109,11 +109,29 @@ pub trait InteractiveSelector {
     ) -> Result<ActionResult>;
 }
 
+/// Replacement for the stdin yes/no prompt, installed by the native browser so
+/// code that calls [`confirm_prompt`] directly gets a modal instead of reading
+/// from the (raw-mode) terminal.
+pub(crate) type ConfirmHook = std::rc::Rc<dyn Fn(&str, bool) -> Result<bool>>;
+
+thread_local! {
+    static CONFIRM_OVERRIDE: std::cell::RefCell<Option<ConfirmHook>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install (or clear with `None`) the confirm override for this thread.
+pub(crate) fn set_confirm_override(hook: Option<ConfirmHook>) {
+    CONFIRM_OVERRIDE.with(|c| *c.borrow_mut() = hook);
+}
+
 /// Prompts the user with a yes/no question on stderr, reads from stdin.
 /// Safe in non-interactive/piped contexts — EOF falls through to `default`.
 /// This is the canonical confirm implementation; `FzfSelector::confirm` delegates here.
 pub(crate) fn confirm_prompt(prompt: &str, default: bool) -> Result<bool> {
     use std::io::BufRead as _;
+    if let Some(hook) = CONFIRM_OVERRIDE.with(|c| c.borrow().clone()) {
+        return hook(prompt, default);
+    }
     let default_hint = if default { "Y/n" } else { "y/N" };
     eprint!("{prompt} [{default_hint}]: ");
     let mut input = String::new();

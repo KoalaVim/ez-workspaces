@@ -66,6 +66,7 @@ fn main() {
             all: cli.all,
             on_enter: cli.on_enter.as_deref(),
             on_create: cli.on_create.as_deref(),
+            no_color: cli.no_color,
         }),
         Some(Command::Clone { url, path }) => repo::clone_repo(&url, path.as_deref()),
         Some(Command::Add { path }) => repo::add_repo(path.as_deref()),
@@ -98,6 +99,7 @@ fn main() {
                 colored::control::set_override(true);
             }
             browser::preview(&path, session_actions, session_id.as_deref())
+                .map(|out| print!("{out}"))
         }
         Some(Command::Daemon { command }) => daemon::dispatch(command),
     };

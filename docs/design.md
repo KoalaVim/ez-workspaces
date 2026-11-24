@@ -12,6 +12,7 @@ graph TB
     CLI --> Session[Session Module]
     CLI --> Plugin[Plugin Module]
     Browser --> Selector[InteractiveSelector Trait]
+    Browser --> Domain[browser/domain shared layer]
 
     subgraph Core
         Config --> ConfigStore[(~/.config/ez/config.toml)]
@@ -90,6 +91,70 @@ flowchart TD
     K --> L
     L --> M[Enter session: cd + plugin hooks]
 ```
+
+## Browser Front Ends
+
+`browser/domain/` holds everything that does not depend on the UI. Two front ends sit on top of it, selected by `selector.backend`.
+
+```mermaid
+graph TB
+    Browse["browse() — selector.backend"] -->|fzf| FzfFE
+    Browse -->|native| NativeFE
+
+    subgraph "fzf front end (pull-style)"
+        FzfFE[views/* + session_loop + drill] --> FzfSel[FzfSelector]
+        FzfSel --> fzf[fzf process]
+        FzfFE --> FzfEff[browser/effects.rs]
+    end
+
+    subgraph "native front end (tui/)"
+        NativeFE[tui::App event loop] --> NatSel[NativeSelector modals]
+        NativeFE --> NatEff[tui/effects.rs]
+    end
+
+    subgraph "browser/domain (shared)"
+        Rows["rows / session_rows: Vec&lt;Row&gt;"]
+        Preview["preview: String (ANSI)"]
+        Actions["actions / repo_actions: Vec&lt;Effect&gt;"]
+    end
+
+    FzfFE --> Rows
+    FzfFE --> Preview
+    FzfFE --> Actions
+    NativeFE --> Rows
+    NativeFE --> Preview
+    NativeFE --> Actions
+    Actions -.wizards.-> Sel[InteractiveSelector trait]
+    FzfSel -.implements.-> Sel
+    NatSel -.implements.-> Sel
+    FzfEff --> Files[(cd-file / post-cmd-file / #EZ_RELAUNCH)]
+    NatEff --> Files
+```
+
+Handlers return `Effect`s (`Cd`, `PostCmds`, `Exec`, `OpenNote`, `Refresh`, `Notify`, `Exit`) instead of writing files, and each front end applies them. The shell-wrapper contract (cd-file, post-cmd-file, relaunch marker) is identical in both.
+
+### Native event loop
+
+```mermaid
+flowchart LR
+    Keys[terminal events] --> Loop
+    subgraph "main thread"
+        Loop["event loop (poll + mpsc)"] --> Update[App update: keys, nav stack]
+        Update --> Draw[draw if dirty]
+    end
+    Update -->|jobs + generation id| Pool[worker pool]
+    Pool -->|"rows, branches, previews, plugin views"| Loop
+    Snap[(browser-snapshot.toml)] -->|first frame| Draw
+    Loop -->|on exit, atomic write| Snap
+    Update -->|action needs a prompt| Modal[NativeSelector nested loop on shared terminal]
+    Modal --> Update
+```
+
+Stale worker results (older generation id) are dropped. Snapshot rows are replaced by fresh rows while the cursor stays on the same value.
+
+### Stdio capture and suspend
+
+The alternate screen must never receive stray output. `tui/stdio.rs` redirects fds 1 and 2 to a sink while the TUI is active and replays any stray output after teardown; `tui/capture.rs` collects handler output so it can be shown as a notification. Plugin binds that need the terminal (`Effect::Exec`) suspend the TUI (leave alternate screen, restore stdio), run the command, then resume; cd and post-command effects end the process so the shell wrapper can act on the files.
 
 ## Session Tree Model
 

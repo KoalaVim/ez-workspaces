@@ -96,6 +96,10 @@ pub fn execute(
     if let Ok(config_dir) = crate::paths::config_dir() {
         cmd.env("EZ_CONFIG_DIR", config_dir);
     }
+    // Keep nested `ez` calls on the same data dir (matters with EZ_DATA_DIR set)
+    if let Ok(data_dir) = crate::paths::data_dir() {
+        cmd.env("EZ_DATA_DIR", data_dir);
+    }
 
     // Expose the running binary so plugins can shell out to ez. `ez` in PATH is
     // not reliable: in an interactive shell it resolves to the wrapper function,

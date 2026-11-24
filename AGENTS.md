@@ -9,8 +9,10 @@ ez-workspaces (`ez`) is a Rust-based workspace and session manager. It manages g
 - **Language**: Rust (single crate, modular structure)
 - **Config**: TOML at `~/.config/ez/`
 - **Data**: Notes and session data at `<data_dir>/ez/` (macOS: `~/Library/Application Support/ez/`, Linux: `~/.local/share/ez/`)
+- **Dir overrides**: `EZ_CONFIG_DIR` / `EZ_DATA_DIR` (non-empty) replace the config/data dirs (resolved in `src/paths.rs`; plugins receive both)
 - **Plugins**: External scripts (JSON-over-stdio protocol)
-- **Interactive UI**: fzf via `InteractiveSelector` trait
+- **Interactive UI**: fzf (default) or native ratatui TUI (experimental, `selector.backend = "native"`); both share `browser/domain/`; wizards use the `InteractiveSelector` trait (`FzfSelector`, `NativeSelector`)
+- **Env**: `EZ_NO_DAEMON=1` disables daemon auto-start
 
 ## Source Layout
 
@@ -27,7 +29,11 @@ src/
     notes.rs        Per-session notes directory management
     env.rs          Session env CLI (set/list/unset)
   plugin/           Plugin execution engine
-  browser/          Interactive fzf browser
+  browser/          Interactive browser (two front ends over a shared domain layer)
+    domain/         Front-end independent logic: rows, preview, action handlers, effects
+    tui/            Native ratatui front end (selector.backend = "native")
+      app/          App state split: actions, draw, keymap, loader, snapshot_io
+    views/          fzf views (pull-style)
 plugins/            Bundled plugin scripts
 docs/               Documentation
 ```
@@ -35,7 +41,7 @@ docs/               Documentation
 ## Key Modules
 
 ### config/ - Configuration
-- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig` structs; `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort`, `note_open_command` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty`, `clone_repo`, `remove_repo`, `note_open`, `note_cd` keybind fields
+- `model.rs`: `EzConfig`, `SelectorConfig`, `PluginsConfig`, `NativeConfig` (`preview_ratio`, `snapshot`) structs; `SelectorBackend` enum (`Fzf`, `Native`); `NameBuilderMode` enum (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`); `SortMode` enum (`Lru`, `Alpha`); `name_builder_modes`, `default_sort`, `note_open_command` fields on `EzConfig`; `sort_toggle`, `new_bare_session`, `session_from_dirty`, `clone_repo`, `remove_repo`, `note_open`, `note_cd` keybind fields
 - `mod.rs`: load/save/edit config
 
 ### repo/ - Repository Management
@@ -63,10 +69,23 @@ docs/               Documentation
 
 ### browser/ - Interactive Browser
 - `selector.rs`: `InteractiveSelector` trait + `FzfSelector` impl
-- `mod.rs`: drill-down browse flow, session action loop, label input parser, shared git helpers; `format_branch_indicator` (dimmed `(branch-name)` next to sessions in the picker and tree view)
-- `preview.rs`: fzf preview pane renderer (repo, directory, keybind help)
+- `mod.rs`: `browse` entry, `browse_repo`, `SortMode`, re-exports of the helpers below
+- `session_loop.rs`: fzf session-list loop; drives the selector, builds rows via `domain`, dispatches keys to `domain::actions` and applies the returned effects
+- `drill.rs`: fzf workspace directory drill-down (rows from `domain::rows::directory_rows`)
+- `effects.rs`: fzf-side effect executor (`apply_effects`) writing `cd_file` / `post_cmd_file` / the `#EZ_RELAUNCH` marker; `write_cd_target`, `write_post_commands`, `write_relaunch_marker`, `accept_session` wrapper
+- `git.rs`: `BranchCache`, `git_cmd`, `get_branch`, `is_dirty`, gitdir/rebase helpers
+- `format.rs`: display formatters (`format_last_accessed`, `format_pr_indicator`, `format_branch_indicator`, `format_repo_display`) and `parse_label_input`
+- `domain/mod.rs`: `Row { display (ANSI), value, kind }`, `RowKind`, and the `Effect` enum (`Cd`, `PostCmds { cmds, relaunch }`, `Exec`, `OpenNote`, `Refresh`, `Notify`, `Exit`); `outln!` macro for writing into a `String`
+- `domain/rows.rs`: row builders for Tree, Workspace roots, directory drill-down, Repo, Owner, Label and plugin views (`Vec<Row>`, no terminal involved)
+- `domain/session_rows.rs`: row builder for the per-repo session list (managed sessions + unmanaged worktrees)
+- `domain/preview.rs`, `preview_session.rs`, `keybind_help.rs`: preview renderers writing into a `String` (`fmt::Write`); `ez preview` prints the returned string
+- `domain/actions.rs`: session-list handlers returning `Vec<Effect>` (`ActionCtx`, `select_session`, `select_unmanaged`, `delete_unmanaged`, `handle_session_action`); wizards still pull from `&dyn InteractiveSelector`
+- `domain/accept.rs`: `accept_session` / `bind_response_effects` as effects (on_enter / on_create navigation)
+- `domain/fresh.rs`: re-validates a row's target against fresh data before acting (stale rows are refused with a notification); `domain/repo_actions.rs`: repo-level handlers (labels, remove, clone); `domain/plugin_view.rs`: plugin view rows and select handling; `domain/preview_slow.rs`: slow preview parts (git log, notes) split out so a front end can run them off-thread; `domain/tests.rs`: domain tests
+- `tui/mod.rs`: native entry (`run`); `terminal.rs` RAII terminal guard + panic hook + suspend/resume; `event.rs` sync poll loop with `mpsc` results (dirty-flag redraw); `keys.rs` fzf key-string parser; `list.rs` nucleo fuzzy list on ANSI-stripped text; `nav.rs` + `level.rs` navigation stack (Esc pops, Ctrl-C = `Interrupted`); `preview_pane.rs` in-process ANSI preview (`ansi-to-tui`, cached); `effects.rs` native effect executor (cd/post-cmd files, suspend for `Exec`); `modal.rs` + `modal_state.rs` `NativeSelector` (modal prompts on the shared terminal); `capture.rs` + `stdio.rs` keep handler/stray stdout+stderr off the alternate screen; `workers.rs` fixed thread pool with generation ids; `snapshot.rs` versioned atomic TOML of last rows (`<data_dir>/ez/browser-snapshot.toml`, `native.snapshot`)
+- `tui/app.rs` + `app/`: `App` state, key map, drawing, row loading on workers, snapshot swap-in, action dispatch
 - `views/mod.rs`: top-level view dispatcher (`ViewMode`: Tree/Workspace/Repo/Owner/Label/Plugin) with view-switch keybind handling including plugin views
-- `views/plugin_view.rs`: renderer for plugin-provided views (OnView → fzf → OnViewSelect)
+- `views/*.rs`: fzf views (tree, workspace, repo, owner, label, plugin_view) built on `domain::rows`
 
 ## Key Traits
 
@@ -84,6 +103,7 @@ make install-debug # install debug build (unoptimized, faster compile)
 make lint          # clippy
 make fmt           # format code
 make check         # fmt check + clippy + tests
+make dev           # debug build against .dev/ (EZ_CONFIG_DIR/EZ_DATA_DIR); ARGS="...", DEV_DIR=...
 ```
 
 ## Plugin Development

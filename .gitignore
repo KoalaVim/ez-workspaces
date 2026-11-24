@@ -20,3 +20,6 @@ Thumbs.db
 # Node
 node_modules/
 raycast/ez-extension/dist/
+
+# make dev sandbox
+/.dev/

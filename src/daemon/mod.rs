@@ -89,6 +89,11 @@ pub fn spawn_daemon() -> Result<()> {
 /// error. A failure to auto-start the daemon should never affect the user's
 /// command.
 pub fn ensure_daemon_running() {
+    // Opt-out for tests and sandboxes that must not leave background processes.
+    if std::env::var_os("EZ_NO_DAEMON").is_some() {
+        log::debug!("daemon: auto-start disabled by EZ_NO_DAEMON");
+        return;
+    }
     if is_daemon_alive() {
         return;
     }

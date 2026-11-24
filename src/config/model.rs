@@ -92,6 +92,10 @@ pub struct EzConfig {
     /// "$EDITOR" is resolved from the environment at runtime.
     #[serde(default = "default_note_open_command")]
     pub note_open_command: String,
+
+    /// Settings for the native TUI backend (`selector.backend = "native"`).
+    #[serde(default)]
+    pub native: NativeConfig,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -129,13 +133,66 @@ pub enum StageKind {
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SelectorConfig {
-    /// Selector backend: "fzf" (default)
+    /// Selector backend: "fzf" (default) or "native"
     #[serde(default = "default_selector_backend")]
     pub backend: String,
 
     /// Extra fzf flags (deprecated, use [fzf] section)
     #[serde(default)]
     pub fzf_opts: Option<String>,
+}
+
+/// Accepted values for `selector.backend`.
+pub const SELECTOR_BACKENDS: [&str; 2] = ["fzf", "native"];
+
+/// Parsed `selector.backend`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SelectorBackend {
+    Fzf,
+    Native,
+}
+
+impl SelectorBackend {
+    /// Parse a backend name; the error lists the accepted values.
+    pub fn parse(s: &str) -> Result<Self, crate::error::EzError> {
+        match s {
+            "fzf" => Ok(Self::Fzf),
+            "native" => Ok(Self::Native),
+            other => Err(crate::error::EzError::Config(format!(
+                "Unknown selector backend '{other}'. Accepted values: {}",
+                SELECTOR_BACKENDS.join(", ")
+            ))),
+        }
+    }
+}
+
+/// `[native]` section: options of the native TUI backend.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct NativeConfig {
+    /// Preview pane width as a percentage of the screen (default: 50).
+    #[serde(default = "default_native_preview_ratio")]
+    pub preview_ratio: u16,
+
+    /// Draw the last-seen rows immediately on start (default: true).
+    #[serde(default = "default_native_snapshot")]
+    pub snapshot: bool,
+}
+
+impl Default for NativeConfig {
+    fn default() -> Self {
+        Self {
+            preview_ratio: default_native_preview_ratio(),
+            snapshot: default_native_snapshot(),
+        }
+    }
+}
+
+fn default_native_preview_ratio() -> u16 {
+    50
+}
+
+fn default_native_snapshot() -> bool {
+    true
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -255,6 +312,7 @@ impl Default for EzConfig {
             default_sort: default_sort(),
             copy_cursor_conversations: false,
             note_open_command: default_note_open_command(),
+            native: NativeConfig::default(),
         }
     }
 }

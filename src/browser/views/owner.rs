@@ -1,16 +1,16 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use colored::Colorize;
 
 use crate::config;
 use crate::error::Result;
-use crate::paths;
 use crate::plugin;
 use crate::repo;
 
-use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, format_repo_display, BranchCache};
+use super::super::domain::rows::{owner_rows, repo_rows};
+use super::super::domain::{to_items, RowKind};
+use super::super::selector::{ActionResult, InteractiveSelector};
+use super::super::{browse_repo, BranchCache};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
@@ -31,29 +31,8 @@ pub(super) fn run(
 
     let plugin_views = plugin::collect_plugin_views("owner", config).unwrap_or_default();
 
-    let mut by_owner: BTreeMap<String, Vec<repo::model::RepoEntry>> = BTreeMap::new();
-    for entry in &index.repos {
-        let owner = owner_for_repo(entry).unwrap_or_else(|| "(unknown)".to_string());
-        by_owner.entry(owner).or_default().push(entry.clone());
-    }
-
-    let owners: Vec<(String, Vec<repo::model::RepoEntry>)> = by_owner.into_iter().collect();
-    let items: Vec<SelectItem> = owners
-        .iter()
-        .map(|(owner, entries)| SelectItem {
-            display: format!(
-                "{} {}",
-                owner.bold().purple(),
-                format!(
-                    "({} repo{})",
-                    entries.len(),
-                    if entries.len() == 1 { "" } else { "s" }
-                )
-                .dimmed()
-            ),
-            value: owner.clone(),
-        })
-        .collect();
+    let owners = owner_rows(&index);
+    let items = to_items(&owners);
 
     let header = view_header("owner", &config.keybinds, &plugin_views);
 
@@ -76,33 +55,12 @@ pub(super) fn run(
         ActionResult::Select(idx) => idx,
     };
 
-    let (_owner, entries) = &owners[owner_idx];
-    let branches: Vec<Option<String>> = std::thread::scope(|s| {
-        let handles: Vec<_> = entries
-            .iter()
-            .map(|r| s.spawn(|| branch_cache.get_branch(&r.path)))
-            .collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-
-    let sub_items: Vec<SelectItem> = entries
-        .iter()
-        .zip(branches.iter())
-        .map(|(r, branch)| {
-            let branch_str = branch.as_deref().unwrap_or("?");
-            let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
-            let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
-            SelectItem {
-                display: format_repo_display(
-                    &r.name,
-                    Some(&path_str),
-                    Some(branch_str),
-                    &meta.labels,
-                ),
-                value: r.path.to_string_lossy().to_string(),
-            }
-        })
-        .collect();
+    let RowKind::Owner { repos } = &owners[owner_idx].kind else {
+        return Ok(Outcome::Done);
+    };
+    let entries: Vec<&repo::model::RepoEntry> = repos.iter().collect();
+    let sub_rows = repo_rows(&entries, branch_cache);
+    let sub_items = to_items(&sub_rows);
 
     let ez_bin = std::env::current_exe().ok();
     let preview_cmd = ez_bin.map(|bin| format!("{} preview {{}}", bin.display()));
@@ -124,7 +82,7 @@ pub(super) fn run(
             }
         }
         ActionResult::Select(idx) => {
-            let entry = &entries[idx];
+            let entry = entries[idx];
             if browse_repo(
                 &entry.path,
                 selector,
@@ -139,19 +97,4 @@ pub(super) fn run(
             }
         }
     }
-}
-
-fn owner_for_repo(entry: &repo::model::RepoEntry) -> Option<String> {
-    let meta = repo::store::load_repo_meta(&entry.id).unwrap_or_default();
-    if let Some(url) = meta.remote_url.as_deref() {
-        if let Some(owner) = repo::model::parse_owner(url) {
-            return Some(owner);
-        }
-    }
-    // Fallback: immediate parent directory name of the repo path.
-    entry
-        .path
-        .parent()
-        .and_then(|p| p.file_name())
-        .map(|n| n.to_string_lossy().to_string())
 }

@@ -517,7 +517,7 @@ fn resolve_plugins_dir(config: &EzConfig) -> Result<std::path::PathBuf> {
 }
 
 /// Info about a plugin view collected from manifests, used by the browser.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct PluginViewInfo {
     pub view_name: String,
     pub plugin_name: String,

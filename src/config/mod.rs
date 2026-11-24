@@ -1,4 +1,6 @@
 pub mod model;
+#[cfg(test)]
+mod tests;
 
 use std::fs;
 
@@ -120,7 +122,27 @@ fn set_value(key: &str, value: &str) -> Result<()> {
         }
         "on_enter" => config.on_enter = value.to_string(),
         "on_create" => config.on_create = value.to_string(),
-        "selector.backend" => config.selector.backend = value.to_string(),
+        "selector.backend" => {
+            // Validate before persisting so a typo can't lock the user out.
+            model::SelectorBackend::parse(value)?;
+            config.selector.backend = value.to_string();
+        }
+        "native.preview_ratio" => {
+            let ratio: u16 = value
+                .parse()
+                .map_err(|_| EzError::Config(format!("Invalid number: {value}")))?;
+            if !(10..=90).contains(&ratio) {
+                return Err(EzError::Config(format!(
+                    "native.preview_ratio must be between 10 and 90, got: {ratio}"
+                )));
+            }
+            config.native.preview_ratio = ratio;
+        }
+        "native.snapshot" => {
+            config.native.snapshot = value
+                .parse()
+                .map_err(|_| EzError::Config(format!("Expected true/false, got: {value}")))?;
+        }
         "selector.fzf_opts" => config.selector.fzf_opts = Some(value.to_string()),
         "copy_cursor_conversations" => {
             config.copy_cursor_conversations = value
@@ -146,6 +168,8 @@ fn get_value(key: &str) -> Result<()> {
         "on_create" => config.on_create,
         "selector.backend" => config.selector.backend,
         "selector.fzf_opts" => config.selector.fzf_opts.unwrap_or_default(),
+        "native.preview_ratio" => config.native.preview_ratio.to_string(),
+        "native.snapshot" => config.native.snapshot.to_string(),
         "plugins.enabled" => format!("{:?}", config.plugins.enabled),
         _ => return Err(EzError::Config(format!("Unknown key: {key}"))),
     };
@@ -243,10 +267,13 @@ fn interactive_init() -> Result<()> {
     config.default_shell = Some(shell_items[idx].value.clone());
 
     // Selector backend
-    let backend_items = vec![SelectItem {
-        display: "fzf".into(),
-        value: "fzf".into(),
-    }];
+    let backend_items: Vec<SelectItem> = model::SELECTOR_BACKENDS
+        .iter()
+        .map(|b| SelectItem {
+            display: (*b).into(),
+            value: (*b).into(),
+        })
+        .collect();
     println!(
         "\n{} {}",
         "Current selector:".bold(),

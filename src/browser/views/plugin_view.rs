@@ -6,7 +6,9 @@ use crate::config;
 use crate::error::Result;
 use crate::plugin;
 
-use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
+use super::super::domain::rows::plugin_item_rows;
+use super::super::domain::to_items;
+use super::super::selector::{ActionResult, InteractiveSelector};
 use super::super::{write_cd_target, write_post_commands};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome};
 
@@ -33,13 +35,7 @@ pub(super) fn run(
         }
     };
 
-    let items: Vec<SelectItem> = view_items
-        .iter()
-        .map(|vi| SelectItem {
-            display: vi.display.clone(),
-            value: vi.value.clone(),
-        })
-        .collect();
+    let items = to_items(&plugin_item_rows(&view_items));
 
     let prompt = response.view_prompt.as_deref().unwrap_or(view_name);
 

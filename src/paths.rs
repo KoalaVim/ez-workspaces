@@ -1,9 +1,29 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::error::{EzError, Result};
 
-/// Returns the base config directory: ~/.config/ez/
+/// Resolve an `EZ_*_DIR` override value: `Some(path)` when set and non-empty
+/// (a leading `~` is expanded), `None` when unset or empty.
+fn resolve_override(value: Option<OsString>) -> Option<PathBuf> {
+    let value = value.filter(|v| !v.is_empty())?;
+    Some(match value.to_str() {
+        Some(s) if s == "~" => dirs::home_dir().unwrap_or_else(|| PathBuf::from(s)),
+        Some(s) => expand_tilde(s),
+        None => PathBuf::from(value),
+    })
+}
+
+/// Returns the base config directory: `$EZ_CONFIG_DIR` if set and non-empty,
+/// else the platform default (~/.config/ez/).
 pub fn config_dir() -> Result<PathBuf> {
+    if let Some(dir) = resolve_override(std::env::var_os("EZ_CONFIG_DIR")) {
+        log::debug!(
+            "config_dir: EZ_CONFIG_DIR override in effect: {}",
+            dir.display()
+        );
+        return Ok(dir);
+    }
     let base = dirs::config_dir()
         .ok_or_else(|| EzError::Path("Could not determine config directory".into()))?;
     Ok(base.join("ez"))
@@ -54,10 +74,18 @@ pub fn daemon_log_file() -> Result<PathBuf> {
     Ok(config_dir()?.join("daemon.log"))
 }
 
-/// Returns the base data directory: <data_dir>/ez/
+/// Returns the base data directory: `$EZ_DATA_DIR` if set and non-empty, else
+/// <data_dir>/ez/
 /// macOS: ~/Library/Application Support/ez/
 /// Linux: ~/.local/share/ez/
 pub fn data_dir() -> Result<PathBuf> {
+    if let Some(dir) = resolve_override(std::env::var_os("EZ_DATA_DIR")) {
+        log::debug!(
+            "data_dir: EZ_DATA_DIR override in effect: {}",
+            dir.display()
+        );
+        return Ok(dir);
+    }
     let base = dirs::data_dir()
         .ok_or_else(|| EzError::Path("Could not determine data directory".into()))?;
     Ok(base.join("ez"))
@@ -220,5 +248,39 @@ mod tests {
         let missing = base.join("does-not-exist");
 
         assert_eq!(normalize(&missing), missing);
+    }
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn unset_falls_back() {
+        assert_eq!(resolve_override(None), None);
+    }
+
+    #[test]
+    fn empty_falls_back() {
+        assert_eq!(resolve_override(Some(OsString::new())), None);
+    }
+
+    #[test]
+    fn set_is_used_verbatim() {
+        assert_eq!(
+            resolve_override(Some("/tmp/ez-dev/config".into())),
+            Some(PathBuf::from("/tmp/ez-dev/config"))
+        );
+    }
+
+    #[test]
+    fn tilde_is_expanded() {
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(
+                resolve_override(Some("~/ez-dev".into())),
+                Some(home.join("ez-dev"))
+            );
+            assert_eq!(resolve_override(Some("~".into())), Some(home));
+        }
     }
 }

@@ -133,6 +133,71 @@ alias Note='ez session note cd'
 bind -T prefix n display-popup -E -w 65% -h 65% "ez session note open"
 ```
 
+## Native browser (experimental)
+
+ez also ships a built-in full-screen browser that does not need fzf. It is experimental; fzf stays the default.
+
+Enable it (and switch back) with:
+
+```bash
+ez config set selector.backend native
+ez config set selector.backend fzf
+```
+
+Options live in the `[native]` section of `config.toml`:
+
+```toml
+[selector]
+backend = "native"
+
+[native]
+preview_ratio = 50   # preview pane width in percent, 10-90 (default 50)
+snapshot = true      # draw the last-seen rows immediately on start (default true)
+```
+
+```bash
+ez config set native.preview_ratio 40
+ez config set native.snapshot false
+```
+
+Behavior:
+
+- One full-screen session for the whole flow: view switching, drill-down, session lists and actions all happen in one process, without restarting a selector between levels.
+- View switching is instant, and each top-level view keeps its own query and cursor while you are in another view.
+- Branches, PR status, previews and plugin views load in background threads, so typing and cursor movement never wait on git, disk or plugins.
+- Snapshot first paint: on exit the last shown rows are saved to `<data_dir>/ez/browser-snapshot.toml` (macOS: `~/Library/Application Support/ez/`, Linux: `~/.local/share/ez/`). The next start draws them on the first frame and swaps in fresh rows, keeping the cursor on the same item. A missing or corrupt snapshot is ignored. Disable with `native.snapshot = false`.
+- Prompts (name builder, confirm, input, config wizard) appear as modals over the browser.
+- Keybinds use the same fzf key syntax as the config (`ctrl-t`, `alt-d`, `enter`, ...), so your existing `[keybinds]` work unchanged.
+
+Differences and limits compared to fzf:
+
+- `fzf.extra_opts` and `selector.fzf_opts` are ignored.
+- A modal text input cancelled with Esc returns its default, like fzf.
+- Previews are not shown inside modals.
+- Validation messages from wizards are shown after the wizard finishes, not inline.
+
+Set `EZ_NO_DAEMON=1` to stop ez from auto-starting its background daemon (useful for tests and sandboxes).
+
+## Testing with a dev config
+
+To try ez (for example the native browser) without touching your real setup, point it at throwaway directories:
+
+```bash
+EZ_CONFIG_DIR=~/ez-dev/config EZ_DATA_DIR=~/ez-dev/data ez
+```
+
+`EZ_CONFIG_DIR` replaces the config directory (config file, repo index, sessions, plugins, daemon pid/log, so a dev daemon never collides with the default one) and `EZ_DATA_DIR` replaces the data directory (notes, browser snapshot). Unset or empty means the platform defaults. Set `EZ_NO_DAEMON=1` to avoid auto-starting the daemon.
+
+`make dev` does this for a debug build, using `.dev/` in the repo (override with `DEV_DIR=...`):
+
+```bash
+make dev                                  # launch the browser against .dev/
+make dev ARGS="config get selector.backend"
+make dev ARGS="add ~/code/some-repo"      # the dev index starts empty
+```
+
+On first run it copies your real `config.toml` (repos and sessions are not copied) and sets `selector.backend` to `native`. Repos under `workspace_roots` still show up through scanning. `make dev` is for testing the UI: without the shell wrapper, cd effects need `--cd-file <path>`.
+
 ## Docs
 
 - [User Guide](docs/user-guide.md) — full command reference, config options, name builder modes

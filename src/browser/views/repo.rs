@@ -4,12 +4,13 @@ use colored::Colorize;
 
 use crate::config;
 use crate::error::Result;
-use crate::paths;
 use crate::plugin;
 use crate::repo;
 
-use super::super::selector::{ActionResult, InteractiveSelector, SelectItem};
-use super::super::{browse_repo, format_repo_display, parse_label_input, BranchCache, SortMode};
+use super::super::domain::rows::repo_view_rows;
+use super::super::domain::{to_items, Row, RowKind};
+use super::super::selector::{ActionResult, InteractiveSelector};
+use super::super::{browse_repo, parse_label_input, BranchCache, SortMode};
 use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 pub(super) fn run(
@@ -35,51 +36,8 @@ pub(super) fn run(
             return Ok(Outcome::Done);
         }
 
-        let mut repo_entries: Vec<&repo::model::RepoEntry> = index.repos.iter().collect();
-
-        if sort_mode == SortMode::Lru {
-            repo_entries.sort_by(|a, b| {
-                let a_ts = repo::store::load_repo_meta(&a.id)
-                    .ok()
-                    .and_then(|m| m.last_accessed);
-                let b_ts = repo::store::load_repo_meta(&b.id)
-                    .ok()
-                    .and_then(|m| m.last_accessed);
-                match (&b_ts, &a_ts) {
-                    (Some(b_v), Some(a_v)) => b_v.cmp(a_v),
-                    (Some(_), None) => std::cmp::Ordering::Greater,
-                    (None, Some(_)) => std::cmp::Ordering::Less,
-                    (None, None) => std::cmp::Ordering::Equal,
-                }
-            });
-        }
-
-        let branches: Vec<Option<String>> = std::thread::scope(|s| {
-            let handles: Vec<_> = repo_entries
-                .iter()
-                .map(|r| s.spawn(|| branch_cache.get_branch(&r.path)))
-                .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect()
-        });
-
-        let items: Vec<SelectItem> = repo_entries
-            .iter()
-            .zip(branches.iter())
-            .map(|(r, branch)| {
-                let branch_str = branch.as_deref().unwrap_or("?");
-                let meta = repo::store::load_repo_meta(&r.id).unwrap_or_default();
-                let path_str = paths::collapse_tilde(&r.path.to_string_lossy());
-                SelectItem {
-                    display: format_repo_display(
-                        &r.name,
-                        Some(&path_str),
-                        Some(branch_str),
-                        &meta.labels,
-                    ),
-                    value: r.path.to_string_lossy().to_string(),
-                }
-            })
-            .collect();
+        let rows = repo_view_rows(&index, sort_mode, branch_cache);
+        let items = to_items(&rows);
 
         let header = format!(
             "{}  sort: {} ({})",
@@ -115,7 +73,9 @@ pub(super) fn run(
                     return Ok(Outcome::Switch(next));
                 }
                 if key == config.keybinds.edit_labels {
-                    let entry = repo_entries[idx];
+                    let Some(entry) = row_entry(&rows[idx]) else {
+                        continue;
+                    };
                     let meta = repo::store::load_repo_meta(&entry.id).unwrap_or_default();
                     let current = meta.labels.join(",");
                     let input =
@@ -135,7 +95,9 @@ pub(super) fn run(
                     continue;
                 }
                 if key == config.keybinds.remove_repo {
-                    let entry = repo_entries[idx];
+                    let Some(entry) = row_entry(&rows[idx]) else {
+                        continue;
+                    };
                     let msg = format!("Remove repo '{}'?", entry.name);
                     if selector.confirm(&msg, false)? {
                         let mut idx_mut = repo::store::load_index()?;
@@ -147,7 +109,9 @@ pub(super) fn run(
                 }
             }
             ActionResult::Select(idx) => {
-                let entry = repo_entries[idx];
+                let Some(entry) = row_entry(&rows[idx]) else {
+                    continue;
+                };
                 if browse_repo(
                     &entry.path,
                     selector,
@@ -161,5 +125,12 @@ pub(super) fn run(
                 return Ok(Outcome::Switch(ViewMode::Repo));
             }
         }
+    }
+}
+
+fn row_entry(row: &Row) -> Option<&repo::model::RepoEntry> {
+    match &row.kind {
+        RowKind::Repo { entry, .. } => entry.as_ref(),
+        _ => None,
     }
 }
