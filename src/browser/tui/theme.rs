@@ -38,11 +38,20 @@ pub fn accent_bold() -> Style {
     Style::default().fg(ACCENT).add_modifier(Modifier::BOLD)
 }
 
-/// Style for fuzzy-matched characters.
+/// Matched-character color, as fzf's default 256-color theme (`hl:108`).
+pub const HL: Color = Color::Indexed(108);
+/// Matched-character color on the current row (fzf `hl+:151`).
+pub const HL_CURRENT: Color = Color::Indexed(151);
+
+/// Style for fuzzy-matched characters: fzf-like recolor, no underline.
+/// The match color replaces the row's own ANSI foreground, like fzf does.
 pub fn matched() -> Style {
-    Style::default()
-        .fg(ACCENT)
-        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+    Style::default().fg(HL)
+}
+
+/// Style for fuzzy-matched characters on the selected row.
+pub fn matched_current() -> Style {
+    Style::default().fg(HL_CURRENT).add_modifier(Modifier::BOLD)
 }
 
 /// Style for the selected row (the gutter glyph carries the accent).

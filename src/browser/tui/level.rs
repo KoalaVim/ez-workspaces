@@ -2,13 +2,16 @@
 //! rows and which preview its rows get. Loading is pure (no UI state), so it
 //! can run on a worker thread.
 
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 
 use super::list::FilteredList;
 use crate::browser::domain::rows;
 use crate::browser::domain::session_rows::session_rows;
 use crate::browser::domain::Row;
+use crate::browser::git::read_head_branch;
 use crate::browser::session_loop::touch_last_accessed;
 use crate::browser::{resolve_repo_entry, BranchCache, SortMode};
 use crate::config::model::EzConfig;
@@ -16,7 +19,7 @@ use crate::error::{EzError, Result};
 use crate::plugin::{self, PluginViewInfo};
 use crate::repo;
 use crate::repo::model::RepoEntry;
-use crate::session;
+use crate::session::{self, WorktreeInfo};
 
 /// The top-level views reachable with the view-switch keys.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -267,6 +270,7 @@ pub fn load(
     touch: bool,
     config: &EzConfig,
     cache: &BranchCache,
+    partial: &dyn Fn(Loaded),
 ) -> Result<Loaded> {
     let plain = |rows| Loaded {
         rows,
@@ -303,30 +307,97 @@ pub fn load(
             Ok(plain(rows::repo_rows(&refs, cache)))
         }
         Source::Fixed => Ok(plain(Vec::new())),
-        Source::Sessions(path) => load_sessions(path, sort, touch, config, cache),
+        Source::Sessions(path) => load_sessions(path, sort, touch, config, cache, partial),
     }
 }
 
+/// Attached-session ids seen on the last full load of each repo (by id);
+/// the fast pass shows them until the plugins answer again.
+fn last_attached() -> &'static Mutex<HashMap<String, HashSet<String>>> {
+    static LAST: OnceLock<Mutex<HashMap<String, HashSet<String>>>> = OnceLock::new();
+    LAST.get_or_init(Default::default)
+}
+
+/// Prime the attached-session memo (from the snapshot).
+pub fn seed_attached(saved: &std::collections::BTreeMap<String, Vec<String>>) {
+    let mut memo = last_attached().lock().unwrap();
+    for (repo, ids) in saved {
+        memo.entry(repo.clone())
+            .or_insert_with(|| ids.iter().cloned().collect());
+    }
+}
+
+/// Current attached-session memo, for saving in the snapshot.
+pub fn attached_memo() -> Vec<(String, Vec<String>)> {
+    let memo = last_attached().lock().unwrap();
+    memo.iter()
+        .map(|(repo, ids)| {
+            let mut ids: Vec<String> = ids.iter().cloned().collect();
+            ids.sort();
+            (repo.clone(), ids)
+        })
+        .collect()
+}
+
 /// Mirrors the per-iteration work of the fzf `session_action_loop`.
+///
+/// Two passes: a fast one (session files + `HEAD` reads, no subprocesses)
+/// handed to `partial` so the list is usable right away, then the full one,
+/// which runs `git worktree list` and the attached-session plugin hooks in
+/// parallel and adds unmanaged worktrees and fresh attached markers.
 fn load_sessions(
     path: &std::path::Path,
     sort: SortMode,
     touch: bool,
     config: &EzConfig,
     cache: &BranchCache,
+    partial: &dyn Fn(Loaded),
 ) -> Result<Loaded> {
+    let t = Instant::now();
+    let lap = |what: &str| log::debug!("load_sessions: {what} at {:?}", t.elapsed());
     let entry = resolve_repo_entry(path)?;
     if touch {
         touch_last_accessed(&entry);
     }
     let tree = session::ensure_default_session(&entry.id, &entry.path)?;
-    let worktree_info = session::build_worktree_info(&entry, &tree);
     let rendered = match sort {
         SortMode::Lru => tree.render_tree_lru(),
         SortMode::Alpha => tree.render_tree(),
     };
+
+    let fast_info = WorktreeInfo {
+        branches: tree
+            .sessions
+            .iter()
+            .map(|s| s.path.as_deref().unwrap_or(&entry.path))
+            .map(|p| (crate::paths::normalize(p), read_head_branch(p)))
+            .collect(),
+        unmanaged: Vec::new(),
+    };
+    let hint = last_attached()
+        .lock()
+        .unwrap()
+        .get(&entry.id)
+        .cloned()
+        .unwrap_or_default();
+    partial(Loaded {
+        rows: session_rows(&entry, &rendered, &fast_info, &hint, cache),
+        repo: Some(entry.clone()),
+        preview_cmd: None,
+    });
+    lap("fast pass");
+
     let meta = repo::store::load_repo_meta(&entry.id).unwrap_or_default();
-    let attached = plugin::get_attached_sessions(&entry, &meta, &tree, config);
+    let (worktree_info, attached) = std::thread::scope(|s| {
+        let worktrees = s.spawn(|| session::build_worktree_info(&entry, &tree));
+        let attached = plugin::get_attached_sessions(&entry, &meta, &tree, config);
+        (worktrees.join().expect("worktree info thread"), attached)
+    });
+    lap("worktrees + attached");
+    last_attached()
+        .lock()
+        .unwrap()
+        .insert(entry.id.clone(), attached.clone());
     let rows = session_rows(&entry, &rendered, &worktree_info, &attached, cache);
     Ok(Loaded {
         rows,

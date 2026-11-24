@@ -72,6 +72,7 @@ impl Handler for App {
                 loaded,
                 quiet,
                 pending,
+                partial,
             } => {
                 let Some(l) =
                     find_level(&mut self.nav, &mut self.saved, level).filter(|l| l.gen == gen)
@@ -80,14 +81,26 @@ impl Handler for App {
                     return;
                 };
                 log::debug!(
-                    "tui: level {level} loaded, {} rows ({} branches pending)",
+                    "tui: level {level} loaded, {} rows ({} branches pending, partial {partial})",
                     loaded.rows.len(),
                     pending.len()
                 );
                 l.list.set_rows(loaded.rows);
                 l.loading = false;
-                l.busy = false;
                 l.stale = false;
+                if let Some(entry) = loaded.repo.as_ref().filter(|_| partial) {
+                    l.title = entry.name.clone();
+                    l.repo = Some(entry.clone());
+                }
+                if partial {
+                    // Usable now; stays busy until the full result lands.
+                    self.first_paint_at = None;
+                    if !quiet {
+                        self.data_gen += 1;
+                    }
+                    return;
+                }
+                l.busy = false;
                 l.preview_cmd = loaded.preview_cmd;
                 if let Some(entry) = loaded.repo {
                     l.title = entry.name.clone();
@@ -102,7 +115,8 @@ impl Handler for App {
                 }
                 if !pending.is_empty() {
                     self.branch_inflight += pending.len();
-                    self.loader.resolve_branches(pending);
+                    *self.branch_pending.entry(level).or_default() += pending.len();
+                    self.loader.resolve_branches(level, pending);
                 }
             }
             Msg::Failed { level, gen, error } => {
@@ -117,7 +131,7 @@ impl Handler for App {
                 l.busy = false;
                 self.first_paint_at = None;
             }
-            Msg::Branch => self.branch_resolved(),
+            Msg::Branch { level } => self.branch_resolved(level),
             Msg::Preview {
                 key,
                 data_gen,

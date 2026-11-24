@@ -170,6 +170,17 @@ pub(crate) fn git_cmd(path: &Path, args: &[&str]) -> Option<String> {
         })
 }
 
+/// Branch checked out at `path`, read straight from its `HEAD` file (no git
+/// process). Falls back to the branch being rebased for a detached `HEAD`.
+pub(crate) fn read_head_branch(path: &Path) -> Option<String> {
+    let gitdir = resolve_gitdir(path)?;
+    let head = std::fs::read_to_string(gitdir.join("HEAD")).ok()?;
+    match head.trim().strip_prefix("ref: refs/heads/") {
+        Some(branch) => Some(branch.to_string()),
+        None => recover_rebase_branch(&gitdir),
+    }
+}
+
 /// Get the current branch of a git repo.
 pub(crate) fn get_branch(path: &Path) -> Option<String> {
     git_cmd(path, &["symbolic-ref", "--short", "HEAD"])
@@ -228,6 +239,22 @@ pub(crate) fn detect_repo_root() -> Option<PathBuf> {
 mod rebase_tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn read_head_branch_follows_worktree_gitdir_and_detached_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let gitdir = dir.path().join("gitdir");
+        fs::create_dir(&gitdir).unwrap();
+        let wt = dir.path().join("wt");
+        fs::create_dir(&wt).unwrap();
+        fs::write(wt.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+
+        fs::write(gitdir.join("HEAD"), "ref: refs/heads/feat/x\n").unwrap();
+        assert_eq!(read_head_branch(&wt), Some("feat/x".to_string()));
+
+        fs::write(gitdir.join("HEAD"), "0123456789abcdef\n").unwrap();
+        assert_eq!(read_head_branch(&wt), None);
+    }
 
     #[test]
     fn recover_rebase_branch_interactive() {

@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use super::App;
+use crate::browser::tui::level;
 use crate::browser::tui::snapshot::{self, Snapshot};
 use crate::config::model::EzConfig;
 use crate::paths;
@@ -18,10 +19,9 @@ pub(super) fn load(config: &EzConfig) -> (Option<Snapshot>, Option<PathBuf>) {
         return (None, None);
     };
     let path = snapshot::path_in(&dir);
-    (
-        Some(snapshot::load_from(&path).unwrap_or_default()),
-        Some(path),
-    )
+    let snap = snapshot::load_from(&path).unwrap_or_default();
+    level::seed_attached(&snap.attached);
+    (Some(snap), Some(path))
 }
 
 impl App {
@@ -34,6 +34,7 @@ impl App {
             snap.record(level);
         }
         snap.view = self.nav.root().title.clone();
+        snap.attached.extend(level::attached_memo());
         if let Err(e) = snapshot::save_to(path, snap) {
             log::debug!("snapshot: save failed: {e}");
         }

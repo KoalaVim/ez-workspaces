@@ -38,6 +38,10 @@ pub struct Snapshot {
     /// Rows per session list, by repo path.
     #[serde(default)]
     pub sessions: BTreeMap<String, Vec<SnapRow>>,
+    /// Attached session ids per repo id, so the fast first pass of a session
+    /// list keeps the attached markers before the plugins answer.
+    #[serde(default)]
+    pub attached: BTreeMap<String, Vec<String>>,
 }
 
 impl Default for Snapshot {
@@ -47,6 +51,7 @@ impl Default for Snapshot {
             view: String::new(),
             views: BTreeMap::new(),
             sessions: BTreeMap::new(),
+            attached: BTreeMap::new(),
         }
     }
 }

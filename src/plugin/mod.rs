@@ -471,6 +471,7 @@ pub fn get_attached_sessions(
     };
     let _ = bundled::ensure_bundled_plugins(&plugins_dir);
 
+    let mut jobs = Vec::new();
     for plugin_name in &config.plugins.enabled {
         let manifest_path = plugins_dir.join(plugin_name).join("manifest.toml");
         if !manifest_path.exists() {
@@ -486,7 +487,6 @@ pub fn get_attached_sessions(
         if !manifest.hooks.contains(&HookType::OnAttachedSessions) {
             continue;
         }
-        let plugin_dir = plugins_dir.join(plugin_name);
         let request = build_request(
             &HookType::OnAttachedSessions,
             repo_entry,
@@ -496,15 +496,34 @@ pub fn get_attached_sessions(
             plugin_name,
             config,
         );
-        match runner::execute(&manifest, &plugin_dir, &request, config.plugin_timeout) {
-            Ok(response) => {
-                attached.extend(response.attached_sessions);
-            }
-            Err(e) => {
-                log::debug!("plugin [{}]: OnAttachedSessions failed: {}", plugin_name, e);
+        jobs.push((
+            plugin_name,
+            manifest,
+            plugins_dir.join(plugin_name),
+            request,
+        ));
+    }
+
+    // Hooks are independent subprocesses: run them side by side.
+    std::thread::scope(|s| {
+        let handles: Vec<_> = jobs
+            .iter()
+            .map(|(name, manifest, dir, request)| {
+                let handle =
+                    s.spawn(move || runner::execute(manifest, dir, request, config.plugin_timeout));
+                (name, handle)
+            })
+            .collect();
+        for (name, handle) in handles {
+            match handle.join() {
+                Ok(Ok(response)) => attached.extend(response.attached_sessions),
+                Ok(Err(e)) => {
+                    log::debug!("plugin [{}]: OnAttachedSessions failed: {}", name, e)
+                }
+                Err(_) => log::debug!("plugin [{}]: OnAttachedSessions panicked", name),
             }
         }
-    }
+    });
     attached
 }
 

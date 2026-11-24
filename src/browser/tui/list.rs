@@ -133,8 +133,10 @@ impl FilteredList {
         self.hits.get(self.cursor).map(|h| &self.rows[h.index])
     }
 
+    /// Re-run the filter and put the cursor on the top hit, like fzf does on
+    /// every query change ([`set_rows`](Self::set_rows) restores the row after
+    /// a data refresh).
     fn refilter(&mut self) {
-        let previous = self.hits.get(self.cursor).map(|h| h.index);
         self.hits = if self.query.is_empty() {
             (0..self.rows.len())
                 .map(|index| Hit {
@@ -167,10 +169,7 @@ impl FilteredList {
             hits.sort_by(|a, b| b.score.cmp(&a.score).then(a.index.cmp(&b.index)));
             hits
         };
-        // Cursor: stay on the same row if it survived the filter, else go to the top.
-        self.cursor = previous
-            .and_then(|p| self.hits.iter().position(|h| h.index == p))
-            .unwrap_or(0);
+        self.cursor = 0;
         log::debug!(
             "list: query '{}' -> {}/{} rows",
             self.query,
@@ -188,10 +187,23 @@ impl FilteredList {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
+        let current = self.state.selected();
         let items: Vec<ListItem> = self
             .hits
             .iter()
-            .map(|h| ListItem::new(display_line(&self.rows[h.index].display, &h.indices)))
+            .enumerate()
+            .map(|(i, h)| {
+                let hl = if current == Some(i) {
+                    theme::matched_current()
+                } else {
+                    theme::matched()
+                };
+                ListItem::new(display_line_with(
+                    &self.rows[h.index].display,
+                    &h.indices,
+                    hl,
+                ))
+            })
             .collect();
         let list = List::new(items)
             .highlight_symbol(Line::from(Span::styled(
@@ -206,19 +218,23 @@ impl FilteredList {
 
 /// Convert an ANSI display string to a `Line`, highlighting matched characters.
 pub fn display_line(display: &str, matched: &[u32]) -> Line<'static> {
+    display_line_with(display, matched, theme::matched())
+}
+
+/// [`display_line`] with an explicit highlight style.
+pub fn display_line_with(display: &str, matched: &[u32], hl: Style) -> Line<'static> {
     let line = match display.into_text() {
         Ok(text) => text.lines.into_iter().next().unwrap_or_default(),
         Err(_) => Line::from(strip_ansi_codes(display).to_string()),
     };
-    highlight(line, matched)
+    highlight_with(line, matched, hl)
 }
 
 /// Patch matched character positions (counted across the line's spans) with a highlight style.
-pub fn highlight(line: Line<'static>, matched: &[u32]) -> Line<'static> {
+fn highlight_with(line: Line<'static>, matched: &[u32], hl: Style) -> Line<'static> {
     if matched.is_empty() {
         return line;
     }
-    let hl = theme::matched();
     let (style, alignment) = (line.style, line.alignment);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut pos: u32 = 0;
@@ -314,19 +330,21 @@ mod tests {
     }
 
     #[test]
-    fn cursor_resets_or_follows_on_filter_change() {
+    fn query_change_moves_cursor_to_top_like_fzf() {
         let mut list = sample();
-        list.move_cursor(2);
-        assert_eq!(list.selected().unwrap().value, "c");
-        list.set_query("alpha");
-        assert!(list.cursor() < list.len());
-        assert!(list.selected().is_some());
-        // cursor follows its row when it survives
+        // Narrow to "d", then delete the query: the cursor goes back to "a".
+        let d_query = list.rows()[3].display.clone();
+        list.set_query(&d_query);
+        assert_eq!(list.selected().unwrap().value, "d");
         list.set_query("");
-        list.move_cursor(-99);
+        assert_eq!(list.selected().unwrap().value, "a");
+        // Same for typing and deleting one character at a time.
         list.move_cursor(2);
-        list.set_query("a");
-        assert_eq!(list.selected().unwrap().value, "c");
+        list.push_char('a');
+        assert_eq!(list.cursor(), 0);
+        list.move_cursor(1);
+        list.pop_char();
+        assert_eq!(list.cursor(), 0);
         // filtered to nothing
         list.set_query("zzzzz");
         assert!(list.selected().is_none());

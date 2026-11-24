@@ -83,6 +83,8 @@ struct App {
     snapshot_path: Option<PathBuf>,
     /// Branch lookups still running on workers.
     branch_inflight: usize,
+    /// Branch lookups still running, per requesting level.
+    branch_pending: HashMap<u64, usize>,
     /// Without a snapshot the first frame waits for fresh rows (at most
     /// [`FIRST_PAINT_WAIT`]) instead of showing an empty list.
     first_paint_at: Option<Instant>,
@@ -125,11 +127,12 @@ impl App {
             hook_selector.confirm(prompt, default)
         })));
         let config = Arc::new(config);
-        let pool = Pool::new(tx);
+        let pool = Pool::new(tx.clone());
         let loader = Loader {
             config: Arc::clone(&config),
             cache: Arc::new(BranchCache::lazy()),
             pool: pool.clone(),
+            tx,
         };
         let (snapshot, snapshot_path) = snapshot_io::load(&config);
         let sort = SortMode::from_config(&config.default_sort);
@@ -158,6 +161,7 @@ impl App {
             snapshot,
             snapshot_path,
             branch_inflight: 0,
+            branch_pending: HashMap::new(),
             first_paint_at: (!seeded).then(Instant::now),
         };
         if let Some(dir) = start.drill {
@@ -318,24 +322,31 @@ impl App {
 
     /// A branch lookup finished: rebuild the rows that showed a placeholder
     /// for it, without touching cached previews.
-    fn branch_resolved(&mut self) {
+    /// A branch lookup finished. Once all lookups of a level are done, that
+    /// level reloads once (instead of every level on every lookup).
+    fn branch_resolved(&mut self, id: u64) {
         self.branch_inflight = self.branch_inflight.saturating_sub(1);
+        let left = self.branch_pending.entry(id).or_default();
+        *left = left.saturating_sub(1);
+        log::debug!(
+            "tui: branch resolved for level {id} ({} in flight)",
+            self.branch_inflight
+        );
+        if *left > 0 {
+            return;
+        }
+        self.branch_pending.remove(&id);
         let loader = &self.loader;
-        for level in self.nav.iter_mut() {
-            if matches!(level.source, Source::Fixed) {
-                continue;
-            }
+        if let Some(level) = self.nav.iter_mut().find(|l| l.id == id) {
             if level.busy {
                 level.reload_again = true;
             } else {
                 loader.request_quiet(level);
             }
-        }
-        // Hidden views reload when they are shown again.
-        for level in self.saved.values_mut() {
+        } else if let Some(level) = self.saved.values_mut().find(|l| l.id == id) {
+            // Hidden views reload when they are shown again.
             level.reload_again = true;
         }
-        log::debug!("tui: branch resolved ({} in flight)", self.branch_inflight);
     }
 
     /// Reload every level (rows and previews) after data changed.
