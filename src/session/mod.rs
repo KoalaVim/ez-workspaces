@@ -1,3 +1,4 @@
+mod base;
 pub mod current;
 pub mod cursor;
 mod env;
@@ -305,7 +306,7 @@ fn new_session(
     };
 
     let session_id = Uuid::new_v4().to_string();
-    let session = Session {
+    let mut session = Session {
         id: session_id.clone(),
         name: session_name.clone(),
         parent_id,
@@ -326,6 +327,13 @@ fn new_session(
     let skip_hooks = bare || !repo_entry.is_git;
     if !skip_hooks {
         handle_branch_conflict(&repo_entry.path, &session_name)?;
+        base::offer_default_branch_base(
+            &repo_entry.path,
+            &tree,
+            session.parent_id.as_deref(),
+            &session_name,
+            &mut session.env,
+        )?;
     }
     tree.add(session.clone())?;
 
@@ -1453,7 +1461,7 @@ pub fn create_child_session(
     }
 
     let session_id = Uuid::new_v4().to_string();
-    let session = Session {
+    let mut session = Session {
         id: session_id.clone(),
         name: name.to_string(),
         parent_id: Some(parent_id.to_string()),
@@ -1470,6 +1478,13 @@ pub fn create_child_session(
     let skip_hooks = bare || !repo_entry.is_git;
     if !skip_hooks {
         handle_branch_conflict(&repo_entry.path, name)?;
+        base::offer_default_branch_base(
+            &repo_entry.path,
+            &tree,
+            Some(parent_id),
+            name,
+            &mut session.env,
+        )?;
     }
     tree.add(session.clone())?;
 

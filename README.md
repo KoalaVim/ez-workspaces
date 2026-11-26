@@ -65,6 +65,8 @@ Worktrees live as siblings of the repo in a `.ez/` directory:
     bugfix-crash/             # worktree session
 ```
 
+New top-level sessions branch from `origin/main` (or `origin/master`); child sessions branch from their parent's HEAD. If the repo's main checkout is on another branch (e.g. a long-lived fork line), ez asks whether to branch from that instead.
+
 Non-git directories can also be tracked — sessions become bookmarks without worktree management.
 
 ## Browser

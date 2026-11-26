@@ -26,6 +26,7 @@ src/
   repo/             Repo CRUD + git clone
   session/          Session lifecycle + tree hierarchy
     from_dirty.rs   Session creation from dirty changes (stash workflow)
+    base.rs         Base-branch prompt for sessions under the default session
     notes.rs        Per-session notes directory management
     env.rs          Session env CLI (set/list/unset)
   plugin/           Plugin execution engine
@@ -55,6 +56,7 @@ docs/               Documentation
 - `name_builder.rs`: interactive name builder with mode selection (`FullName`, `BuildFromParts`, `GitHubPr`, `JiraUrl`)
 - `store.rs`: filesystem persistence
 - `from_dirty.rs`: session creation from dirty changes (stash workflow)
+- `base.rs`: `offer_default_branch_base` — when a new session's parent is the default session (or absent) and the default checkout is on a branch other than main/master, asks (`confirm_prompt`) whether to start from that branch and sets `ez_start_point`
 - `notes.rs`: per-session notes directory (`<data_dir>/ez/repos/<repo-id>/notes/<session-id>/README.md`); `ensure_notes_dir`, `open_note`, `delete_notes_dir`, `notes_readme_exists`
 - `current.rs`: current-session detection from tmux `@ez_session_name` + `@ez_repo_id` (preferred) with fallback to `@ez_session_path` and worktree paths
 - `env.rs`: `ez session env {set|list|unset}` — set, list, and unset environment variables on a session

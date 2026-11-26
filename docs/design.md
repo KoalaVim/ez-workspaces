@@ -60,6 +60,10 @@ sequenceDiagram
     R-->>C: RepoEntry
     C->>S: new_session("feature-x")
     S->>S: load sessions.toml
+    opt parent is default and default checkout is not on main/master
+        S->>U: Base on '<branch>'? [Y/n]
+        U-->>S: yes → env ez_start_point = <branch>
+    end
     S->>S: add to SessionTree
     S->>P: run_hooks(OnSessionCreate)
     P->>E: JSON request (stdin)

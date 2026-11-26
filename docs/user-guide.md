@@ -240,6 +240,30 @@ Recreate? [y/N]:
 In a non-interactive context (e.g. piped stdin), the prompt receives EOF and defaults
 to **reuse**, so existing scripts keep working without modification.
 
+#### Base branch prompt
+
+A new session under the default session (or with no parent) normally starts from
+`origin/main` / `origin/master`. When the repo's main checkout is on some **other
+branch** — say a long-lived fork line like `fork-v0.9.x` — ez asks first:
+
+```
+The default session is on 'fork-v0.9.x', not main/master.
+  [Y] start 'my-feature' from 'fork-v0.9.x'  (default)
+  [n] start 'my-feature' from origin/main|master
+Base on 'fork-v0.9.x'? [Y/n]:
+```
+
+- **Press Enter (or Y)** — the new branch starts from the main checkout's current
+  branch (the local branch, as it is now — not fetched). This is stored as
+  `ez_start_point` in the session env.
+- **Type `n`** — the usual `origin/main` / `origin/master` base.
+
+No prompt is shown when the main checkout is on `main` / `master` or detached, when
+the parent is another (non-default) session (that already starts from the parent's
+HEAD), when the session name matches an existing branch that is being reused, or when
+the start point is already decided (PR checkout, session from dirty changes).
+In a non-interactive context, the prompt defaults to **yes**.
+
 ### Bare sessions
 
 Create a session without a worktree:
