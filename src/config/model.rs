@@ -240,6 +240,14 @@ pub struct KeybindsConfig {
     #[serde(default = "default_bind_view_label")]
     pub view_label: String,
 
+    /// Switch to the next view tab, wrapping around (default: "tab")
+    #[serde(default = "default_bind_view_next")]
+    pub view_next: String,
+
+    /// Switch to the previous view tab, wrapping around (default: "btab" i.e. Shift-Tab)
+    #[serde(default = "default_bind_view_prev")]
+    pub view_prev: String,
+
     /// Edit labels on the selected item (default: "alt-l")
     #[serde(default = "default_bind_edit_labels")]
     pub edit_labels: String,
@@ -346,6 +354,8 @@ impl Default for KeybindsConfig {
             view_repo: default_bind_view_repo(),
             view_owner: default_bind_view_owner(),
             view_label: default_bind_view_label(),
+            view_next: default_bind_view_next(),
+            view_prev: default_bind_view_prev(),
             edit_labels: default_bind_edit_labels(),
             cd_session: default_bind_cd_session(),
             new_bare_session: default_bind_new_bare(),
@@ -398,6 +408,14 @@ fn default_bind_view_owner() -> String {
 
 fn default_bind_view_label() -> String {
     "ctrl-g".into()
+}
+
+fn default_bind_view_next() -> String {
+    "tab".into()
+}
+
+fn default_bind_view_prev() -> String {
+    "btab".into()
 }
 
 fn default_bind_edit_labels() -> String {

@@ -19,7 +19,7 @@ use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use self::keymap::{build_keymap, build_tabs, Action, RowKeys};
+use self::keymap::{build_keymap, build_tabs, cycle_tab, Action, RowKeys};
 use self::loader::Loader;
 use super::event::{self, Flow};
 use super::keys::Key;
@@ -258,6 +258,11 @@ impl App {
     fn act(&mut self, action: Action) -> Flow {
         match action {
             Action::SwitchView(view) => self.switch_view(view),
+            Action::CycleView(step) => {
+                if let Some(view) = cycle_tab(&self.tabs, self.current_view(), step) {
+                    self.switch_view(view);
+                }
+            }
             Action::SortToggle => {
                 let loader = &self.loader;
                 let level = self.nav.top_mut();

@@ -76,6 +76,7 @@ Launch with `ez`. The preview pane shows all available keybinds.
 **Views** — switch with keybinds anytime:
 
 - `Ctrl-t` Tree · `Ctrl-w` Workspace · `Ctrl-e` Repo · `Ctrl-o` Owner · `Ctrl-g` Label
+- `Tab` / `Shift-Tab` next / previous view (wraps around, includes plugin views; `view_next` / `view_prev` in `[keybinds]`)
 
 **Workspace drill-down** — while browsing directories:
 

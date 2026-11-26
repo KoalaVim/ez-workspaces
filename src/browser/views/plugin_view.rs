@@ -10,7 +10,7 @@ use super::super::domain::rows::plugin_item_rows;
 use super::super::domain::to_items;
 use super::super::selector::{ActionResult, InteractiveSelector};
 use super::super::{write_cd_target, write_post_commands};
-use super::{match_view_switch, view_header, view_switch_keys, Outcome};
+use super::{match_view_switch, view_header, view_switch_keys, Outcome, ViewMode};
 
 /// Run a plugin-provided view. Calls the plugin's OnView hook to get items,
 /// renders them in fzf, then calls OnViewSelect with the user's choice.
@@ -52,7 +52,11 @@ pub(super) fn run(
     match action {
         ActionResult::Cancel => Ok(Outcome::Done),
         ActionResult::Action(key, _) => {
-            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+            let current = ViewMode::Plugin {
+                view_name: view_name.to_string(),
+                plugin_name: plugin_name.to_string(),
+            };
+            match match_view_switch(&config.keybinds, &plugin_views, &current, &key) {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }

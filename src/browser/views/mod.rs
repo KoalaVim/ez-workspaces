@@ -25,7 +25,7 @@ use super::selector::InteractiveSelector;
 use super::BranchCache;
 
 /// Top-level view modes selectable via keybinds.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ViewMode {
     Tree,
     Workspace,
@@ -135,6 +135,8 @@ pub(super) fn view_switch_keys<'a>(
         kb.view_repo.as_str(),
         kb.view_owner.as_str(),
         kb.view_label.as_str(),
+        kb.view_next.as_str(),
+        kb.view_prev.as_str(),
     ];
     for pv in plugin_views {
         keys.push(pv.key.as_str());
@@ -142,13 +144,47 @@ pub(super) fn view_switch_keys<'a>(
     keys
 }
 
+/// Views in tab order: core views, then plugin views.
+fn ordered_views(plugin_views: &[plugin::PluginViewInfo]) -> Vec<ViewMode> {
+    let mut views = vec![
+        ViewMode::Tree,
+        ViewMode::Workspace,
+        ViewMode::Repo,
+        ViewMode::Owner,
+        ViewMode::Label,
+    ];
+    views.extend(plugin_views.iter().map(|pv| ViewMode::Plugin {
+        view_name: pv.view_name.clone(),
+        plugin_name: pv.plugin_name.clone(),
+    }));
+    views
+}
+
+/// The view `step` places away from `current` in tab order, wrapping around.
+fn cycle_view(
+    plugin_views: &[plugin::PluginViewInfo],
+    current: &ViewMode,
+    step: isize,
+) -> ViewMode {
+    let views = ordered_views(plugin_views);
+    let len = views.len() as isize;
+    let pos = views.iter().position(|v| v == current).unwrap_or(0) as isize;
+    views[(pos + step).rem_euclid(len) as usize].clone()
+}
+
 /// Translate a pressed key into a view switch, if it matches any view keybind.
+/// `current` is the view the key was pressed in (for next/prev cycling).
 pub(super) fn match_view_switch(
     kb: &config::model::KeybindsConfig,
     plugin_views: &[plugin::PluginViewInfo],
+    current: &ViewMode,
     key: &str,
 ) -> Option<ViewMode> {
-    if key == kb.view_tree {
+    if key == kb.view_next {
+        Some(cycle_view(plugin_views, current, 1))
+    } else if key == kb.view_prev {
+        Some(cycle_view(plugin_views, current, -1))
+    } else if key == kb.view_tree {
         Some(ViewMode::Tree)
     } else if key == kb.view_workspace {
         Some(ViewMode::Workspace)

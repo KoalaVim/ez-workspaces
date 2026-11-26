@@ -60,7 +60,7 @@ pub(super) fn run(
     match action {
         ActionResult::Cancel => Ok(Outcome::Done),
         ActionResult::Action(key, _) => {
-            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+            match match_view_switch(&config.keybinds, &plugin_views, &ViewMode::Tree, &key) {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }

@@ -47,7 +47,8 @@ pub(super) fn run(
     let owner_idx = match action {
         ActionResult::Cancel => return Ok(Outcome::Done),
         ActionResult::Action(key, _) => {
-            return match match_view_switch(&config.keybinds, &plugin_views, &key) {
+            return match match_view_switch(&config.keybinds, &plugin_views, &ViewMode::Owner, &key)
+            {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }
@@ -76,7 +77,7 @@ pub(super) fn run(
     match sub_action {
         ActionResult::Cancel => Ok(Outcome::Switch(ViewMode::Owner)),
         ActionResult::Action(key, _) => {
-            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+            match match_view_switch(&config.keybinds, &plugin_views, &ViewMode::Owner, &key) {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }

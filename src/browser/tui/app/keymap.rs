@@ -14,6 +14,8 @@ use crate::plugin::{self, PluginBindInfo, PluginViewInfo};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Action {
     SwitchView(ViewKind),
+    /// Move along the view tabs by this many steps (wrapping).
+    CycleView(isize),
     SortToggle,
     ViewAll,
     Redraw,
@@ -28,6 +30,8 @@ pub(super) fn build_keymap(config: &EzConfig) -> HashMap<Key, Action> {
         (&b.view_repo, Action::SwitchView(ViewKind::Repo)),
         (&b.view_owner, Action::SwitchView(ViewKind::Owner)),
         (&b.view_label, Action::SwitchView(ViewKind::Label)),
+        (&b.view_next, Action::CycleView(1)),
+        (&b.view_prev, Action::CycleView(-1)),
         (&b.sort_toggle, Action::SortToggle),
         (&b.view_all, Action::ViewAll),
     ];
@@ -69,6 +73,20 @@ pub(super) fn build_tabs(config: &EzConfig) -> Vec<(ViewKind, String)> {
         tabs.push((ViewKind::plugin(info), key));
     }
     tabs
+}
+
+/// The view `step` tabs away from `current`, wrapping around the tab list.
+pub(super) fn cycle_tab(
+    tabs: &[(ViewKind, String)],
+    current: ViewKind,
+    step: isize,
+) -> Option<ViewKind> {
+    let len = tabs.len() as isize;
+    if len == 0 {
+        return None;
+    }
+    let pos = tabs.iter().position(|(v, _)| *v == current).unwrap_or(0) as isize;
+    Some(tabs[(pos + step).rem_euclid(len) as usize].0)
 }
 
 /// Plugin views usable from any core view or from a plugin view (each once).
@@ -170,6 +188,37 @@ mod tests {
             label: "l".into(),
             description: None,
         }
+    }
+
+    #[test]
+    fn cycle_tab_wraps_both_ways() {
+        let tabs = build_tabs(&EzConfig::default());
+        assert_eq!(
+            cycle_tab(&tabs, ViewKind::Tree, 1),
+            Some(ViewKind::Workspace)
+        );
+        assert_eq!(
+            cycle_tab(&tabs, ViewKind::Tree, -1),
+            Some(tabs.last().unwrap().0)
+        );
+        assert_eq!(
+            cycle_tab(&tabs, tabs.last().unwrap().0, 1),
+            Some(ViewKind::Tree)
+        );
+        assert_eq!(cycle_tab(&[], ViewKind::Tree, 1), None);
+    }
+
+    #[test]
+    fn tab_keys_cycle_views_by_default() {
+        let map = build_keymap(&EzConfig::default());
+        assert_eq!(
+            map.get(&Key::parse("tab").unwrap()),
+            Some(&Action::CycleView(1))
+        );
+        assert_eq!(
+            map.get(&Key::parse("shift-tab").unwrap()),
+            Some(&Action::CycleView(-1))
+        );
     }
 
     #[test]

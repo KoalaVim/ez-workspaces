@@ -8,6 +8,11 @@ use crate::config;
 use crate::plugin;
 
 fn fmt_key(k: &str) -> String {
+    match k {
+        "tab" => return "Tab".into(),
+        "btab" | "shift-tab" => return "Shift-Tab".into(),
+        _ => {}
+    }
     k.replace("alt-", "Alt-")
         .replace("ctrl-", "Ctrl-")
         .replace("shift-", "Shift-")
@@ -209,6 +214,17 @@ pub(super) fn preview_main_keybind_help(out: &mut impl Write) {
         (
             fmt_key(&keybinds.view_label).bold().yellow().to_string(),
             "Label".into(),
+        ),
+        (
+            format!(
+                "{}/{}",
+                fmt_key(&keybinds.view_next),
+                fmt_key(&keybinds.view_prev)
+            )
+            .bold()
+            .yellow()
+            .to_string(),
+            "Next/prev view".into(),
         ),
     ];
     for pv in plugin::collect_plugin_views("repo", &config).unwrap_or_default() {

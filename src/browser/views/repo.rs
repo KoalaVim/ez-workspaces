@@ -69,7 +69,9 @@ pub(super) fn run(
                     log::debug!("repo view: sort toggled to {:?}", sort_mode);
                     continue;
                 }
-                if let Some(next) = match_view_switch(&config.keybinds, &plugin_views, &key) {
+                if let Some(next) =
+                    match_view_switch(&config.keybinds, &plugin_views, &ViewMode::Repo, &key)
+                {
                     return Ok(Outcome::Switch(next));
                 }
                 if key == config.keybinds.edit_labels {

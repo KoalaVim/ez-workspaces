@@ -48,7 +48,8 @@ pub(super) fn run(
     let label_idx = match action {
         ActionResult::Cancel => return Ok(Outcome::Done),
         ActionResult::Action(key, _) => {
-            return match match_view_switch(&config.keybinds, &plugin_views, &key) {
+            return match match_view_switch(&config.keybinds, &plugin_views, &ViewMode::Label, &key)
+            {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }
@@ -72,7 +73,7 @@ pub(super) fn run(
     match sub_action {
         ActionResult::Cancel => Ok(Outcome::Switch(ViewMode::Label)),
         ActionResult::Action(key, _) => {
-            match match_view_switch(&config.keybinds, &plugin_views, &key) {
+            match match_view_switch(&config.keybinds, &plugin_views, &ViewMode::Label, &key) {
                 Some(next) => Ok(Outcome::Switch(next)),
                 None => Ok(Outcome::Done),
             }

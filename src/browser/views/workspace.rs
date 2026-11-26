@@ -62,7 +62,12 @@ pub(super) fn run(
         match action {
             ActionResult::Cancel => return Ok(Outcome::Done),
             ActionResult::Action(key, _) => {
-                return match match_view_switch(&config.keybinds, &plugin_views, &key) {
+                return match match_view_switch(
+                    &config.keybinds,
+                    &plugin_views,
+                    &ViewMode::Workspace,
+                    &key,
+                ) {
                     Some(next) => Ok(Outcome::Switch(next)),
                     None => Ok(Outcome::Done),
                 }

@@ -335,6 +335,7 @@ At any top-level selector, press a keybind to switch views:
 - **Ctrl-g** — Label view: items grouped by user-defined labels
 - **Ctrl-a** — Tmux view (plugin): ez-managed tmux sessions — select to attach/switch
 - **Ctrl-z** — Zellij view (plugin): all ez sessions with their zellij state — select to attach/switch
+- **Tab** / **Shift-Tab** — Next / previous view in tab order (core views, then plugin views), wrapping around. Remap with `view_next` / `view_prev` in `[keybinds]`
 
 Plugin views appear automatically when enabled plugins register them. The tmux plugin adds `Ctrl-a`, the zellij plugin adds `Ctrl-z`.
 
